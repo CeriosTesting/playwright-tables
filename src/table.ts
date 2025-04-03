@@ -13,7 +13,28 @@ export class Table {
     private readonly _columnsSelector: string
   ) {}
 
-  async load(options?: { timeout?: number }): Promise<void> {
+  async getHeaders(): Promise<string[]> {
+    await this.load();
+    return this._headers;
+  }
+
+  async getRows(): Promise<{ columns: string[] }[]> {
+    await this.load();
+    return this._rows;
+  }
+
+  async getJson(): Promise<any> {
+    await this.load();
+    return this._rows.map((row) => {
+      const rowObj: Record<string, string> = {};
+      this._headers.forEach((header, index) => {
+        rowObj[header] = row.columns[index] || "";
+      });
+      return rowObj;
+    });
+  }
+
+  private async load(options?: { timeout?: number }): Promise<void> {
     await Promise.all([
       this._headersLocator.last().waitFor({ state: "visible", ...options }),
       this._rowsLocator
@@ -38,26 +59,5 @@ export class Table {
       },
       this._columnsSelector
     );
-
-    console.log("Headers:", this._headers);
-    console.log("Rows:", this._rows);
-  }
-
-  getHeaders(): string[] {
-    return this._headers;
-  }
-
-  getRows(): { columns: string[] }[] {
-    return this._rows;
-  }
-
-  getJson(): any {
-    return this._rows.map((row) => {
-      const rowObj: Record<string, string> = {};
-      this._headers.forEach((header, index) => {
-        rowObj[header] = row.columns[index] || "";
-      });
-      return rowObj;
-    });
   }
 }

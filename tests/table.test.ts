@@ -11,9 +11,7 @@ test.describe("Table Tests", () => {
       page.locator("table>tbody>tr"),
       "td"
     );
-    await table.load();
-
-    const headers = table.getHeaders();
+    const headers = await table.getHeaders();
     expect(headers).toEqual(["First name", "Last name", "Date of birth"]);
   });
 
@@ -25,9 +23,8 @@ test.describe("Table Tests", () => {
       page.locator("table>tbody>tr"),
       "td"
     );
-    await table.load();
 
-    const rows = table.getRows();
+    const rows = await table.getRows();
     expect(rows).toEqual([
       { columns: ["Ronald", "Veth", "22-12-1987"] },
       { columns: ["Logan", "Deacon", "01-10-2002"] },
@@ -42,9 +39,8 @@ test.describe("Table Tests", () => {
       page.locator("table>tbody>tr"),
       "td"
     );
-    await table.load();
 
-    const json = table.getJson();
+    const json = await table.getJson();
     expect(json).toEqual([
       {
         "First name": "Ronald",
