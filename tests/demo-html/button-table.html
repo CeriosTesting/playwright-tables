@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>HTML Table with button in rowcolumn</title>
+    <style>
+        table, td {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>HTML Table with button in rowcolumn</h2>
+
+    <table id="DeleteRowTable">
+        <thead>
+            <tr>
+                <th>Rownumber</th>
+                <th>Delete?</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Row 1</td>
+                <td><input type="button" value="Delete" onclick="deleteRow(this)"></td>
+            </tr>
+            <tr>
+                <td>Row 2</td>
+                <td><input type="button" value="Delete" onclick="deleteRow(this)"></td>
+            </tr>
+            <tr>
+                <td>Row 3</td>
+                <td><input type="button" value="Delete" onclick="deleteRow(this)"></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <script>
+        function deleteRow(r) {
+            var i = r.parentNode.parentNode.rowIndex;
+            document.getElementById("DeleteRowTable").deleteRow(i);
+        }
+    </script>
+
+</body>
+</html>

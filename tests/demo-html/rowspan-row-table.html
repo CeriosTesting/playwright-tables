@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Cell in row that spans two rows</title>
+    <style>
+        table, th, td {
+            border: 1px solid black;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 5px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Cell in row that spans two rows</h2>
+
+    <table style="width:50%">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th>Savings</th>
+                <th>Savings for holiday!</th>
+            </tr>
+            <tr>
+                <th>Height</th>
+                <th>Weight</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>January</td>
+                <td>100</td>
+                <td rowspan="2">50</td>
+            </tr>
+            <tr>
+                <td>February</td>
+                <td>80</td>
+            </tr>
+        </tbody>
+    </table>
+
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Cell in header that spans two rows</title>
+    <style>
+        table, th, td {
+            border: 1px solid black;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 5px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Cell in header that spans two rows</h2>
+
+    <table style="width:50%">
+        <thead>
+            <tr>
+                <th colspan="2">Average</th>
+                <th rowspan="2">Age</th>
+            </tr>
+            <tr>
+                <th>Height</th>
+                <th>Weight</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>186</td>
+                <td>83</td>
+                <td>33</td>
+            </tr>
+            <tr>
+                <td>179</td>
+                <td>80</td>
+                <td>40</td>
+            </tr>
+        </tbody>
+    </table>
+
+</body>
+</html>
