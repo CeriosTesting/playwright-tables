@@ -10,9 +10,12 @@ export class Table {
 	private _rows: Row[] = [];
 
 	constructor(
-		private readonly _headersLocator: Locator,
-		private readonly _rowsLocator: Locator,
-		private readonly _columnsSelector: string
+    private readonly _tableLocator: Locator,
+    private readonly _options?: {
+      headersSelector?: string;
+      rowsSelector?: string;
+      columnsSelector?: string;
+    },
 	) {}
 
 	async getHeaders(): Promise<string[]> {
@@ -37,17 +40,21 @@ export class Table {
 	}
 
 	private async load(options?: { timeout?: number }): Promise<void> {
+    const headersLocator = this._tableLocator.locator(this._options?.headersSelector ?? "thead>tr:last-of-type>th");
+    const rowsLocator = this._tableLocator.locator(this._options?.rowsSelector ?? "tbody>tr");
+    const columnsSelector = this._options?.columnsSelector ?? "td";
+
 		await Promise.all([
-			this._headersLocator.last().waitFor({ state: "visible", ...options }),
-			this._rowsLocator
-				.locator(this._columnsSelector)
+			headersLocator.last().waitFor({ state: "visible", ...options }),
+			rowsLocator
+				.locator(columnsSelector)
 				.last()
 				.waitFor({ state: "visible", ...options }),
 		]);
 
-		this._headers = await TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(this._headersLocator);
+		this._headers = await TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(headersLocator);
 
-		this._rows = await this._rowsLocator.evaluateAll((rows, columnsSelector) => {
+		this._rows = await rowsLocator.evaluateAll((rows, columnsSelector) => {
        // Tracks rowspan cells for each column index
 			const spannedCells: Record<number, (string | boolean | number)[]> = {};
 
@@ -100,6 +107,6 @@ export class Table {
 
 				return { columns };
 			});
-		}, this._columnsSelector);
+		}, columnsSelector);
 	}
 }

@@ -6,7 +6,7 @@ test.describe("Table Tests", () => {
 	test("getHeaders returns headers", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new Table(page.locator("table>thead>tr>th"), page.locator("table>tbody>tr"), "td");
+		const table = new Table(page.locator("table"));
 		const headers = await table.getHeaders();
 		expect(headers).toEqual(["First name", "Last name", "Date of birth"]);
 	});
@@ -14,7 +14,7 @@ test.describe("Table Tests", () => {
 	test("getRows returns rows", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new Table(page.locator("table>thead>tr>th"), page.locator("table>tbody>tr"), "td");
+		const table = new Table(page.locator("table"));
 
 		const rows = await table.getRows();
 		expect(rows).toEqual([
@@ -26,7 +26,7 @@ test.describe("Table Tests", () => {
 	test("getJson returns json", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new Table(page.locator("table>thead>tr>th"), page.locator("table>tbody>tr"), "td");
+		const table = new Table(page.locator("table"));
 
 		const json = await table.getJson();
 		expect(json).toEqual([
@@ -46,7 +46,7 @@ test.describe("Table Tests", () => {
 	test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanRowTable));
 
-		const table = new Table(page.locator("table>thead>tr>th"), page.locator("table>tbody>tr"), "td");
+		const table = new Table(page.locator("table"));
 		const json = await table.getJson();
 
 		expect(json).toEqual([
