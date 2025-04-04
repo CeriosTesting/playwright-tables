@@ -1,16 +1,16 @@
 {
-  "compilerOptions": {
-    "target": "es2019",                                  /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */
-    "module": "commonjs",                                /* Specify what module code is generated. */
-    "baseUrl": "./",                                  /* Specify the base directory to resolve non-relative module names. */
-    "resolveJsonModule": true,                        /* Enable importing .json files. */
-    "noEmit": true,                                   /* Disable emitting files from a compilation. */
-    "esModuleInterop": true,                             /* Emit additional JavaScript to ease support for importing CommonJS modules. This enables 'allowSyntheticDefaultImports' for type compatibility. */
-    "forceConsistentCasingInFileNames": true,            /* Ensure that casing is correct in imports. */
-    "strict": true,                                      /* Enable all strict type-checking options. */
-    "strictPropertyInitialization": true,             /* Check for class properties that are declared but not set in the constructor. */
-    "noUnusedLocals": true,                           /* Enable error reporting when local variables aren't read. */
-    "noUnusedParameters": true,                       /* Raise an error when a function parameter isn't read. */
-    "skipLibCheck": true                                 /* Skip type checking all .d.ts files. */
-  }
+	"compilerOptions": {
+		"target": "es2019" /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */,
+		"module": "commonjs" /* Specify what module code is generated. */,
+		"baseUrl": "./" /* Specify the base directory to resolve non-relative module names. */,
+		"resolveJsonModule": true /* Enable importing .json files. */,
+		"noEmit": true /* Disable emitting files from a compilation. */,
+		"esModuleInterop": true /* Emit additional JavaScript to ease support for importing CommonJS modules. This enables 'allowSyntheticDefaultImports' for type compatibility. */,
+		"forceConsistentCasingInFileNames": true /* Ensure that casing is correct in imports. */,
+		"strict": true /* Enable all strict type-checking options. */,
+		"strictPropertyInitialization": true /* Check for class properties that are declared but not set in the constructor. */,
+		"noUnusedLocals": true /* Enable error reporting when local variables aren't read. */,
+		"noUnusedParameters": true /* Raise an error when a function parameter isn't read. */,
+		"skipLibCheck": true /* Skip type checking all .d.ts files. */
+	}
 }

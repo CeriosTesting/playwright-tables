@@ -42,4 +42,24 @@ test.describe("Table Tests", () => {
 			},
 		]);
 	});
+
+	test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
+		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanRowTable));
+
+		const table = new Table(page.locator("table>thead>tr>th"), page.locator("table>tbody>tr"), "td");
+		const json = await table.getJson();
+
+		expect(json).toEqual([
+			{
+				Month: "January",
+				Savings: 100,
+				"Savings for holiday!": 50,
+			},
+			{
+				Month: "February",
+				Savings: 80,
+				"Savings for holiday!": 50,
+			},
+		]);
+	});
 });

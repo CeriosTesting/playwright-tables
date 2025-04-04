@@ -24,7 +24,9 @@ test.describe("Header Indexer Tests", () => {
 		test(testCase.testHtml, async ({ page }) => {
 			await page.goto(TestHtmlProvider.getHtmlFilePath(testCase.testHtml));
 
-			const headers = await TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(page.locator("table>thead>tr>th"));
+			const headers = await TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(
+				page.locator("table>thead>tr>th")
+			);
 			expect(headers).toEqual(testCase.expectedHeaders);
 		});
 	}
