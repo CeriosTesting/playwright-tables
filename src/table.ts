@@ -1,5 +1,5 @@
 import { Locator } from "@playwright/test";
-import { HeaderIndexer } from "./header-indexer";
+import { TableHeaderIndexer } from "./table-header-indexer";
 
 export class Table {
 	private _headers: string[] = [];
@@ -43,13 +43,18 @@ export class Table {
 				.waitFor({ state: "visible", ...options }),
 		]);
 
-		this._headers = await HeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(this._headersLocator);
+		this._headers = await TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(this._headersLocator);
 
 		this._rows = await this._rowsLocator.evaluateAll((rows, columnsSelector) => {
-			return rows.map(row => {
-				const columns = Array.from(row.querySelectorAll(columnsSelector)).map(col => col.textContent?.trim() || "");
-				return { columns };
-			});
-		}, this._columnsSelector);
+      return rows.map(row => {
+          const columns = Array.from(row.querySelectorAll(columnsSelector)).map(col => {
+              if (col.hasAttribute("rowspan")) {
+                  throw new Error("Rowspan is not supported in table rows.");
+              }
+              return col.textContent?.trim() || "";
+          });
+          return { columns };
+      });
+  }, this._columnsSelector);
 	}
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { HeaderIndexer } from "../src/header-indexer";
+import { TableHeaderIndexer } from "../src/table-header-indexer";
 import { TestHtml, TestHtmlProvider } from "./demo-html/test-html-provider";
 
 test.describe("Header Indexer Tests", () => {
@@ -24,7 +24,7 @@ test.describe("Header Indexer Tests", () => {
 		test(testCase.testHtml, async ({ page }) => {
 			await page.goto(TestHtmlProvider.getHtmlFilePath(testCase.testHtml));
 
-			const headers = await HeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(page.locator("table>thead>tr>th"));
+			const headers = await TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(page.locator("table>thead>tr>th"));
 			expect(headers).toEqual(testCase.expectedHeaders);
 		});
 	}
@@ -32,7 +32,7 @@ test.describe("Header Indexer Tests", () => {
 	test("Table header with rowspan throws error", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanHeaderTable));
 
-		const headers = HeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(page.locator("table>thead>tr>th"));
+		const headers = TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(page.locator("table>thead>tr>th"));
 		await expect(headers).rejects.toThrowError("Header with rowspan is not supported.");
 	});
 });

@@ -1,6 +1,6 @@
 import { Locator } from "@playwright/test";
 
-export abstract class HeaderIndexer {
+export abstract class TableHeaderIndexer {
 	static async HeadersIncludingColspanAndDuplicateAsync(locatorHeaders: Locator): Promise<string[]> {
 		const headerNames: string[] = [];
 		const count = await locatorHeaders.count();
