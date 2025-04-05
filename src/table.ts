@@ -1,8 +1,10 @@
 import { Locator } from "@playwright/test";
 import { TableHeaderIndexer } from "./table-header-indexer";
 
+export type Column = (string | boolean | number);
+
 export interface Row {
-	columns: (string | boolean | number)[];
+	columns: Column[];
 }
 
 export class Table {
@@ -31,7 +33,7 @@ export class Table {
 	async getJson(): Promise<any> {
 		await this.load();
 		return this._rows.map(row => {
-			const rowObj: Record<string, string | boolean | number> = {};
+			const rowObj: Record<string, Column> = {};
 			this._headers.forEach((header, index) => {
 				rowObj[header] = row.columns[index] || "";
 			});
@@ -56,9 +58,9 @@ export class Table {
 
 		this._rows = await rowsLocator.evaluateAll((rows, columnsSelector) => {
        // Tracks rowspan cells for each column index
-			const spannedCells: Record<number, (string | boolean | number)[]> = {};
+			const spannedCells: Record<number, Column[]> = {};
 
-			const castContent = (value: string): string | number | boolean => {
+			const castContent = (value: string): Column => {
 				const lowerInput = value.trim().toLowerCase();
 				if (lowerInput === "true") return true;
 				if (lowerInput === "false") return false;

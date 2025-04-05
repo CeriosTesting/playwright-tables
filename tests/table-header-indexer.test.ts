@@ -31,7 +31,7 @@ test.describe("Header Indexer Tests", () => {
 		});
 	}
 
-	test("Table header with rowspan throws error", async ({ page }) => {
+	test("table header with rowspan throws error", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanHeaderTable));
 
 		const headers = TableHeaderIndexer.HeadersIncludingColspanAndDuplicateAsync(page.locator("table>thead>tr>th"));
