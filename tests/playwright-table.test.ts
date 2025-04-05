@@ -1,32 +1,44 @@
 import test, { expect } from "@playwright/test";
 import { TestHtmlProvider, TestHtml } from "./demo-html/test-html-provider";
-import { Table } from "../src/table";
+import { PlaywrightTable } from "../src/playwright-table";
 
 test.describe("Table Tests", () => {
-	test("getHeaders returns headers", async ({ page }) => {
+	test("getActiveHeaders returns headers used for table", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new Table(page.locator("table"));
-		const headers = await table.getHeaders();
+		const table = new PlaywrightTable(page.locator("table"));
+		const headers = await table.getMainHeaderRow();
 		expect(headers).toEqual(["First name", "Last name", "Date of birth"]);
+	});
+
+	test("getHeaderRows with multiple rows returns header rows", async ({ page }) => {
+		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanHeaderTable));
+
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const headers = await table.getHeaderRows();
+		expect(headers).toEqual([
+			["Average", "Average_1", "Age"],
+			["Height", "Weight", "Age"],
+		]);
 	});
 
 	test("getRows returns rows", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new Table(page.locator("table"));
+		const table = new PlaywrightTable(page.locator("table"));
 
 		const rows = await table.getRows();
 		expect(rows).toEqual([
-			{ columns: ["Ronald", "Veth", "22-12-1987"] },
-			{ columns: ["Logan", "Deacon", "01-10-2002"] },
+			["Ronald", "Veth", "22-12-1987"],
+			["Logan", "Deacon", "01-10-2002"],
 		]);
 	});
 
 	test("getJson returns json", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new Table(page.locator("table"));
+		const table = new PlaywrightTable(page.locator("table"));
 
 		const json = await table.getJson();
 		expect(json).toEqual([
@@ -46,7 +58,7 @@ test.describe("Table Tests", () => {
 	test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanRowTable));
 
-		const table = new Table(page.locator("table"));
+		const table = new PlaywrightTable(page.locator("table"));
 		const json = await table.getJson();
 
 		expect(json).toEqual([
