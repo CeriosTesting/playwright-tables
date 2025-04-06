@@ -85,4 +85,15 @@ test.describe("Table Tests", () => {
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
 	});
+
+	test("getCellLocatorByRowConditions returns locator", async ({ page }) => {
+		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+
+		const table = new PlaywrightTable(page.locator("table"));
+		expect(await table.getBodyRows()).toHaveLength(3);
+
+		const cellLocator = await table.getCellLocatorByRowConditions({ "Rownumber": "Row 2" }, "Delete?");
+		await cellLocator.locator("input[type='button']").click();
+		expect(await table.getBodyRows()).toHaveLength(2);
+	});
 });
