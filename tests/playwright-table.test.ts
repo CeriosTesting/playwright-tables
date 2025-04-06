@@ -28,7 +28,7 @@ test.describe("Table Tests", () => {
 
 		const table = new PlaywrightTable(page.locator("table"));
 
-		const rows = await table.getRows();
+		const rows = await table.getBodyRows();
 		expect(rows).toEqual([
 			["Ronald", "Veth", "22-12-1987"],
 			["Logan", "Deacon", "01-10-2002"],
@@ -73,5 +73,16 @@ test.describe("Table Tests", () => {
 				"Savings for holiday!": 50,
 			},
 		]);
+	});
+
+	test("getCellLocator returns locator", async ({ page }) => {
+		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+
+		const table = new PlaywrightTable(page.locator("table"));
+		expect(await table.getBodyRows()).toHaveLength(3);
+
+		const cellLocator = await table.getCellLocator(0, 1);
+		await cellLocator.locator("input[type='button']").click();
+		expect(await table.getBodyRows()).toHaveLength(2);
 	});
 });

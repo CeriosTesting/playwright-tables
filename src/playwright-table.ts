@@ -6,6 +6,10 @@ import { TableHeaderRow } from "./table-header-row";
 export class PlaywrightTable {
 	private _headers: HeaderRow[] = [];
 	private _rows: BodyRow[] = [];
+	private _bodyRowLocator: Locator;
+	private _bodyRowColumnSelector: string;
+	private _headerRowLocator: Locator;
+	private _headerColumnSelector: string;
 
 	constructor(
 		private readonly _tableLocator: Locator,
@@ -20,7 +24,12 @@ export class PlaywrightTable {
 				columnSelector?: string;
 			};
 		}
-	) {}
+	) {
+		this._headerRowLocator = this._tableLocator.locator(this._options?.header?.rowSelector ?? "thead>tr");
+		this._headerColumnSelector = this._options?.header?.columnSelector ?? "th";
+		this._bodyRowLocator = this._tableLocator.locator(this._options?.row?.rowSelector ?? "tbody>tr");
+		this._bodyRowColumnSelector = this._options?.row?.columnSelector ?? "td";
+	}
 
 	async getHeaderRows(): Promise<HeaderRow[]> {
 		await this.load();
@@ -35,9 +44,13 @@ export class PlaywrightTable {
 		return headers.map(header => header);
 	}
 
-	async getRows(): Promise<TableBodyRow[]> {
+	async getBodyRows(): Promise<BodyRow[]> {
 		await this.load();
 		return this._rows;
+	}
+
+	async getCellLocator(rowNumber: number, headerPosition: number): Promise<Locator> {
+		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
 	async getJson(): Promise<any> {
@@ -53,23 +66,18 @@ export class PlaywrightTable {
 	}
 
 	private async load(options?: { timeout?: number }): Promise<void> {
-		const headersLocator = this._tableLocator.locator(this._options?.header?.rowSelector ?? "thead>tr");
-		const headersColumnSelector = this._options?.header?.columnSelector ?? "th";
-		const rowsLocator = this._tableLocator.locator(this._options?.row?.rowSelector ?? "tbody>tr");
-		const rowColumnSelector = this._options?.row?.columnSelector ?? "td";
-
 		await Promise.all([
-			headersLocator
-				.locator(headersColumnSelector)
+			this._headerRowLocator
+				.locator(this._headerColumnSelector)
 				.last()
 				.waitFor({ state: "visible", ...options }),
-			rowsLocator
-				.locator(rowColumnSelector)
+			this._bodyRowLocator
+				.locator(this._bodyRowColumnSelector)
 				.last()
 				.waitFor({ state: "visible", ...options }),
 		]);
 
-		this._headers = await TableHeaderRow.getHeaderRows(headersLocator, headersColumnSelector);
-		this._rows = await TableBodyRow.getRows(rowsLocator, rowColumnSelector);
+		this._headers = await TableHeaderRow.getHeaderRows(this._headerRowLocator, this._headerColumnSelector);
+		this._rows = await TableBodyRow.getRows(this._bodyRowLocator, this._bodyRowColumnSelector);
 	}
 }
