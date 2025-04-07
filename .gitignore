@@ -1,7 +1,11 @@
+# Logs
+logs
+*.log
+npm-debug.log*
 
-# Playwright
+# Dependency directories
 node_modules/
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
+
+# Build directories
+dist/
+build/
