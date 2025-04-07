@@ -1,12 +1,13 @@
 import test, { expect } from "@playwright/test";
 import { TestHtmlProvider, TestHtml } from "./demo-html/test-html-provider";
-import { PlaywrightTable } from "../src/playwright-table";
+import { Table } from "../src/table";
+import { TableBodyRow } from "src/table-body-row";
 
 test.describe("Table Tests", () => {
 	test("getActiveHeaders returns headers used for table", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 		const headers = await table.getMainHeaderRow();
 		expect(headers).toEqual(["First name", "Last name", "Date of birth"]);
 	});
@@ -14,7 +15,7 @@ test.describe("Table Tests", () => {
 	test("getHeaderRows with multiple rows returns header rows", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanHeaderTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 
 		const headers = await table.getHeaderRows();
 		expect(headers).toEqual([
@@ -26,7 +27,7 @@ test.describe("Table Tests", () => {
 	test("getRows returns rows", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 
 		const rows = await table.getBodyRows();
 		expect(rows).toEqual([
@@ -38,7 +39,7 @@ test.describe("Table Tests", () => {
 	test("getJson returns json", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 
 		const json = await table.getJson();
 		expect(json).toEqual([
@@ -58,7 +59,7 @@ test.describe("Table Tests", () => {
 	test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanRowTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 		const json = await table.getJson();
 
 		expect(json).toEqual([
@@ -75,25 +76,56 @@ test.describe("Table Tests", () => {
 		]);
 	});
 
-	test("getCellLocator returns locator", async ({ page }) => {
+	test("getBodyCellLocator returns locator", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
 
-		const cellLocator = await table.getCellLocator(0, 1);
+		const cellLocator = table.getBodyCellLocator(0, 1);
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
 	});
 
-	test("getCellLocatorByRowConditions returns locator", async ({ page }) => {
+	test("getBodyCellLocatorByRowConditions returns locator", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
 
-		const table = new PlaywrightTable(page.locator("table"));
+		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
 
-		const cellLocator = await table.getCellLocatorByRowConditions({ "Rownumber": "Row 2" }, "Delete?");
+		const cellLocator = await table.getBodyCellLocatorByRowConditions({ "Rownumber": "Row 2" }, "Delete?");
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
+	});
+
+	test("getAllBodyCellLocatorsByHeaderName returns locators", async ({ page }) => {
+		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+		
+		const table = new Table(page.locator("table"));
+		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
+		
+		const locators = await table.getAllBodyCellLocatorsByHeaderName("Delete?");
+		expect(locators).toHaveLength(3);
+		
+		for (const locator of locators.reverse()) {
+			await locator.locator("input[type='button']").click();
+		}
+		
+		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
+	});
+
+	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {
+		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+
+		const table = new Table(page.locator("table"));
+		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
+
+		const locators = await table.getAllBodyCellLocatorsByHeaderIndex(1);
+		expect(locators).toHaveLength(3);
+
+		for (const locator of locators.reverse()) {
+			await locator.locator("input[type='button']").click();
+		}
+		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 });

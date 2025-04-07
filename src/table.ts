@@ -3,7 +3,7 @@ import { TableBodyRow } from "./table-body-row";
 import { BodyRow, Cell, HeaderRow } from "./row";
 import { TableHeaderRow } from "./table-header-row";
 
-export class PlaywrightTable {
+export class Table {
 	private _headers: HeaderRow[] = [];
 	private _rows: BodyRow[] = [];
 	private _bodyRowLocator: Locator;
@@ -49,11 +49,11 @@ export class PlaywrightTable {
 		return this._rows;
 	}
 
-	async getCellLocator(rowNumber: number, headerPosition: number): Promise<Locator> {
+	getBodyCellLocator(rowNumber: number, headerPosition: number): Locator {
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
-	async getCellLocatorByRowConditions(
+	async getBodyCellLocatorByRowConditions(
 		conditions: Record<string, string>,
 		targetHeader: string
 	): Promise<Locator> {
@@ -81,11 +81,36 @@ export class PlaywrightTable {
 			}
 	
 			if (matches) {
-				return this.getCellLocator(rowIndex, targetHeaderIndex);
+				return this.getBodyCellLocator(rowIndex, targetHeaderIndex);
 			}
 		}
 	
 		throw new Error(`No row found matching conditions: ${JSON.stringify(conditions)}`);
+	}
+
+	async getAllBodyCellLocatorsByHeaderName(header: string): Promise<Locator[]> {
+		await this.load();
+		const headers = await this.getMainHeaderRow();
+		const headerIndex = headers.indexOf(header);
+		if (headerIndex === -1) {
+			throw new Error(`Header "${header}" not found.`);
+		}
+		const locators: Locator[] = [];
+		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
+			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
+			locators.push(cellLocator);
+		}
+		return locators;
+	}
+
+	async getAllBodyCellLocatorsByHeaderIndex(headerIndex: number): Promise<Locator[]> {
+		await this.load();
+		const locators: Locator[] = [];
+		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
+			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
+			locators.push(cellLocator);
+		}
+		return locators;
 	}
 
 	async getJson(): Promise<any> {
