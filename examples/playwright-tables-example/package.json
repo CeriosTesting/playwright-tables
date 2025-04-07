@@ -5,7 +5,7 @@
 	"scripts": {
 		"start": "serve public -p 3000",
 		"test": "playwright test",
-		"format": "prettier --write ."
+		"format": "prettier --write . --config ../../.prettierrc"
 	},
 	"author": "Ronald Veth",
 	"license": "ISC",
