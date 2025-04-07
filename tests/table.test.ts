@@ -93,24 +93,24 @@ test.describe("Table Tests", () => {
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
 
-		const cellLocator = await table.getBodyCellLocatorByRowConditions({ "Rownumber": "Row 2" }, "Delete?");
+		const cellLocator = await table.getBodyCellLocatorByRowConditions({ Rownumber: "Row 2" }, "Delete?");
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
 	});
 
 	test("getAllBodyCellLocatorsByHeaderName returns locators", async ({ page }) => {
 		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
-		
+
 		const table = new Table(page.locator("table"));
 		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
-		
+
 		const locators = await table.getAllBodyCellLocatorsByHeaderName("Delete?");
 		expect(locators).toHaveLength(3);
-		
+
 		for (const locator of locators.reverse()) {
 			await locator.locator("input[type='button']").click();
 		}
-		
+
 		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 

@@ -53,22 +53,19 @@ export class Table {
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
-	async getBodyCellLocatorByRowConditions(
-		conditions: Record<string, string>,
-		targetHeader: string
-	): Promise<Locator> {
+	async getBodyCellLocatorByRowConditions(conditions: Record<string, string>, targetHeader: string): Promise<Locator> {
 		await this.load();
 		const headers = await this.getMainHeaderRow();
-	
+
 		const targetHeaderIndex = headers.indexOf(targetHeader);
 		if (targetHeaderIndex === -1) {
 			throw new Error(`Header "${targetHeader}" not found.`);
 		}
-	
+
 		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
 			const row = this._rows[rowIndex];
 			let matches = true;
-	
+
 			for (const [header, value] of Object.entries(conditions)) {
 				const headerIndex = headers.indexOf(header);
 				if (headerIndex === -1) {
@@ -79,12 +76,12 @@ export class Table {
 					break;
 				}
 			}
-	
+
 			if (matches) {
 				return this.getBodyCellLocator(rowIndex, targetHeaderIndex);
 			}
 		}
-	
+
 		throw new Error(`No row found matching conditions: ${JSON.stringify(conditions)}`);
 	}
 

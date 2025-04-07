@@ -27,27 +27,52 @@ export abstract class TableBodyRow {
 		const columnCount = await columnLocators.count();
 
 		for (let colIndex = 0; colIndex < columnCount; colIndex++) {
-			const column = columnLocators.nth(colIndex);
-			const content = await column.textContent();
-			const castedContent = this.castContent(content?.trim() || "");
-
-			const rowspan = parseInt((await column.getAttribute("rowspan")) || "1", 10);
-			const colspan = parseInt((await column.getAttribute("colspan")) || "1", 10);
-
-			for (let span = 0; span < colspan; span++) {
-				columns[colIndex + span] = castedContent;
-			}
-
-			if (rowspan > 1) {
-				for (let span = 1; span < rowspan; span++) {
-					if (!spannedCells[rowIndex + span]) {
-						spannedCells[rowIndex + span] = [];
-					}
-					spannedCells[rowIndex + span][colIndex] = castedContent;
-				}
-			}
+			await this.processColumn(columnLocators.nth(colIndex), colIndex, columns, rowIndex, spannedCells);
 		}
 
+		this.applySpannedCells(spannedCells, rowIndex, columns);
+
+		return columns;
+	}
+
+	private static async processColumn(
+		column: Locator,
+		colIndex: number,
+		columns: Cell[],
+		rowIndex: number,
+		spannedCells: Record<number, Cell[]>
+	): Promise<void> {
+		const content = await column.textContent();
+		const castedContent = this.castContent(content?.trim() || "");
+
+		const rowspan = parseInt((await column.getAttribute("rowspan")) || "1", 10);
+		const colspan = parseInt((await column.getAttribute("colspan")) || "1", 10);
+
+		for (let span = 0; span < colspan; span++) {
+			columns[colIndex + span] = castedContent;
+		}
+
+		if (rowspan > 1) {
+			this.storeSpannedCells(rowIndex, colIndex, rowspan, castedContent, spannedCells);
+		}
+	}
+
+	private static storeSpannedCells(
+		rowIndex: number,
+		colIndex: number,
+		rowspan: number,
+		content: Cell,
+		spannedCells: Record<number, Cell[]>
+	): void {
+		for (let span = 1; span < rowspan; span++) {
+			if (!spannedCells[rowIndex + span]) {
+				spannedCells[rowIndex + span] = [];
+			}
+			spannedCells[rowIndex + span][colIndex] = content;
+		}
+	}
+
+	private static applySpannedCells(spannedCells: Record<number, Cell[]>, rowIndex: number, columns: Cell[]): void {
 		if (spannedCells[rowIndex]) {
 			spannedCells[rowIndex].forEach((spannedContent, colIndex) => {
 				if (spannedContent !== undefined) {
@@ -55,8 +80,6 @@ export abstract class TableBodyRow {
 				}
 			});
 		}
-
-		return columns;
 	}
 
 	private static castContent(value: string): Cell {
