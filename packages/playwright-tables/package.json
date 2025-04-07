@@ -14,6 +14,7 @@
 	"types": "./dist/playwright-tables.d.ts",
 	"exports": {
 		".": {
+			"types": "./dist/playwright-tables.d.ts",
 			"import": "./dist/playwright-tables.js",
 			"require": "./dist/playwright-tables.umd.cjs"
 		}

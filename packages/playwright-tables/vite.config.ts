@@ -6,7 +6,7 @@ import dts from "vite-plugin-dts";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-	plugins: [dts({ tsconfigPath: "./tsconfig.lib.json", rollupTypes: true })],
+	plugins: [dts({ tsconfigPath: "./tsconfig.lib.json", insertTypesEntry: true })],
 	build: {
 		lib: {
 			entry: resolve(__dirname, "src/main.ts"),
