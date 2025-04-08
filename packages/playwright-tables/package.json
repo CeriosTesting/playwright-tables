@@ -32,6 +32,6 @@
 	},
 	"scripts": {
 		"build": "vite build",
-		"format": "prettier --write . --config ../../.prettierrc"
+		"format": "prettier --write . --cache --ignore-path=../../.prettierignore"
 	}
 }

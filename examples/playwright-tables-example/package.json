@@ -6,7 +6,7 @@
 	"scripts": {
 		"start": "serve public -p 3000",
 		"test": "playwright test",
-		"format": "prettier --write . --config ../../.prettierrc"
+		"format": "prettier --write . --cache --ignore-path=../../.prettierignore"
 	},
 	"author": "Ronald Veth",
 	"license": "ISC",
