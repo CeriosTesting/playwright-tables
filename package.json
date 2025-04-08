@@ -10,5 +10,9 @@
 	"private": true,
 	"scripts": {
 		"format": "npm run format --workspaces"
-	}
+	},
+	"engines": {
+		"node": ">=18"
+	},
+	"packageManager": "npm@11.2.0"
 }
