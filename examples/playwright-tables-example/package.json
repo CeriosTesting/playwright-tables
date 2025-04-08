@@ -2,6 +2,7 @@
 	"name": "playwright-tables-example",
 	"version": "1.0.0",
 	"main": "index.js",
+	"private": true,
 	"scripts": {
 		"start": "serve public -p 3000",
 		"test": "playwright test",

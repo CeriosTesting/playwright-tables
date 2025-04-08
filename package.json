@@ -7,6 +7,7 @@
 		"packages/**",
 		"examples/**"
 	],
+	"private": true,
 	"scripts": {
 		"format": "npm run format --workspaces"
 	}
