@@ -1,7 +1,7 @@
 import { Locator } from "@playwright/test";
 import { HeaderRow } from "./row";
 
-export abstract class TableHeaderRow {
+export abstract class TableHeader {
 	static async getHeaderRows(headerRowLocator: Locator, columnsSelector: string): Promise<HeaderRow[]> {
 		const headerRows: HeaderRow[] = [];
 		const rowSpans: (string | null)[] = [];

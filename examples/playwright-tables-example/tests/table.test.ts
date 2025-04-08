@@ -1,11 +1,10 @@
 import test, { expect } from "@playwright/test";
-import { TestHtmlProvider, TestHtml } from "./demo-html/test-html-provider";
-import { Table } from "../src/table";
-import { TableBodyRow } from "src/table-body-row";
+import { Routes } from "../src/routes";
+import { Table, TableBody } from "@cerios/playwright-tables";
 
 test.describe("Table Tests", () => {
 	test("getActiveHeaders returns headers used for table", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
+		await page.goto("/simple-table");
 
 		const table = new Table(page.locator("table"));
 		const headers = await table.getMainHeaderRow();
@@ -13,7 +12,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getHeaderRows with multiple rows returns header rows", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanHeaderTable));
+		await page.goto(Routes.RowspanHeaderTable);
 
 		const table = new Table(page.locator("table"));
 
@@ -25,7 +24,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getRows returns rows", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
+		await page.goto(Routes.SimpleTable);
 
 		const table = new Table(page.locator("table"));
 
@@ -37,7 +36,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getJson returns json", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.SimpleTable));
+		await page.goto(Routes.SimpleTable);
 
 		const table = new Table(page.locator("table"));
 
@@ -57,7 +56,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.RowspanRowTable));
+		await page.goto(Routes.RowspanRowTable);
 
 		const table = new Table(page.locator("table"));
 		const json = await table.getJson();
@@ -77,7 +76,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyCellLocator returns locator", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+		await page.goto(Routes.ButtonTable);
 
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
@@ -88,7 +87,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyCellLocatorByRowConditions returns locator", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+		await page.goto(Routes.ButtonTable);
 
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
@@ -99,10 +98,10 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getAllBodyCellLocatorsByHeaderName returns locators", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+		await page.goto(Routes.ButtonTable);
 
 		const table = new Table(page.locator("table"));
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
 
 		const locators = await table.getAllBodyCellLocatorsByHeaderName("Delete?");
 		expect(locators).toHaveLength(3);
@@ -111,14 +110,14 @@ test.describe("Table Tests", () => {
 			await locator.locator("input[type='button']").click();
 		}
 
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 
 	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {
-		await page.goto(TestHtmlProvider.getHtmlFilePath(TestHtml.ButtonTable));
+		await page.goto(Routes.ButtonTable);
 
 		const table = new Table(page.locator("table"));
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
 
 		const locators = await table.getAllBodyCellLocatorsByHeaderIndex(1);
 		expect(locators).toHaveLength(3);
@@ -126,6 +125,6 @@ test.describe("Table Tests", () => {
 		for (const locator of locators.reverse()) {
 			await locator.locator("input[type='button']").click();
 		}
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 });

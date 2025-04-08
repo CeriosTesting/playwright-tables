@@ -1,20 +1,24 @@
 {
-	"name": "playwright-tables",
-	"version": "1.0.0",
-	"main": "index.js",
 	"keywords": [],
 	"author": "Ronald Veth",
 	"license": "ISC",
 	"description": "",
-	"devDependencies": {
-		"@playwright/test": "^1.51.1",
-		"@types/node": "^22.13.17",
-		"prettier": "^3.5.3"
-	},
+	"workspaces": [
+		"packages/**",
+		"examples/**"
+	],
+	"private": true,
 	"scripts": {
-		"format": "prettier --write ."
+		"format": "npm run format --workspaces",
+		"prepare": "husky"
 	},
-	"dependencies": {
-		"typescript": "^5.8.2"
+	"engines": {
+		"node": ">=18"
+	},
+	"packageManager": "npm@11.2.0",
+	"devDependencies": {
+		"husky": "^9.1.7",
+		"lint-staged": "^15.5.0",
+		"prettier": "^3.5.3"
 	}
 }

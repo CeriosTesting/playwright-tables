@@ -1,0 +1,17 @@
+{
+	"name": "playwright-tables-example",
+	"version": "1.0.0",
+	"main": "index.js",
+	"private": true,
+	"scripts": {
+		"start": "serve public -p 3000",
+		"test": "playwright test",
+		"format": "prettier --write . --cache --ignore-path=../../.prettierignore"
+	},
+	"author": "Ronald Veth",
+	"license": "ISC",
+	"description": "",
+	"devDependencies": {
+		"serve": "^14.2.4"
+	}
+}
