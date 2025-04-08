@@ -1,5 +1,5 @@
 {
-	"name": "playwright-tables",
+	"name": "@cerios/playwright-tables",
 	"version": "1.0.0",
 	"keywords": [],
 	"author": "Ronald Veth",

@@ -1,7 +1,7 @@
 import { Locator } from "@playwright/test";
 import { Cell, BodyRow } from "./row";
 
-export abstract class TableBodyRow {
+export abstract class TableBody {
 	static async getRows(rowLocator: Locator, columnsSelector: string): Promise<BodyRow[]> {
 		const rows: BodyRow[] = [];
 		const rowsCount = await rowLocator.count();

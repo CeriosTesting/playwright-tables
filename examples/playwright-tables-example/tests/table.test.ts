@@ -1,6 +1,6 @@
 import test, { expect } from "@playwright/test";
 import { Routes } from "../src/routes";
-import { Table, TableBodyRow } from "playwright-tables";
+import { Table, TableBody } from "@cerios/playwright-tables";
 
 test.describe("Table Tests", () => {
 	test("getActiveHeaders returns headers used for table", async ({ page }) => {
@@ -101,7 +101,7 @@ test.describe("Table Tests", () => {
 		await page.goto(Routes.ButtonTable);
 
 		const table = new Table(page.locator("table"));
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
 
 		const locators = await table.getAllBodyCellLocatorsByHeaderName("Delete?");
 		expect(locators).toHaveLength(3);
@@ -110,14 +110,14 @@ test.describe("Table Tests", () => {
 			await locator.locator("input[type='button']").click();
 		}
 
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 
 	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {
 		await page.goto(Routes.ButtonTable);
 
 		const table = new Table(page.locator("table"));
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
 
 		const locators = await table.getAllBodyCellLocatorsByHeaderIndex(1);
 		expect(locators).toHaveLength(3);
@@ -125,6 +125,6 @@ test.describe("Table Tests", () => {
 		for (const locator of locators.reverse()) {
 			await locator.locator("input[type='button']").click();
 		}
-		expect(await TableBodyRow.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
+		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 });

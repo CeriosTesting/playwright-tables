@@ -1,7 +1,7 @@
 import { Locator } from "@playwright/test";
-import { TableBodyRow } from "./table-body-row";
+import { TableBody } from "./table-body";
 import { BodyRow, Cell, HeaderRow } from "./row";
-import { TableHeaderRow } from "./table-header-row";
+import { TableHeader } from "./table-header";
 
 export class Table {
 	private _headers: HeaderRow[] = [];
@@ -134,7 +134,7 @@ export class Table {
 				.waitFor({ state: "visible", ...options }),
 		]);
 
-		this._headers = await TableHeaderRow.getHeaderRows(this._headerRowLocator, this._headerColumnSelector);
-		this._rows = await TableBodyRow.getRows(this._bodyRowLocator, this._bodyRowColumnSelector);
+		this._headers = await TableHeader.getHeaderRows(this._headerRowLocator, this._headerColumnSelector);
+		this._rows = await TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector);
 	}
 }

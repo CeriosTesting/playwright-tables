@@ -1,4 +1,4 @@
 export * from "./row";
-export { TableBodyRow } from "./table-body-row";
-export { TableHeaderRow } from "./table-header-row";
-export { Table } from "./table";
+export * from "./table-body";
+export * from "./table-header";
+export * from "./table";
