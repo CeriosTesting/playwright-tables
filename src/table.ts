@@ -31,21 +31,29 @@ export class Table {
 		this._bodyRowColumnSelector = this._options?.row?.columnSelector ?? "td";
 	}
 
-	async getHeaderRows(): Promise<HeaderRow[]> {
-		await this.load();
+	async getHeaderRows(options?: {
+		timeout?: number;
+		duplicateSuffix?: boolean;
+		colspanEnabled?: boolean;
+	}): Promise<HeaderRow[]> {
+		await this.load(options);
 		return this._headers;
 	}
 
-	async getMainHeaderRow(): Promise<string[]> {
-		const headerRows = await this.getHeaderRows();
+	async getMainHeaderRow(options?: {
+		timeout?: number;
+		duplicateSuffix?: boolean;
+		colspanEnabled?: boolean;
+	}): Promise<string[]> {
+		const headerRows = await this.getHeaderRows(options);
 		const headers = this._options?.header?.setMainHeaderRow
 			? headerRows[this._options.header.setMainHeaderRow]
 			: headerRows[this._headers.length - 1];
 		return headers.map(header => header);
 	}
 
-	async getBodyRows(): Promise<BodyRow[]> {
-		await this.load();
+	async getBodyRows(options?: { timeout?: number }): Promise<BodyRow[]> {
+		await this.load({ ...options, duplicateSuffix: true, colspanEnabled: true });
 		return this._rows;
 	}
 
@@ -53,8 +61,12 @@ export class Table {
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
-	async getBodyCellLocatorByRowConditions(conditions: Record<string, string>, targetHeader: string): Promise<Locator> {
-		await this.load();
+	async getBodyCellLocatorByRowConditions(
+		conditions: Record<string, string>,
+		targetHeader: string,
+		options?: { timeout?: number; duplicateSuffix?: boolean; colspanEnabled?: boolean }
+	): Promise<Locator> {
+		await this.load(options);
 		const headers = await this.getMainHeaderRow();
 
 		const targetHeaderIndex = headers.indexOf(targetHeader);
@@ -85,8 +97,8 @@ export class Table {
 		throw new Error(`No row found matching conditions: ${JSON.stringify(conditions)}`);
 	}
 
-	async getAllBodyCellLocatorsByHeaderName(header: string): Promise<Locator[]> {
-		await this.load();
+	async getAllBodyCellLocatorsByHeaderName(header: string, options?: { timeout?: number }): Promise<Locator[]> {
+		await this.load(options);
 		const headers = await this.getMainHeaderRow();
 		const headerIndex = headers.indexOf(header);
 		if (headerIndex === -1) {
@@ -110,9 +122,9 @@ export class Table {
 		return locators;
 	}
 
-	async getJson(): Promise<any> {
-		await this.load();
-		const headers = await this.getMainHeaderRow();
+	async getJson(options?: { timeout?: number }): Promise<any> {
+		await this.load({ ...options, duplicateSuffix: true, colspanEnabled: true });
+		const headers = await this.getMainHeaderRow({ duplicateSuffix: true, colspanEnabled: true });
 		return this._rows.map(row => {
 			const rowObj: Record<string, Cell> = {};
 			headers.forEach((header, index) => {
@@ -122,7 +134,11 @@ export class Table {
 		});
 	}
 
-	private async load(options?: { timeout?: number }): Promise<void> {
+	private async load(options?: {
+		timeout?: number;
+		duplicateSuffix?: boolean;
+		colspanEnabled?: boolean;
+	}): Promise<void> {
 		await Promise.all([
 			this._headerRowLocator
 				.locator(this._headerColumnSelector)
@@ -134,7 +150,7 @@ export class Table {
 				.waitFor({ state: "visible", ...options }),
 		]);
 
-		this._headers = await TableHeader.getHeaderRows(this._headerRowLocator, this._headerColumnSelector);
+		this._headers = await TableHeader.getHeaderRows(this._headerRowLocator, this._headerColumnSelector, options);
 		this._rows = await TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector);
 	}
 }

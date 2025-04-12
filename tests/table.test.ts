@@ -1,10 +1,11 @@
 import test, { expect } from "@playwright/test";
-import { Routes } from "../src/routes";
-import { Table, TableBody } from "@cerios/playwright-tables";
+import { Table } from "src/table";
+import { DemoHtml, DemoHtmlProvider } from "./demo-html/demo-html-provider";
+import { TableBody } from "src/table-body";
 
 test.describe("Table Tests", () => {
 	test("getActiveHeaders returns headers used for table", async ({ page }) => {
-		await page.goto("/simple-table");
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.SimpleTable));
 
 		const table = new Table(page.locator("table"));
 		const headers = await table.getMainHeaderRow();
@@ -12,19 +13,19 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getHeaderRows with multiple rows returns header rows", async ({ page }) => {
-		await page.goto(Routes.RowspanHeaderTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.RowspanHeaderTable));
 
 		const table = new Table(page.locator("table"));
 
 		const headers = await table.getHeaderRows();
 		expect(headers).toEqual([
-			["Average", "Average_1", "Age"],
+			["Average", "Age"],
 			["Height", "Weight", "Age"],
 		]);
 	});
 
 	test("getRows returns rows", async ({ page }) => {
-		await page.goto(Routes.SimpleTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.SimpleTable));
 
 		const table = new Table(page.locator("table"));
 
@@ -36,7 +37,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getJson returns json", async ({ page }) => {
-		await page.goto(Routes.SimpleTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.SimpleTable));
 
 		const table = new Table(page.locator("table"));
 
@@ -56,7 +57,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
-		await page.goto(Routes.RowspanRowTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.RowspanRowTable));
 
 		const table = new Table(page.locator("table"));
 		const json = await table.getJson();
@@ -76,7 +77,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyCellLocator returns locator", async ({ page }) => {
-		await page.goto(Routes.ButtonTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.ButtonTable));
 
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
@@ -87,7 +88,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyCellLocatorByRowConditions returns locator", async ({ page }) => {
-		await page.goto(Routes.ButtonTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.ButtonTable));
 
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
@@ -98,7 +99,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getAllBodyCellLocatorsByHeaderName returns locators", async ({ page }) => {
-		await page.goto(Routes.ButtonTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.ButtonTable));
 
 		const table = new Table(page.locator("table"));
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
@@ -114,7 +115,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {
-		await page.goto(Routes.ButtonTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.ButtonTable));
 
 		const table = new Table(page.locator("table"));
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);

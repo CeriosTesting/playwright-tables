@@ -1,5 +1,5 @@
+import { BodyRow, Cell } from "@common/helpers/playwright-table/row";
 import { Locator } from "@playwright/test";
-import { Cell, BodyRow } from "./row";
 
 export abstract class TableBody {
 	static async getRows(rowLocator: Locator, columnsSelector: string): Promise<BodyRow[]> {

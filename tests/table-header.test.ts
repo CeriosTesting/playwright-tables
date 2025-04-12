@@ -1,28 +1,29 @@
 import { expect, test } from "@playwright/test";
-import { Routes } from "../src/routes";
-import { TableHeader, BodyRow } from "@cerios/playwright-tables";
+import { BodyRow } from "src/row";
+import { TableHeader } from "src/table-header";
+import { DemoHtml, DemoHtmlProvider } from "./demo-html/demo-html-provider";
 
 test.describe("Header Row Tests", () => {
 	const headerIndexerTestCases: {
-		testHtml: Routes;
+		demoHtml: DemoHtml;
 		expectedHeaders: BodyRow[];
 	}[] = [
 		{
-			testHtml: Routes.SimpleTable,
+			demoHtml: DemoHtml.SimpleTable,
 			expectedHeaders: [["First name", "Last name", "Date of birth"]],
 		},
 		{
-			testHtml: Routes.DuplicateEmptyHeadersTable,
-			expectedHeaders: [["", "Duplicate", "Duplicate_1", "Unique", "_1"]],
+			demoHtml: DemoHtml.DuplicateEmptyHeadersTable,
+			expectedHeaders: [["", "Duplicate", "Duplicate", "Unique", ""]],
 		},
 		{
-			testHtml: Routes.ColspanHeaderTable,
-			expectedHeaders: [["Name", "Color Combination", "Color Combination_1"]],
+			demoHtml: DemoHtml.ColspanHeaderTable,
+			expectedHeaders: [["Name", "Color Combination"]],
 		},
 	];
 	for (const testCase of headerIndexerTestCases) {
-		test(testCase.testHtml, async ({ page }) => {
-			await page.goto(testCase.testHtml);
+		test(testCase.demoHtml, async ({ page }) => {
+			await page.goto(DemoHtmlProvider.getHtmlFilePath(testCase.demoHtml));
 
 			const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th");
 			expect(headers).toEqual(testCase.expectedHeaders);
@@ -30,7 +31,7 @@ test.describe("Header Row Tests", () => {
 	}
 
 	test("table header with rowspan throws error", async ({ page }) => {
-		await page.goto(Routes.RowspanHeaderTable);
+		await page.goto(DemoHtmlProvider.getHtmlFilePath(DemoHtml.RowspanHeaderTable));
 
 		const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th");
 		console.log(headers);
