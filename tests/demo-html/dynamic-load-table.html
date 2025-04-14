@@ -1,99 +1,99 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <title>Html Table with dynamic load</title>
-        <style>
-            table,
-            td {
-                border: 1px solid black;
-            }
-            .skeleton {
-                background-color: #e0e0e0;
-                color: transparent;
-                animation: pulse 1.5s infinite;
-            }
-            @keyframes pulse {
-                0% {
-                    background-color: #e0e0e0;
-                }
-                50% {
-                    background-color: #f0f0f0;
-                }
-                100% {
-                    background-color: #e0e0e0;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <h2>Dynamic Table with Skeleton Loading</h2>
-        <table id="DynamicTable">
-            <thead>
-                <tr id="DynamicTableHeader">
-                    <!-- Header will be populated dynamically -->
-                </tr>
-            </thead>
-            <tbody id="DynamicTableBody">
-                <!-- Rows will be populated dynamically -->
-            </tbody>
-        </table>
+	<head>
+		<title>Html Table with dynamic load</title>
+		<style>
+			table,
+			td {
+				border: 1px solid black;
+			}
+			.skeleton {
+				background-color: #e0e0e0;
+				color: transparent;
+				animation: pulse 1.5s infinite;
+			}
+			@keyframes pulse {
+				0% {
+					background-color: #e0e0e0;
+				}
+				50% {
+					background-color: #f0f0f0;
+				}
+				100% {
+					background-color: #e0e0e0;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Dynamic Table with Skeleton Loading</h2>
+		<table id="DynamicTable">
+			<thead>
+				<tr id="DynamicTableHeader">
+					<!-- Header will be populated dynamically -->
+				</tr>
+			</thead>
+			<tbody id="DynamicTableBody">
+				<!-- Rows will be populated dynamically -->
+			</tbody>
+		</table>
 
-        <script>
-            // Function to add skeleton placeholders
-            function addSkeleton() {
-                const headerRow = document.getElementById("DynamicTableHeader");
-                const headers = ["Header 1", "Header 2", "Header 3", "Header 4", "Header 5"];
-                headers.forEach(() => {
-                    const th = document.createElement("th");
-                    th.className = "skeleton";
-                    th.textContent = "";
-                    headerRow.appendChild(th);
-                });
+		<script>
+			// Function to add skeleton placeholders
+			function addSkeleton() {
+				const headerRow = document.getElementById("DynamicTableHeader");
+				const headers = ["", "", ""];
+				headers.forEach(() => {
+					const th = document.createElement("th");
+					th.className = "skeleton";
+					th.textContent = "";
+					headerRow.appendChild(th);
+				});
 
-                const body = document.getElementById("DynamicTableBody");
-                for (let i = 1; i <= 3; i++) {
-                    const row = document.createElement("tr");
-                    for (let j = 1; j <= 5; j++) {
-                        const cell = document.createElement("td");
-                        cell.className = "skeleton";
-                        cell.textContent = "";
-                        row.appendChild(cell);
-                    }
-                    body.appendChild(row);
-                }
-            }
+				const body = document.getElementById("DynamicTableBody");
+				for (let i = 1; i <= 3; i++) {
+					const row = document.createElement("tr");
+					for (let j = 1; j <= 3; j++) {
+						const cell = document.createElement("td");
+						cell.className = "skeleton";
+						cell.textContent = "";
+						row.appendChild(cell);
+					}
+					body.appendChild(row);
+				}
+			}
 
-            // Function to dynamically load table content
-            function loadDynamicTable() {
-                // Replace headers
-                const headerRow = document.getElementById("DynamicTableHeader");
-                headerRow.innerHTML = ""; // Clear skeleton
-                const headers = ["Header 1", "Header 2", "Header 3", "Header 4", "Header 5"];
-                headers.forEach(headerText => {
-                    const th = document.createElement("th");
-                    th.textContent = headerText;
-                    headerRow.appendChild(th);
-                });
+			// Function to dynamically load table content
+			function loadDynamicTable() {
+				// Replace headers
+				const headerRow = document.getElementById("DynamicTableHeader");
+				headerRow.innerHTML = ""; // Clear skeleton
+				const headers = ["Header 1", "Header 2", "Header 3"];
+				headers.forEach(headerText => {
+					const th = document.createElement("th");
+					th.textContent = headerText;
+					headerRow.appendChild(th);
+				});
 
-                // Replace rows
-                const body = document.getElementById("DynamicTableBody");
-                body.innerHTML = ""; // Clear skeleton
-                for (let i = 1; i <= 3; i++) {
-                    const row = document.createElement("tr");
-                    for (let j = 1; j <= 5; j++) {
-                        const cell = document.createElement("td");
-                        cell.textContent = `Row ${i} Col ${j}`;
-                        row.appendChild(cell);
-                    }
-                    body.appendChild(row);
-                }
-            }
+				// Replace rows
+				const body = document.getElementById("DynamicTableBody");
+				body.innerHTML = ""; // Clear skeleton
+				for (let i = 1; i <= 3; i++) {
+					const row = document.createElement("tr");
+					for (let j = 1; j <= 3; j++) {
+						const cell = document.createElement("td");
+						cell.textContent = `Row ${i} Col ${j}`;
+						row.appendChild(cell);
+					}
+					body.appendChild(row);
+				}
+			}
 
-            // Add skeleton placeholders initially
-            addSkeleton();
+			// Add skeleton placeholders initially
+			addSkeleton();
 
-            // Load the actual table content after 5 seconds
-            setTimeout(loadDynamicTable, 5000);
-        </script>
-    </body>
+			// Load the actual table content after 5 seconds
+			setTimeout(loadDynamicTable, 5000);
+		</script>
+	</body>
 </html>

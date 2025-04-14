@@ -1,159 +1,118 @@
 import { Locator } from "@playwright/test";
 import { HeaderRow } from "./row";
 
+export type HeaderRowsOptions = {
+	emptyCellReplacement?: boolean;
+	duplicateSuffix?: boolean;
+	colspan?: { enabled?: boolean; suffix?: boolean };
+};
+
 export abstract class TableHeader {
 	static async getHeaderRows(
 		headerRowLocator: Locator,
 		columnsSelector: string,
-		options?: { duplicateSuffix?: boolean; colspanEnabled?: boolean }
+		headerRowsOptions?: HeaderRowsOptions
 	): Promise<HeaderRow[]> {
 		const headerRows: HeaderRow[] = [];
-		const rowSpans: (string | null)[] = [];
-		const duplicateSuffix = options?.duplicateSuffix ?? false;
-		const colspanEnabled = options?.colspanEnabled ?? false;
+		const rowSpans: Map<number, string> = new Map();
+		const colspanEnabled = headerRowsOptions?.colspan?.enabled ?? true;
+		const colspanSuffix = headerRowsOptions?.colspan?.suffix ?? false;
+		const duplicateSuffix = headerRowsOptions?.duplicateSuffix ?? false;
+		const emptyCellReplacement = headerRowsOptions?.emptyCellReplacement ?? true;
 
-		for (let i = 0; i < (await headerRowLocator.count()); i++) {
-			const row = headerRowLocator.nth(i);
-			const columns = row.locator(columnsSelector);
-			const columnTexts = await this.processRow(columns, rowSpans, i, duplicateSuffix, colspanEnabled);
-			headerRows.push(columnTexts);
+		// Locate all header rows
+		const rows = await headerRowLocator.elementHandles();
+
+		for (const row of rows) {
+			const headerRow: HeaderRow = [];
+			const cells = await row.$$(columnsSelector);
+			let columnIndex = 0;
+
+			// Process each cell in the row
+			for (const cell of cells) {
+				// Skip columns occupied by rowSpans
+				while (rowSpans.has(columnIndex)) {
+					headerRow.push(rowSpans.get(columnIndex)!);
+					rowSpans.delete(columnIndex);
+					columnIndex++;
+				}
+
+				// Get cell text and attributes
+				let text = (await cell.textContent())?.trim() || "";
+				if (!text && emptyCellReplacement) {
+					text = "{{Empty}}"; // Replace empty cell value with {{Empty}}
+				}
+				const colspan = parseInt((await cell.getAttribute("colspan")) || "1", 10);
+				const rowspan = parseInt((await cell.getAttribute("rowspan")) || "1", 10);
+
+				// Add the cell text to the current row
+				headerRow.push(text);
+
+				// Handle colspan: add suffixes for extra cells
+				if (colspan > 1) {
+					for (let i = 1; i < colspan; i++) {
+						headerRow.push(`${text}__Colspan__${i}`);
+					}
+				}
+
+				// Handle rowspan: store the text for subsequent rows
+				if (rowspan > 1) {
+					for (let i = 0; i < colspan; i++) {
+						rowSpans.set(columnIndex + i, text);
+					}
+				}
+
+				// Increment column index by colspan
+				columnIndex += colspan;
+			}
+
+			// Add any remaining rowSpans to the current row
+			while (rowSpans.has(columnIndex)) {
+				headerRow.push(rowSpans.get(columnIndex)!);
+				rowSpans.delete(columnIndex);
+				columnIndex++;
+			}
+
+			headerRows.push(headerRow);
+		}
+
+		if (!colspanEnabled) {
+			for (const headerRow of headerRows) {
+				for (let i = 0; i < headerRow.length; i++) {
+					if (headerRow[i].includes("__Colspan__")) {
+						headerRow.splice(i, 1);
+						i--;
+					}
+				}
+			}
+		}
+
+		if (!colspanSuffix) {
+			for (const headerRow of headerRows) {
+				for (let i = 0; i < headerRow.length; i++) {
+					if (headerRow[i].includes("__Colspan__")) {
+						headerRow[i] = headerRow[i].split("__Colspan__")[0];
+					}
+				}
+			}
+		}
+
+		if (duplicateSuffix) {
+			for (const headerRow of headerRows) {
+				const headerCountMap: Map<string, number> = new Map(); // Tracks counts for each header
+				for (let i = 0; i < headerRow.length; i++) {
+					const header = headerRow[i];
+					if (headerCountMap.has(header)) {
+						const count = headerCountMap.get(header)!; // Get the current count
+						headerRow[i] = `${header}__Duplicate__${count}`; // Add the suffix starting at 1
+						headerCountMap.set(header, count + 1); // Increment the count for the next duplicate
+					} else {
+						headerCountMap.set(header, 1); // Initialize count for this header
+					}
+				}
+			}
 		}
 
 		return headerRows;
-	}
-
-	private static async processRow(
-		columns: Locator,
-		rowSpans: (string | null)[],
-		rowIndex: number,
-		duplicateSuffix: boolean,
-		colspanEnabled: boolean
-	): Promise<string[]> {
-		const columnTexts: string[] = [];
-		const nameCount: Record<string, number> = {};
-		let colIndex = 0;
-
-		for (let j = 0; j < (await columns.count()); j++) {
-			const column = columns.nth(j);
-			colIndex = await this.processColumn(
-				column,
-				columnTexts,
-				rowSpans,
-				nameCount,
-				colIndex,
-				rowIndex,
-				duplicateSuffix,
-				colspanEnabled
-			);
-		}
-
-		while (rowSpans[colIndex]) {
-			columnTexts.push(rowSpans[colIndex]!);
-			rowSpans[colIndex] = null;
-			colIndex++;
-		}
-
-		return columnTexts;
-	}
-
-	private static async processColumn(
-		column: Locator,
-		columnTexts: string[],
-		rowSpans: (string | null)[],
-		nameCount: Record<string, number>,
-		colIndex: number,
-		rowIndex: number,
-		duplicateSuffix: boolean,
-		colspanEnabled: boolean
-	): Promise<number> {
-		let text = await column.innerText();
-		text = text.trim();
-
-		const colspan = colspanEnabled ? parseInt((await column.getAttribute("colspan")) || "1", 10) : 1;
-		const rowspan = parseInt((await column.getAttribute("rowspan")) || "1", 10);
-
-		text = this.handleDuplicateHeaderNames(text, nameCount, duplicateSuffix);
-
-		colIndex = this.insertRowSpans(columnTexts, rowSpans, colIndex);
-		columnTexts.push(text);
-
-		this.fillRowSpans(rowSpans, text, colIndex, rowspan, rowIndex);
-
-		colIndex++;
-
-		colIndex = this.handleColspan(columnTexts, text, colIndex, colspan, duplicateSuffix, nameCount, colspanEnabled);
-
-		return colIndex;
-	}
-
-	private static handleDuplicateHeaderNames(
-		text: string,
-		nameCount: Record<string, number>,
-		duplicateSuffix: boolean
-	): string {
-		if (!duplicateSuffix) {
-			return text;
-		}
-
-		if (nameCount[text] !== undefined) {
-			nameCount[text]++;
-			return `${text}_${nameCount[text]}`;
-		} else {
-			nameCount[text] = 0;
-			return text;
-		}
-	}
-
-	private static handleColspan(
-		columnTexts: string[],
-		text: string,
-		colIndex: number,
-		colspan: number,
-		duplicateSuffix: boolean,
-		nameCount: Record<string, number>,
-		colspanEnabled: boolean
-	): number {
-		if (!colspanEnabled) {
-			return colIndex;
-		}
-		for (let c = 1; c < colspan; c++) {
-			let colspanText = text;
-			if (duplicateSuffix) {
-				if (nameCount[text] !== undefined) {
-					nameCount[text]++;
-					colspanText = `${text}_${nameCount[text]}`;
-				} else {
-					nameCount[text] = 0;
-					colspanText = `${text}_1`;
-				}
-			}
-			columnTexts.push(colspanText);
-			colIndex++;
-		}
-		return colIndex;
-	}
-
-	private static insertRowSpans(columnTexts: string[], rowSpans: (string | null)[], colIndex: number): number {
-		while (rowSpans[colIndex]) {
-			columnTexts.push(rowSpans[colIndex]!);
-			rowSpans[colIndex] = null;
-			colIndex++;
-		}
-		return colIndex;
-	}
-
-	private static fillRowSpans(
-		rowSpans: (string | null)[],
-		text: string,
-		colIndex: number,
-		rowspan: number,
-		rowIndex: number
-	): void {
-		for (let r = 1; r < rowspan; r++) {
-			if (rowIndex + r >= rowSpans.length) {
-				rowSpans.push(null);
-			}
-			rowSpans[colIndex] = text;
-		}
 	}
 }
