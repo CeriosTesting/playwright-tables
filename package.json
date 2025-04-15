@@ -1,24 +1,38 @@
 {
-	"keywords": [],
+	"version": "1.0.0",
 	"author": "Ronald Veth",
+	"description": "Easy Html Tables handler for Playwright",
 	"license": "ISC",
-	"description": "",
-	"workspaces": [
-		"packages/**",
-		"examples/**"
+	"keywords": [
+		"playwright",
+		"html",
+		"table",
+		"testing"
 	],
-	"private": true,
 	"scripts": {
-		"format": "npm run format --workspaces",
-		"prepare": "husky"
+		"format": "prettier --write . --cache --ignore-path=.prettierignore",
+		"test": "playwright test",
+		"prepare": "husky",
+		"build": "tsup",
+		"serve": "serve tests/demo-html -p 3000"
 	},
-	"engines": {
-		"node": ">=18"
-	},
-	"packageManager": "npm@11.2.0",
 	"devDependencies": {
+		"@playwright/test": "^1.51.1",
 		"husky": "^9.1.7",
 		"lint-staged": "^15.5.0",
-		"prettier": "^3.5.3"
-	}
+		"prettier": "^3.5.3",
+		"serve": "^14.2.4",
+		"ts-node": "^10.9.2",
+		"tsup": "^8.4.0",
+		"typescript": "^5.8.3"
+	},
+	"peerDependencies": {
+		"@playwright/test": "^1.51.1"
+	},
+	"main": "./dist/index.js",
+	"module": "./dist/index.mjs",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist"
+	]
 }
