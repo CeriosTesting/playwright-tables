@@ -11,14 +11,17 @@
 	],
 	"scripts": {
 		"format": "prettier --write . --cache --ignore-path=.prettierignore",
+		"test": "playwright test",
 		"prepare": "husky",
-		"build": "tsup"
+		"build": "tsup",
+		"serve": "serve tests/demo-html -p 3000"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.51.1",
 		"husky": "^9.1.7",
 		"lint-staged": "^15.5.0",
-		"@playwright/test": "^1.51.1",
 		"prettier": "^3.5.3",
+		"serve": "^14.2.4",
 		"ts-node": "^10.9.2",
 		"tsup": "^8.4.0",
 		"typescript": "^5.8.3"

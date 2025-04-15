@@ -1,11 +1,11 @@
 import test, { expect } from "@playwright/test";
 import { Table } from "src/table";
-import { DemoHtml, DemoHtmlPathProvider } from "./demo-html/demo-html-path-provider";
+import { Route } from "./demo-html/routes";
 import { TableBody } from "src/table-body";
 
 test.describe("Table Tests", () => {
 	test("getActiveHeaders returns headers used for table", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.SimpleTable));
+		await page.goto(Route.SimpleTable);
 
 		const table = new Table(page.locator("table"));
 		const headers = await table.getMainHeaderRow();
@@ -13,7 +13,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getHeaderRows returns header rows", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.RowspanHeaderTable));
+		await page.goto(Route.RowspanHeaderTable);
 
 		const table = new Table(page.locator("table"));
 
@@ -25,7 +25,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyRows returns body rows", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.SimpleTable));
+		await page.goto(Route.SimpleTable);
 
 		const table = new Table(page.locator("table"));
 
@@ -38,7 +38,7 @@ test.describe("Table Tests", () => {
 
 	test.describe("getJson", async () => {
 		test("getJson returns json", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.SimpleTable));
+			await page.goto(Route.SimpleTable);
 
 			const table = new Table(page.locator("table"));
 
@@ -58,7 +58,7 @@ test.describe("Table Tests", () => {
 		});
 
 		test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.RowspanRowTable));
+			await page.goto(Route.RowspanRowTable);
 
 			const table = new Table(page.locator("table"));
 			const json = await table.getJson();
@@ -79,7 +79,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyCellLocator returns locator", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.ButtonTable));
+		await page.goto(Route.ButtonTable);
 
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
@@ -90,7 +90,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getBodyCellLocatorByRowConditions returns locator", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.ButtonTable));
+		await page.goto(Route.ButtonTable);
 
 		const table = new Table(page.locator("table"));
 		expect(await table.getBodyRows()).toHaveLength(3);
@@ -101,7 +101,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getAllBodyCellLocatorsByHeaderName returns locators", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.ButtonTable));
+		await page.goto(Route.ButtonTable);
 
 		const table = new Table(page.locator("table"));
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
@@ -117,7 +117,7 @@ test.describe("Table Tests", () => {
 	});
 
 	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {
-		await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.ButtonTable));
+		await page.goto(Route.ButtonTable);
 
 		const table = new Table(page.locator("table"));
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(3);
@@ -133,7 +133,7 @@ test.describe("Table Tests", () => {
 
 	test.describe("dynamic table loading", async () => {
 		test("should wait for table to contain text", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.DynamicLoadTable));
+			await page.goto(Route.DynamicLoadTable);
 
 			const table = new Table(page.locator("table"));
 			const json = await table.getJson();
@@ -157,21 +157,21 @@ test.describe("Table Tests", () => {
 		});
 
 		test("empty header rows should throw exception", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.EmptyHeaderRowsTable));
+			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"));
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No content found for header cells");
 		});
 
 		test("empty body rows should throw exception", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.EmptyBodyRowsTable));
+			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"));
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No content found for body cells");
 		});
 
 		test("No header rows should throw exception", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.EmptyHeaderRowsTable));
+			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"), { header: { rowSelector: "invalid" } });
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
@@ -180,7 +180,7 @@ test.describe("Table Tests", () => {
 		});
 
 		test("No header row cells should throw exception", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.EmptyHeaderRowsTable));
+			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"), { header: { columnSelector: "invalid" } });
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
@@ -189,7 +189,7 @@ test.describe("Table Tests", () => {
 		});
 
 		test("No body rows should throw exception", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.EmptyBodyRowsTable));
+			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"), { row: { rowSelector: "invalid" } });
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
@@ -198,7 +198,7 @@ test.describe("Table Tests", () => {
 		});
 
 		test("No body row cells should throw exception", async ({ page }) => {
-			await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.EmptyBodyRowsTable));
+			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"), { row: { columnSelector: "invalid" } });
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { HeaderRow } from "src/row";
 import { TableHeader } from "src/table-header";
-import { DemoHtml, DemoHtmlPathProvider } from "./demo-html/demo-html-path-provider";
+import { Route, DemoHtmlPathProvider } from "./demo-html/routes";
 
 test.describe("Header Row Tests", () => {
 	test.describe("Options colspan", async () => {
@@ -39,7 +39,7 @@ test.describe("Header Row Tests", () => {
 			test(`Colspan enabled = ${testCase.options.colspan!.enabled} suffix = ${testCase.options.colspan!.suffix}`, async ({
 				page,
 			}) => {
-				await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.ColspanHeaderTable));
+				await page.goto(Route.ColspanHeaderTable);
 
 				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", testCase.options);
 				expect(headers).toEqual(testCase.expectedHeaders);
@@ -63,7 +63,7 @@ test.describe("Header Row Tests", () => {
 		];
 		for (const testCase of optionsEmptyCellReplacementTestCases) {
 			test(`Empty cell replacement = ${testCase.options.emptyCellReplacement}`, async ({ page }) => {
-				await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.DuplicateEmptyHeadersTable));
+				await page.goto(Route.DuplicateEmptyHeadersTable);
 
 				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", testCase.options);
 				expect(headers).toEqual(testCase.expectedHeaders);
@@ -93,7 +93,7 @@ test.describe("Header Row Tests", () => {
 		];
 		for (const testCase of optionsDuplicateSuffixTestCases) {
 			test(`Duplicate suffix = ${testCase.options.duplicateSuffix}`, async ({ page }) => {
-				await page.goto(DemoHtmlPathProvider.getHtmlFilePath(DemoHtml.RowspanHeaderTable));
+				await page.goto(Route.RowspanHeaderTable);
 
 				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", testCase.options);
 				expect(headers).toEqual(testCase.expectedHeaders);
