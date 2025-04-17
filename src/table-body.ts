@@ -1,15 +1,26 @@
 import { Locator } from "@playwright/test";
 import { BodyRow, Cell } from "./row";
 
+export enum CellContentType {
+	TextContent = "textContent",
+	InnerText = "innerText",
+}
+
 export abstract class TableBody {
-	static async getRows(rowLocator: Locator, columnsSelector: string): Promise<BodyRow[]> {
+	static async getRows(
+		rowLocator: Locator,
+		columnsSelector: string,
+		options?: {
+			cellContentType?: CellContentType;
+		}
+	): Promise<BodyRow[]> {
 		const rows: BodyRow[] = [];
 		const rowsCount = await rowLocator.count();
 		const spannedCells: Record<number, Cell[]> = {};
 
 		for (let rowIndex = 0; rowIndex < rowsCount; rowIndex++) {
 			const row = rowLocator.nth(rowIndex);
-			const columns = await this.extractColumns(row, columnsSelector, rowIndex, spannedCells);
+			const columns = await this.extractColumns(row, columnsSelector, rowIndex, spannedCells, options?.cellContentType);
 			rows.push(columns as BodyRow);
 		}
 
@@ -20,14 +31,22 @@ export abstract class TableBody {
 		row: Locator,
 		columnsSelector: string,
 		rowIndex: number,
-		spannedCells: Record<number, Cell[]>
+		spannedCells: Record<number, Cell[]>,
+		cellContentType?: CellContentType
 	): Promise<Cell[]> {
 		const columns: Cell[] = [];
 		const columnLocators = row.locator(columnsSelector);
 		const columnCount = await columnLocators.count();
 
 		for (let colIndex = 0; colIndex < columnCount; colIndex++) {
-			await this.processColumn(columnLocators.nth(colIndex), colIndex, columns, rowIndex, spannedCells);
+			await this.processColumn(
+				columnLocators.nth(colIndex),
+				colIndex,
+				columns,
+				rowIndex,
+				spannedCells,
+				cellContentType
+			);
 		}
 
 		this.applySpannedCells(spannedCells, rowIndex, columns);
@@ -40,9 +59,11 @@ export abstract class TableBody {
 		colIndex: number,
 		columns: Cell[],
 		rowIndex: number,
-		spannedCells: Record<number, Cell[]>
+		spannedCells: Record<number, Cell[]>,
+		cellContentType: CellContentType = CellContentType.InnerText
 	): Promise<void> {
-		const content = await column.textContent();
+		const content =
+			cellContentType === CellContentType.InnerText ? await column.innerText() : await column.textContent();
 		const castedContent = this.castContent(content?.trim() || "");
 
 		const rowspan = parseInt((await column.getAttribute("rowspan")) || "1", 10);

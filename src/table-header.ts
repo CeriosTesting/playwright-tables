@@ -1,4 +1,4 @@
-import { ElementHandle, Locator } from "@playwright/test";
+import { Locator } from "@playwright/test";
 import { HeaderRow } from "./row";
 
 export type HeaderRowsOptions = {
@@ -14,7 +14,7 @@ export abstract class TableHeader {
 		headerRowsOptions?: HeaderRowsOptions
 	): Promise<HeaderRow[]> {
 		const options = this.getDefaultOptions(headerRowsOptions);
-		const rows = await headerRowLocator.elementHandles();
+		const rows = await headerRowLocator.all();
 		const headerRows: HeaderRow[] = [];
 		const rowSpans: Map<number, string> = new Map();
 
@@ -41,13 +41,13 @@ export abstract class TableHeader {
 	}
 
 	private static async processRow(
-		row: ElementHandle<Node>,
+		row: Locator,
 		columnsSelector: string,
 		rowSpans: Map<number, string>,
 		options: Required<HeaderRowsOptions>
 	): Promise<HeaderRow> {
 		const headerRow: HeaderRow = [];
-		const cells = await row.$$(columnsSelector);
+		const cells = await row.locator(columnsSelector).all();
 		let columnIndex = 0;
 
 		for (const cell of cells) {
@@ -59,7 +59,7 @@ export abstract class TableHeader {
 	}
 
 	private static async processCell(
-		cell: ElementHandle<SVGElement | HTMLElement>,
+		cell: Locator,
 		headerRow: HeaderRow,
 		rowSpans: Map<number, string>,
 		columnIndex: number,

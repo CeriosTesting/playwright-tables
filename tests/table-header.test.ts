@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { HeaderRow } from "src/row";
 import { TableHeader } from "src/table-header";
-import { Route, DemoHtmlPathProvider } from "./demo-html/routes";
+import { Route } from "./demo-html/routes";
 
 test.describe("Header Row Tests", () => {
 	test.describe("Options colspan", async () => {
