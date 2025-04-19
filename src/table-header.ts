@@ -88,7 +88,7 @@ export abstract class TableHeader {
 
 	private static handleColspan(headerRow: HeaderRow, text: string, colspan: number): void {
 		for (let i = 1; i < colspan; i++) {
-			headerRow.push(`${text}__Colspan__${i}`);
+			headerRow.push(`${text}__C${i}`);
 		}
 	}
 
@@ -127,7 +127,7 @@ export abstract class TableHeader {
 	private static removeColspanCells(headerRows: HeaderRow[]): void {
 		for (const headerRow of headerRows) {
 			for (let i = 0; i < headerRow.length; i++) {
-				if (headerRow[i].includes("__Colspan__")) {
+				if (/__C\d/.test(headerRow[i])) {
 					headerRow.splice(i, 1);
 					i--;
 				}
@@ -138,8 +138,8 @@ export abstract class TableHeader {
 	private static removeColspanSuffix(headerRows: HeaderRow[]): void {
 		for (const headerRow of headerRows) {
 			for (let i = 0; i < headerRow.length; i++) {
-				if (headerRow[i].includes("__Colspan__")) {
-					headerRow[i] = headerRow[i].split("__Colspan__")[0];
+				if (/__C\d/.test(headerRow[i])) {
+					headerRow[i] = headerRow[i].replace(/__C\d/, "");
 				}
 			}
 		}
@@ -154,7 +154,7 @@ export abstract class TableHeader {
 				const header = headerRow[i];
 				if (headerCountMap.has(header)) {
 					const count = headerCountMap.get(header)!;
-					headerRow[i] = `${header}__Duplicate__${count}`;
+					headerRow[i] = `${header}__D${count}`;
 					headerCountMap.set(header, count + 1);
 				} else {
 					headerCountMap.set(header, 1);
