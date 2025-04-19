@@ -137,6 +137,90 @@ export class Table {
 		});
 	}
 
+	async waitForHeaderRows(options?: {
+		timeout?: number;
+		row?: {
+			amount?: number;
+			cell?: {
+				totalCount?: number;
+				contentCount?: number;
+			};
+		};
+	}): Promise<void> {
+		const checkIfAnyCellWithContent = async (): Promise<void> => {
+			const headerCells = await this._headerRowLocator.locator(this._headerColumnSelector).all();
+			const headerCellsWithContent = (
+				await Promise.all(
+					headerCells.map(async cell => {
+						const content = await cell.textContent();
+						return content !== null && content.trim() !== "" ? cell : null;
+					})
+				)
+			).filter(cell => cell !== null);
+			expect(headerCellsWithContent.length, "No header cells with content found").toBeGreaterThan(0);
+		};
+
+		await expect(async () => {
+			const headerRows = await this._headerRowLocator.all();
+			if (options?.row) {
+				if (options?.row.amount) {
+					expect(headerRows.length, `Expected ${options.row.amount} header rows, but found ${headerRows.length}`).toBe(
+						options.row.amount
+					);
+				} else {
+					expect(headerRows.length, "No header rows found").toBeGreaterThan(0);
+				}
+
+				if (options?.row.cell) {
+					if (options.row.cell.totalCount) {
+						const rowsWithAmountOfCells = (
+							await Promise.all(
+								headerRows.map(async row => {
+									const cellCount = await row.locator(this._headerColumnSelector).count();
+									return cellCount === options.row?.cell?.totalCount ? row : null;
+								})
+							)
+						).filter(row => row !== null);
+						expect(
+							rowsWithAmountOfCells.length,
+							`Expected amount of ${options.row.cell.totalCount} header cells for row not found`
+						).toBeGreaterThan(0);
+					}
+					if (options.row.cell.contentCount) {
+						const rowsWithAmountOfCells = (
+							await Promise.all(
+								headerRows.map(async row => {
+									const cellCount = await row.locator(this._headerColumnSelector).count();
+									return cellCount >= options.row!.cell!.contentCount! ? row : null;
+								})
+							)
+						).filter(row => row !== null);
+						const rowWithAmountOfCellsAndContent = (
+							await Promise.all(
+								rowsWithAmountOfCells.map(async row => {
+									const cells = await row.locator(this._headerColumnSelector).all();
+									const cellsContent = await Promise.all(cells.map(cell => cell.textContent()));
+									const cellsWithContent = cellsContent.filter(cell => cell !== null && cell.trim() !== "");
+									return cellsWithContent.length === options.row!.cell!.contentCount! ? row : null;
+								})
+							)
+						).filter(row => row !== null);
+						expect(
+							rowWithAmountOfCellsAndContent.length,
+							`Expected amount of ${options.row.cell.contentCount} header cells with content for row not found`
+						).toBeGreaterThan(0);
+					} else {
+						await checkIfAnyCellWithContent();
+					}
+				} else {
+					await checkIfAnyCellWithContent();
+				}
+			} else {
+				await checkIfAnyCellWithContent();
+			}
+		}).toPass({ timeout: options?.timeout });
+	}
+
 	private async load(options?: { timeout?: number; headerRowsOptions?: HeaderRowsOptions }): Promise<void> {
 		const timeout = options?.timeout ?? 30_000;
 
