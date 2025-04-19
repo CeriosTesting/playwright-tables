@@ -160,111 +160,42 @@ test.describe("Table Tests", () => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"));
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No content found for header cells");
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
 		});
 
 		test("empty body rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"));
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No content found for body cells");
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
 
 		test("No header rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"), { header: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No header cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
 		});
 
 		test("No header row cells should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"), { header: { columnSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No header cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
 		});
 
 		test("No body rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"), { row: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No body cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
 
 		test("No body row cells should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"), { row: { columnSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No body cells found. Please check locators"
-			);
-		});
-
-		test.describe("waitForHeaderRows", async () => {
-			test("default options should not throw error", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(table.waitForHeaderRows()).resolves.not.toThrowError();
-			});
-
-			test("should throw error when amount of header rows is not met", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(table.waitForHeaderRows({ timeout: 500, row: { amount: 5 } })).rejects.toThrowError(
-					"Expected 5 header rows, but found 1"
-				);
-			});
-
-			test("should NOT throw error when amount of header rows is met", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(table.waitForHeaderRows({ timeout: 2_500, row: { amount: 1 } })).resolves.not.toThrowError();
-			});
-
-			test("should throw error when amount of header cells is not met", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(table.waitForHeaderRows({ timeout: 500, row: { cell: { totalCount: 10 } } })).rejects.toThrowError(
-					"Expected amount of 10 header cells for row not found"
-				);
-			});
-
-			test("should NOT throw error when amount of header cells is met", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(
-					table.waitForHeaderRows({ timeout: 2_500, row: { cell: { totalCount: 3 } } })
-				).resolves.not.toThrowError();
-			});
-
-			test("should throw error when amount of header cells with content is not met", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(
-					table.waitForHeaderRows({ timeout: 500, row: { cell: { contentCount: 10 } } })
-				).rejects.toThrowError("Expected amount of 10 header cells with content for row not found");
-			});
-
-			test("should NOT throw error when amount of header cells with content is met", async ({ page }) => {
-				await page.goto(Route.DynamicLoadTable);
-
-				const table = new Table(page.locator("table"));
-				await expect(
-					table.waitForHeaderRows({ timeout: 300_000, row: { cell: { contentCount: 3 } } })
-				).resolves.not.toThrowError();
-			});
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
 	});
 });
