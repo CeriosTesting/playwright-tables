@@ -198,4 +198,38 @@ test.describe("Table Tests", () => {
 			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
 	});
+
+	test("div table", async ({ page }) => {
+		await page.goto(Route.DivTable);
+
+		const table = new Table(page.locator(".divTable"), {
+			header: {
+				rowSelector: ".divTableHeading > .divTableRow",
+				columnSelector: ".divTableHead",
+			},
+			row: {
+				rowSelector: ".divTableBody > .divTableRow",
+				columnSelector: ".divTableCell",
+			},
+		});
+		const json = await table.getJson();
+
+		expect(json).toEqual([
+			{
+				"First name": "Ronald",
+				"Last name": "Veth",
+				Specialty: "Test Automation",
+			},
+			{
+				"First name": "Logan",
+				"Last name": "Deacon",
+				Specialty: "Make special together",
+			},
+			{
+				"First name": "John",
+				"Last name": "Doe",
+				Specialty: "Anonymity",
+			},
+		]);
+	});
 });

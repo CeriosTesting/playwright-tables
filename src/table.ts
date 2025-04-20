@@ -45,12 +45,12 @@ export class Table {
 		timeout?: number;
 		duplicateSuffix?: boolean;
 		headerRowsOptions?: HeaderRowsOptions;
-	}): Promise<string[]> {
+	}): Promise<HeaderRow> {
 		const headerRows = await this.getHeaderRows(options);
 		const headers = this._options?.header?.setMainHeaderRow
 			? headerRows[this._options.header.setMainHeaderRow]
 			: headerRows[this._headers.length - 1];
-		return headers.map(header => header);
+		return headers;
 	}
 
 	async getBodyRows(options?: { timeout?: number }): Promise<BodyRow[]> {
@@ -124,17 +124,14 @@ export class Table {
 	}
 
 	async getJson(options?: { timeout?: number }): Promise<any> {
-		await this.load({
-			...options,
+		const headers = await this.getMainHeaderRow({
+			timeout: options?.timeout,
+			duplicateSuffix: true,
 			headerRowsOptions: {
 				colspan: { enabled: true, suffix: true },
-				emptyCellReplacement: true,
 				duplicateSuffix: true,
+				emptyCellReplacement: true,
 			},
-		});
-		const headers = await this.getMainHeaderRow({
-			duplicateSuffix: true,
-			headerRowsOptions: { colspan: { enabled: true } },
 		});
 		return this._rows.map(row => {
 			const rowObj: Record<string, Cell> = {};
