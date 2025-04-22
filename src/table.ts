@@ -1,7 +1,7 @@
 import { expect, Locator } from "@playwright/test";
 import { TableBody } from "./table-body";
 import { BodyRow, Cell, HeaderRow } from "./row";
-import { HeaderRowsOptions, TableHeader } from "./table-header";
+import { HeaderRowOptions, TableHeader } from "./table-header";
 import { RowKind, TableWait } from "./table-wait";
 
 export class Table {
@@ -35,7 +35,7 @@ export class Table {
 	async getHeaderRows(options?: {
 		timeout?: number;
 		duplicateSuffix?: boolean;
-		headerRowsOptions?: HeaderRowsOptions;
+		headerRowOptions?: HeaderRowOptions;
 	}): Promise<HeaderRow[]> {
 		await this.load(options);
 		return this._headers;
@@ -44,7 +44,7 @@ export class Table {
 	async getMainHeaderRow(options?: {
 		timeout?: number;
 		duplicateSuffix?: boolean;
-		headerRowsOptions?: HeaderRowsOptions;
+		headerRowOptions?: HeaderRowOptions;
 	}): Promise<HeaderRow> {
 		const headerRows = await this.getHeaderRows(options);
 		const headers = this._options?.header?.setMainHeaderRow
@@ -54,7 +54,7 @@ export class Table {
 	}
 
 	async getBodyRows(options?: { timeout?: number }): Promise<BodyRow[]> {
-		await this.load({ ...options, headerRowsOptions: { colspan: { enabled: true } } });
+		await this.load({ ...options, headerRowOptions: { colspan: { enabled: true } } });
 		return this._rows;
 	}
 
@@ -127,7 +127,7 @@ export class Table {
 		const headers = await this.getMainHeaderRow({
 			timeout: options?.timeout,
 			duplicateSuffix: true,
-			headerRowsOptions: {
+			headerRowOptions: {
 				colspan: { enabled: true, suffix: true },
 				duplicateSuffix: true,
 				emptyCellReplacement: true,
@@ -177,7 +177,7 @@ export class Table {
 		});
 	}
 
-	private async load(options?: { timeout?: number; headerRowsOptions?: HeaderRowsOptions }): Promise<void> {
+	private async load(options?: { timeout?: number; headerRowOptions?: HeaderRowOptions }): Promise<void> {
 		await expect(async () => {
 			await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header);
 			await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body);
@@ -186,7 +186,7 @@ export class Table {
 		this._headers = await TableHeader.getHeaderRows(
 			this._headerRowLocator,
 			this._headerColumnSelector,
-			options?.headerRowsOptions
+			options?.headerRowOptions
 		);
 		this._rows = await TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector);
 	}
