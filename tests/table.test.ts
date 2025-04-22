@@ -160,50 +160,76 @@ test.describe("Table Tests", () => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"));
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No content found for header cells");
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
 		});
 
 		test("empty body rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"));
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No content found for body cells");
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
 
 		test("No header rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"), { header: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No header cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
 		});
 
 		test("No header row cells should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new Table(page.locator("table"), { header: { columnSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No header cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
 		});
 
 		test("No body rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"), { row: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No body cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
 
 		test("No body row cells should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new Table(page.locator("table"), { row: { columnSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError(
-				"No body cells found. Please check locators"
-			);
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
 		});
+	});
+
+	test("div table", async ({ page }) => {
+		await page.goto(Route.DivTable);
+
+		const table = new Table(page.locator(".divTable"), {
+			header: {
+				rowSelector: ".divTableHeading > .divTableRow",
+				columnSelector: ".divTableHead",
+			},
+			row: {
+				rowSelector: ".divTableBody > .divTableRow",
+				columnSelector: ".divTableCell",
+			},
+		});
+		const json = await table.getJson();
+
+		expect(json).toEqual([
+			{
+				"First name": "Ronald",
+				"Last name": "Veth",
+				Specialty: "Test Automation",
+			},
+			{
+				"First name": "Logan",
+				"Last name": "Deacon",
+				Specialty: "Make special together",
+			},
+			{
+				"First name": "John",
+				"Last name": "Doe",
+				Specialty: "Anonymity",
+			},
+		]);
 	});
 });

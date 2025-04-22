@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { HeaderRow } from "src/row";
 import { TableHeader } from "src/table-header";
-import { Route, DemoHtmlPathProvider } from "./demo-html/routes";
+import { Route } from "./demo-html/routes";
 
 test.describe("Header Row Tests", () => {
 	test.describe("Options colspan", async () => {
@@ -12,14 +12,7 @@ test.describe("Header Row Tests", () => {
 			{
 				options: { colspan: { enabled: true, suffix: true } },
 				expectedHeaders: [
-					[
-						"Number",
-						"Name",
-						"Name__Colspan__1",
-						"Color Combination",
-						"Color Combination__Colspan__1",
-						"Color Combination__Colspan__2",
-					],
+					["Number", "Name", "Name__C1", "Color Combination", "Color Combination__C1", "Color Combination__C2"],
 				],
 			},
 			{
@@ -79,8 +72,8 @@ test.describe("Header Row Tests", () => {
 			{
 				options: { duplicateSuffix: true },
 				expectedHeaders: [
-					["Average", "Average__Duplicate__1", "Average__Duplicate__2", "Average__Duplicate__3", "Age"],
-					["Height", "Weight", "Height__Duplicate__1", "Weight__Duplicate__1", "Age"],
+					["Average", "Average__D1", "Average__D2", "Average__D3", "Age"],
+					["Height", "Weight", "Height__D1", "Weight__D1", "Age"],
 				],
 			},
 			{
