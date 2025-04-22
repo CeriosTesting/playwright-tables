@@ -1,16 +1,12 @@
 import { Locator } from "@playwright/test";
 import { BodyRow, Cell } from "./row";
-
-export enum CellContentType {
-	TextContent = "textContent",
-	InnerText = "innerText",
-}
+import { CellContentType } from "./cell-content-type";
 
 export abstract class TableBody {
 	static async getRows(
 		rowLocator: Locator,
 		columnsSelector: string,
-		options?: {
+		bodyRowsOptions?: {
 			cellContentType?: CellContentType;
 		}
 	): Promise<BodyRow[]> {
@@ -20,7 +16,13 @@ export abstract class TableBody {
 
 		for (let rowIndex = 0; rowIndex < rowsCount; rowIndex++) {
 			const row = rowLocator.nth(rowIndex);
-			const columns = await this.extractColumns(row, columnsSelector, rowIndex, spannedCells, options?.cellContentType);
+			const columns = await this.extractColumns(
+				row,
+				columnsSelector,
+				rowIndex,
+				spannedCells,
+				bodyRowsOptions?.cellContentType
+			);
 			rows.push(columns as BodyRow);
 		}
 

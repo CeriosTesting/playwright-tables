@@ -1,3 +1,4 @@
 export * from "./table";
 export * from "./row";
-export { HeaderRowsOptions } from "./table-header";
+export { HeaderRowOptions } from "./table-header";
+export { CellContentType } from "./cell-content-type";

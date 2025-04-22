@@ -1,7 +1,9 @@
 import { Locator } from "@playwright/test";
 import { HeaderRow } from "./row";
+import { CellContentType } from "./cell-content-type";
 
-export type HeaderRowsOptions = {
+export type HeaderRowOptions = {
+	cellContentType?: CellContentType;
 	emptyCellReplacement?: boolean;
 	duplicateSuffix?: boolean;
 	colspan?: { enabled?: boolean; suffix?: boolean };
@@ -11,9 +13,9 @@ export abstract class TableHeader {
 	static async getHeaderRows(
 		headerRowLocator: Locator,
 		columnsSelector: string,
-		headerRowsOptions?: HeaderRowsOptions
+		headerRowOptions?: HeaderRowOptions
 	): Promise<HeaderRow[]> {
-		const options = this.getDefaultOptions(headerRowsOptions);
+		const options = this.getDefaultOptions(headerRowOptions);
 		const rows = await headerRowLocator.all();
 		const headerRows: HeaderRow[] = [];
 		const rowSpans: Map<number, string> = new Map();
@@ -29,8 +31,9 @@ export abstract class TableHeader {
 		return headerRows;
 	}
 
-	private static getDefaultOptions(options?: HeaderRowsOptions): Required<HeaderRowsOptions> {
+	private static getDefaultOptions(options?: HeaderRowOptions): Required<HeaderRowOptions> {
 		return {
+			cellContentType: options?.cellContentType ?? CellContentType.InnerText,
 			emptyCellReplacement: options?.emptyCellReplacement ?? true,
 			duplicateSuffix: options?.duplicateSuffix ?? false,
 			colspan: {
@@ -44,7 +47,7 @@ export abstract class TableHeader {
 		row: Locator,
 		columnsSelector: string,
 		rowSpans: Map<number, string>,
-		options: Required<HeaderRowsOptions>
+		options: Required<HeaderRowOptions>
 	): Promise<HeaderRow> {
 		const headerRow: HeaderRow = [];
 		const cells = await row.locator(columnsSelector).all();
@@ -63,7 +66,7 @@ export abstract class TableHeader {
 		headerRow: HeaderRow,
 		rowSpans: Map<number, string>,
 		columnIndex: number,
-		options: Required<HeaderRowsOptions>
+		options: Required<HeaderRowOptions>
 	): Promise<number> {
 		while (rowSpans.has(columnIndex)) {
 			headerRow.push(rowSpans.get(columnIndex)!);
@@ -71,7 +74,9 @@ export abstract class TableHeader {
 			columnIndex++;
 		}
 
-		let text = (await cell.textContent())?.trim() || "";
+		const content =
+			options.cellContentType === CellContentType.InnerText ? await cell.innerText() : await cell.textContent();
+		let text = content?.trim() || "";
 		if (!text && options.emptyCellReplacement) {
 			text = "{{Empty}}";
 		}
@@ -114,7 +119,7 @@ export abstract class TableHeader {
 		}
 	}
 
-	private static applyColspanOptions(headerRows: HeaderRow[], options: Required<HeaderRowsOptions>): void {
+	private static applyColspanOptions(headerRows: HeaderRow[], options: Required<HeaderRowOptions>): void {
 		if (!options.colspan.enabled) {
 			this.removeColspanCells(headerRows);
 		}
@@ -145,7 +150,7 @@ export abstract class TableHeader {
 		}
 	}
 
-	private static applyDuplicateSuffix(headerRows: HeaderRow[], options: Required<HeaderRowsOptions>): void {
+	private static applyDuplicateSuffix(headerRows: HeaderRow[], options: Required<HeaderRowOptions>): void {
 		if (!options.duplicateSuffix) return;
 
 		for (const headerRow of headerRows) {

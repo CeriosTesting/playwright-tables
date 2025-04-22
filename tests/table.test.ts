@@ -17,7 +17,7 @@ test.describe("Table Tests", () => {
 
 		const table = new Table(page.locator("table"));
 
-		const headers = await table.getHeaderRows({ headerRowsOptions: { colspan: { enabled: false } } });
+		const headers = await table.getHeaderRows({ headerRowOptions: { colspan: { enabled: false } } });
 		expect(headers).toEqual([
 			["Average", "Average", "Age"],
 			["Height", "Weight", "Height", "Weight", "Age"],
