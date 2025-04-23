@@ -1,6 +1,7 @@
 import { Locator } from "@playwright/test";
 import { HeaderRow } from "./row";
 import { CellContentType } from "./cell-content-type";
+import { TableUtils } from "./table-utils";
 
 export type HeaderRowOptions = {
 	cellContentType?: CellContentType;
@@ -10,7 +11,7 @@ export type HeaderRowOptions = {
 };
 
 export abstract class TableHeader {
-	static async getHeaderRows(
+	static async getRows(
 		headerRowLocator: Locator,
 		columnsSelector: string,
 		headerRowOptions?: HeaderRowOptions
@@ -34,10 +35,10 @@ export abstract class TableHeader {
 	private static getDefaultOptions(options?: HeaderRowOptions): Required<HeaderRowOptions> {
 		return {
 			cellContentType: options?.cellContentType ?? CellContentType.InnerText,
-			emptyCellReplacement: options?.emptyCellReplacement ?? true,
+			emptyCellReplacement: options?.emptyCellReplacement ?? false,
 			duplicateSuffix: options?.duplicateSuffix ?? false,
 			colspan: {
-				enabled: options?.colspan?.enabled ?? true,
+				enabled: options?.colspan?.enabled ?? false,
 				suffix: options?.colspan?.suffix ?? false,
 			},
 		};
@@ -74,15 +75,12 @@ export abstract class TableHeader {
 			columnIndex++;
 		}
 
-		const content =
-			options.cellContentType === CellContentType.InnerText ? await cell.innerText() : await cell.textContent();
-		let text = content?.trim() || "";
+		let text = await TableUtils.getCellContent(cell, options.cellContentType);
 		if (!text && options.emptyCellReplacement) {
 			text = "{{Empty}}";
 		}
 
-		const colspan = parseInt((await cell.getAttribute("colspan")) || "1", 10);
-		const rowspan = parseInt((await cell.getAttribute("rowspan")) || "1", 10);
+		const { colspan, rowspan } = await TableUtils.parseSpanAttributes(cell);
 
 		headerRow.push(text);
 		this.handleColspan(headerRow, text, colspan);

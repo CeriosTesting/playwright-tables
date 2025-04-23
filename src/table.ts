@@ -183,7 +183,7 @@ export class Table {
 			await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body);
 		}).toPass({ timeout: options?.timeout });
 
-		this._headers = await TableHeader.getHeaderRows(
+		this._headers = await TableHeader.getRows(
 			this._headerRowLocator,
 			this._headerColumnSelector,
 			options?.headerRowOptions
