@@ -34,10 +34,10 @@ export abstract class TableHeader {
 	private static getDefaultOptions(options?: HeaderRowOptions): Required<HeaderRowOptions> {
 		return {
 			cellContentType: options?.cellContentType ?? CellContentType.InnerText,
-			emptyCellReplacement: options?.emptyCellReplacement ?? true,
+			emptyCellReplacement: options?.emptyCellReplacement ?? false,
 			duplicateSuffix: options?.duplicateSuffix ?? false,
 			colspan: {
-				enabled: options?.colspan?.enabled ?? true,
+				enabled: options?.colspan?.enabled ?? false,
 				suffix: options?.colspan?.suffix ?? false,
 			},
 		};

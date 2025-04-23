@@ -88,7 +88,10 @@ test.describe("Header Row Tests", () => {
 			test(`Duplicate suffix = ${testCase.options.duplicateSuffix}`, async ({ page }) => {
 				await page.goto(Route.RowspanHeaderTable);
 
-				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", testCase.options);
+				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", {
+					...testCase.options,
+					colspan: { enabled: true },
+				});
 				expect(headers).toEqual(testCase.expectedHeaders);
 			});
 		}
