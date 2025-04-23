@@ -34,7 +34,7 @@ test.describe("Header Row Tests", () => {
 			}) => {
 				await page.goto(Route.ColspanHeaderTable);
 
-				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", testCase.options);
+				const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", testCase.options);
 				expect(headers).toEqual(testCase.expectedHeaders);
 			});
 		}
@@ -58,7 +58,7 @@ test.describe("Header Row Tests", () => {
 			test(`Empty cell replacement = ${testCase.options.emptyCellReplacement}`, async ({ page }) => {
 				await page.goto(Route.DuplicateEmptyHeadersTable);
 
-				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", testCase.options);
+				const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", testCase.options);
 				expect(headers).toEqual(testCase.expectedHeaders);
 			});
 		}
@@ -88,7 +88,7 @@ test.describe("Header Row Tests", () => {
 			test(`Duplicate suffix = ${testCase.options.duplicateSuffix}`, async ({ page }) => {
 				await page.goto(Route.RowspanHeaderTable);
 
-				const headers = await TableHeader.getHeaderRows(page.locator("table>thead>tr"), "th", {
+				const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", {
 					...testCase.options,
 					colspan: { enabled: true },
 				});

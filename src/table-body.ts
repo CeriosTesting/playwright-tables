@@ -1,6 +1,7 @@
 import { Locator } from "@playwright/test";
 import { BodyRow, Cell } from "./row";
 import { CellContentType } from "./cell-content-type";
+import { TableUtils } from "./table-utils";
 
 export abstract class TableBody {
 	static async getRows(
@@ -64,12 +65,10 @@ export abstract class TableBody {
 		spannedCells: Record<number, Cell[]>,
 		cellContentType: CellContentType = CellContentType.InnerText
 	): Promise<void> {
-		const content =
-			cellContentType === CellContentType.InnerText ? await column.innerText() : await column.textContent();
-		const castedContent = this.castContent(content?.trim() || "");
+		const content = await TableUtils.getCellContent(column, cellContentType);
+		const castedContent = TableUtils.castContent(content);
 
-		const rowspan = parseInt((await column.getAttribute("rowspan")) || "1", 10);
-		const colspan = parseInt((await column.getAttribute("colspan")) || "1", 10);
+		const { rowspan, colspan } = await TableUtils.parseSpanAttributes(column);
 
 		for (let span = 0; span < colspan; span++) {
 			columns[colIndex + span] = castedContent;
@@ -103,25 +102,5 @@ export abstract class TableBody {
 				}
 			});
 		}
-	}
-
-	private static castContent(value: string): Cell {
-		const lowerInput = value.trim().toLowerCase();
-		if (lowerInput === "true") return true;
-		if (lowerInput === "false") return false;
-
-		const num = Number(value);
-		const isNumber = !isNaN(num);
-		const isDate = !isNaN(Date.parse(value)) && /\d{4}-\d{2}-\d{2}/.test(value);
-
-		if (isDate) {
-			return value;
-		}
-
-		if (isNumber) {
-			return num;
-		}
-
-		return value;
 	}
 }
