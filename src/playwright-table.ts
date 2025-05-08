@@ -4,7 +4,7 @@ import { BodyRow, Cell, HeaderRow } from "./row";
 import { HeaderRowOptions, TableHeader } from "./table-header";
 import { RowKind, TableWait } from "./table-wait";
 
-export class Table {
+export class PlaywrightTable {
 	private _headers: HeaderRow[] = [];
 	private _rows: BodyRow[] = [];
 	private _bodyRowLocator: Locator;
