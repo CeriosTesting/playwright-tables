@@ -1,10 +1,4 @@
-<h1>
-🎭 Playwright Tables
-<picture>
-  <source srcset="cerios-logo-seasalt.svg" media="(prefers-color-scheme: dark)">
-  <img src="cerios-logo-spacecadet.svg" alt="cerios logo">
-</picture>
-</h1>
+# 🎭 Playwright Tables | By Cerios
 
 ## Introduction
 
