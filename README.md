@@ -34,7 +34,7 @@ First you need to install and get firmiliar with the amazing playwright testing 
 https://github.com/microsoft/playwright/blob/main/README.md
 
 ```
-npx i -D @cerios/playwright-tables
+npx i -D @cerios/playwright-table
 ```
 
 ## Usage
