@@ -1,8 +1,10 @@
 {
+	"name": "@cerios/playwright-table",
 	"version": "1.0.0",
-	"author": "Ronald Veth",
+	"author": "Ronald Veth - Cerios",
 	"description": "Easy Html Tables handler for Playwright",
-	"license": "ISC",
+	"homepage": "https://www.cerios.nl/",
+	"license": "MIT",
 	"keywords": [
 		"playwright",
 		"html",
@@ -14,9 +16,14 @@
 		"test": "playwright test",
 		"prepare": "husky",
 		"build": "tsup",
-		"serve": "serve tests/demo-html -p 3000"
+		"serve": "serve tests/demo-html -p 3000",
+		"check-exports": "attw --pack .",
+		"changeset": "npx changeset",
+		"local-release": "changeset version && changeset publish"
 	},
 	"devDependencies": {
+		"@arethetypeswrong/cli": "^0.18.0",
+		"@changesets/cli": "^2.29.3",
 		"@playwright/test": "^1.51.1",
 		"husky": "^9.1.7",
 		"lint-staged": "^15.5.0",
@@ -34,5 +41,13 @@
 	"types": "./dist/index.d.ts",
 	"files": [
 		"dist"
-	]
+	],
+	"type": "commonjs",
+	"exports": {
+		"./package.json": "./package.json",
+		".": {
+			"import": "./dist/index.mjs",
+			"default": "./dist/index.js"
+		}
+	}
 }
