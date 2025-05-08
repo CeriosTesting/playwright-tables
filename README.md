@@ -1,10 +1,4 @@
-<h1>
-🎭 Playwright Tables
-<picture>
-  <source srcset="cerios-logo-seasalt.svg" media="(prefers-color-scheme: dark)">
-  <img src="cerios-logo-spacecadet.svg" alt="cerios logo">
-</picture>
-</h1>
+# 🎭 Playwright Tables | By Cerios
 
 ## Introduction
 
@@ -40,7 +34,7 @@ First you need to install and get firmiliar with the amazing playwright testing 
 https://github.com/microsoft/playwright/blob/main/README.md
 
 ```
-npx i -D @cerios/playwright-tables
+npx i -D @cerios/playwright-table
 ```
 
 ## Usage
