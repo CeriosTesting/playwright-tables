@@ -1,6 +1,6 @@
 {
 	"name": "@cerios/playwright-table",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"author": "Ronald Veth - Cerios",
 	"description": "Easy Html Tables handler for Playwright",
 	"license": "MIT",
