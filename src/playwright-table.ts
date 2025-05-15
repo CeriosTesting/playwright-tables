@@ -4,6 +4,9 @@ import { BodyRow, Cell, HeaderRow } from "./row";
 import { HeaderRowOptions, TableHeader } from "./table-header";
 import { RowKind, TableWait } from "./table-wait";
 
+/**
+ * Represents a table in Playwright, providing methods to interact with its headers, rows, and cells.
+ */
 export class PlaywrightTable {
 	private _headers: HeaderRow[] = [];
 	private _rows: BodyRow[] = [];
@@ -12,6 +15,11 @@ export class PlaywrightTable {
 	private _headerRowLocator: Locator;
 	private _headerColumnSelector: string;
 
+	/**
+	 * Constructs a new instance of the PlaywrightTable class.
+	 * @param _tableLocator - The Playwright Locator for the table element.
+	 * @param _options - Optional configuration for header and row selectors.
+	 */
 	constructor(
 		private readonly _tableLocator: Locator,
 		private readonly _options?: {
@@ -32,6 +40,11 @@ export class PlaywrightTable {
 		this._bodyRowColumnSelector = this._options?.row?.columnSelector ?? "td";
 	}
 
+	/**
+	 * Retrieves all header rows of the table.
+	 * @param options - Optional parameters for timeout and header row options.
+	 * @returns A promise that resolves to an array of header rows.
+	 */
 	async getHeaderRows(options?: {
 		timeout?: number;
 		duplicateSuffix?: boolean;
@@ -41,6 +54,11 @@ export class PlaywrightTable {
 		return this._headers;
 	}
 
+	/**
+	 * Retrieves the main header row of the table.
+	 * @param options - Optional parameters for timeout and header row options.
+	 * @returns A promise that resolves to the main header row.
+	 */
 	async getMainHeaderRow(options?: {
 		timeout?: number;
 		duplicateSuffix?: boolean;
@@ -53,15 +71,34 @@ export class PlaywrightTable {
 		return headers;
 	}
 
+	/**
+	 * Retrieves all body rows of the table.
+	 * @param options - Optional parameters for timeout.
+	 * @returns A promise that resolves to an array of body rows.
+	 */
 	async getBodyRows(options?: { timeout?: number }): Promise<BodyRow[]> {
 		await this.load({ ...options, headerRowOptions: { colspan: { enabled: true } } });
 		return this._rows;
 	}
 
+	/**
+	 * Retrieves a specific cell locator in the body of the table.
+	 * @param rowNumber - The row number (0-based index).
+	 * @param headerPosition - The header position (0-based index).
+	 * @returns A Playwright Locator for the specified cell.
+	 */
 	getBodyCellLocator(rowNumber: number, headerPosition: number): Locator {
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
+	/**
+	 * Retrieves a cell locator in the body of the table based on row conditions and a target header.
+	 * @param conditions - A record of header names and their expected values.
+	 * @param targetHeader - The target header name for the desired cell.
+	 * @param options - Optional parameters for timeout and other configurations.
+	 * @returns A promise that resolves to a Playwright Locator for the matching cell.
+	 * @throws An error if no matching row is found or if a header is not found.
+	 */
 	async getBodyCellLocatorByRowConditions(
 		conditions: Record<string, string>,
 		targetHeader: string,
@@ -98,6 +135,13 @@ export class PlaywrightTable {
 		throw new Error(`No row found matching conditions: ${JSON.stringify(conditions)}`);
 	}
 
+	/**
+	 * Retrieves all cell locators in the body of the table for a specific header name.
+	 * @param header - The header name.
+	 * @param options - Optional parameters for timeout.
+	 * @returns A promise that resolves to an array of Playwright Locators for the cells.
+	 * @throws An error if the header is not found.
+	 */
 	async getAllBodyCellLocatorsByHeaderName(header: string, options?: { timeout?: number }): Promise<Locator[]> {
 		await this.load(options);
 		const headers = await this.getMainHeaderRow();
@@ -113,6 +157,11 @@ export class PlaywrightTable {
 		return locators;
 	}
 
+	/**
+	 * Retrieves all cell locators in the body of the table for a specific header index.
+	 * @param headerIndex - The header index (0-based).
+	 * @returns A promise that resolves to an array of Playwright Locators for the cells.
+	 */
 	async getAllBodyCellLocatorsByHeaderIndex(headerIndex: number): Promise<Locator[]> {
 		await this.load();
 		const locators: Locator[] = [];
@@ -123,6 +172,11 @@ export class PlaywrightTable {
 		return locators;
 	}
 
+	/**
+	 * Converts the table data into a JSON object.
+	 * @param options - Optional parameters for timeout.
+	 * @returns A promise that resolves to a JSON representation of the table.
+	 */
 	async getJson(options?: { timeout?: number }): Promise<any> {
 		const headers = await this.getMainHeaderRow({
 			timeout: options?.timeout,
@@ -142,6 +196,11 @@ export class PlaywrightTable {
 		});
 	}
 
+	/**
+	 * Waits for the header rows to be loaded.
+	 * @param options - Optional parameters for timeout and row conditions.
+	 * @returns A promise that resolves when the header rows are loaded.
+	 */
 	async waitForHeaderRows(options?: {
 		timeout?: number;
 		row?: {
@@ -160,6 +219,11 @@ export class PlaywrightTable {
 		});
 	}
 
+	/**
+	 * Waits for the body rows to be loaded.
+	 * @param options - Optional parameters for timeout and row conditions.
+	 * @returns A promise that resolves when the body rows are loaded.
+	 */
 	async waitForBodyRows(options?: {
 		timeout?: number;
 		row?: {
@@ -177,6 +241,11 @@ export class PlaywrightTable {
 		});
 	}
 
+	/**
+	 * Loads the table data, including headers and rows.
+	 * @param options - Optional parameters for timeout and header row options.
+	 * @returns A promise that resolves when the table data is loaded.
+	 */
 	private async load(options?: { timeout?: number; headerRowOptions?: HeaderRowOptions }): Promise<void> {
 		await expect(async () => {
 			await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header);

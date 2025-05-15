@@ -1,9 +1,8 @@
 {
 	"name": "@cerios/playwright-table",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"author": "Ronald Veth - Cerios",
 	"description": "Easy Html Tables handler for Playwright",
-	"homepage": "https://www.cerios.nl/",
 	"license": "MIT",
 	"keywords": [
 		"playwright",
@@ -11,6 +10,14 @@
 		"table",
 		"testing"
 	],
+	"bugs": {
+		"url": "https://github.com/CeriosTesting/playwright-tables/issues"
+	},
+	"homepage": "https://github.com/CeriosTesting/playwright-tables#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/CeriosTesting/playwright-tables.git"
+	},
 	"scripts": {
 		"format": "prettier --write . --cache --ignore-path=.prettierignore",
 		"test": "playwright test",
@@ -19,14 +26,16 @@
 		"serve": "serve tests/demo-html -p 3000",
 		"check-exports": "attw --pack .",
 		"changeset": "npx changeset",
-		"local-release": "changeset version && changeset publish"
+		"local-release": "changeset version && changeset publish",
+		"compile": "tsc --noEmit",
+		"update-all-packages": "npx npm-check-updates -u && npm i"
 	},
 	"devDependencies": {
-		"@arethetypeswrong/cli": "^0.18.0",
-		"@changesets/cli": "^2.29.3",
-		"@playwright/test": "^1.51.1",
+		"@arethetypeswrong/cli": "^0.18.1",
+		"@changesets/cli": "^2.29.4",
+		"@playwright/test": "^1.52.0",
 		"husky": "^9.1.7",
-		"lint-staged": "^15.5.0",
+		"lint-staged": "^16.0.0",
 		"prettier": "^3.5.3",
 		"serve": "^14.2.4",
 		"ts-node": "^10.9.2",
