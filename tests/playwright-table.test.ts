@@ -66,13 +66,13 @@ test.describe("Table Tests", () => {
 			expect(json).toEqual([
 				{
 					Month: "January",
-					Savings: 100,
-					"Savings for holiday!": 50,
+					Savings: "100",
+					"Savings for holiday!": "50",
 				},
 				{
 					Month: "February",
-					Savings: 80,
-					"Savings for holiday!": 50,
+					Savings: "80",
+					"Savings for holiday!": "50",
 				},
 			]);
 		});

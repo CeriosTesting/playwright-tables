@@ -1,5 +1,11 @@
 # @cerios/playwright-table
 
+## 1.1.0
+
+### Minor Changes
+
+- 3459ebc: removed casting
+
 ## 1.0.4
 
 ### Patch Changes

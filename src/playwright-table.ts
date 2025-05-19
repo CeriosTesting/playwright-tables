@@ -121,7 +121,8 @@ export class PlaywrightTable {
 				if (headerIndex === -1) {
 					throw new Error(`Header "${header}" not found.`);
 				}
-				if (row[headerIndex] !== value) {
+				const cellValue = row[headerIndex] ?? "";
+				if (cellValue !== value) {
 					matches = false;
 					break;
 				}
