@@ -6,6 +6,12 @@
 
 - 3459ebc: removed casting
 
+## 1.0.4
+
+### Patch Changes
+
+- a2c399d: Updated typescript documentation and readme
+
 ## 1.0.2
 
 ### Patch Changes
