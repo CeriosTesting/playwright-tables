@@ -66,16 +66,14 @@ export abstract class TableBody {
 		cellContentType: CellContentType = CellContentType.InnerText
 	): Promise<void> {
 		const content = await TableUtils.getCellContent(column, cellContentType);
-		const castedContent = TableUtils.castContent(content);
-
 		const { rowspan, colspan } = await TableUtils.parseSpanAttributes(column);
 
 		for (let span = 0; span < colspan; span++) {
-			columns[colIndex + span] = castedContent;
+			columns[colIndex + span] = content;
 		}
 
 		if (rowspan > 1) {
-			this.storeSpannedCells(rowIndex, colIndex, rowspan, castedContent, spannedCells);
+			this.storeSpannedCells(rowIndex, colIndex, rowspan, content, spannedCells);
 		}
 	}
 
