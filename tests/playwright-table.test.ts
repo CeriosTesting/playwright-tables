@@ -2,9 +2,10 @@ import test, { expect } from "@playwright/test";
 import { PlaywrightTable } from "src/playwright-table";
 import { Route } from "./demo-html/routes";
 import { TableBody } from "src/table-body";
+import { CellContentType } from "src";
 
 test.describe("Table Tests", () => {
-	test("getActiveHeaders returns headers used for table", async ({ page }) => {
+	test("getMainHeaderRow returns headers used for table", async ({ page }) => {
 		await page.goto(Route.SimpleTable);
 
 		const table = new PlaywrightTable(page.locator("table"));
@@ -24,16 +25,31 @@ test.describe("Table Tests", () => {
 		]);
 	});
 
-	test("getBodyRows returns body rows", async ({ page }) => {
-		await page.goto(Route.SimpleTable);
+	test.describe("getBodyRows", async () => {
+		test("getBodyRows returns body rows", async ({ page }) => {
+			await page.goto(Route.SimpleTable);
 
-		const table = new PlaywrightTable(page.locator("table"));
+			const table = new PlaywrightTable(page.locator("table"));
 
-		const rows = await table.getBodyRows();
-		expect(rows).toEqual([
-			["Ronald", "Veth", "22-12-1987"],
-			["Logan", "Deacon", "01-10-2002"],
-		]);
+			const rows = await table.getBodyRows();
+			expect(rows).toEqual([
+				["Ronald", "Veth", "22-12-1987"],
+				["Logan", "Deacon", "01-10-2002"],
+			]);
+		});
+
+		test("should only return strings", async ({ page }) => {
+			await page.goto(Route.PrimitivesTable);
+
+			const table = new PlaywrightTable(page.locator("table"));
+
+			const rows = await table.getBodyRows();
+			for (const row of rows) {
+				for (const cell of row) {
+					expect(typeof cell).toBe("string");
+				}
+			}
+		});
 	});
 
 	test.describe("getJson", async () => {
@@ -75,6 +91,56 @@ test.describe("Table Tests", () => {
 					"Savings for holiday!": "50",
 				},
 			]);
+		});
+
+		test.describe("options.bodyRowOptions.cellContentType", async () => {
+			for (const testCase of [
+				{
+					description: "CellContentType.TextContent return the raw text content of the cell",
+					cellContentType: CellContentType.TextContent,
+					expected: [
+						{
+							id: "1",
+							withoutStyling: "transform uppercase",
+							withStyling: "transform uppercase",
+						},
+						{
+							id: "2",
+							withoutStyling: "TRANSFORM LOWERCASE",
+							withStyling: "TRANSFORM LOWERCASE",
+						},
+					],
+				},
+				{
+					description: "CellContentType.InnerText return the rendered text content of the cell",
+					cellContentType: CellContentType.InnerText,
+					expected: [
+						{
+							id: "1",
+							withoutStyling: "transform uppercase",
+							withStyling: "TRANSFORM UPPERCASE",
+						},
+						{
+							id: "2",
+							withoutStyling: "TRANSFORM LOWERCASE",
+							withStyling: "transform lowercase",
+						},
+					],
+				},
+			]) {
+				test(testCase.description, async ({ page }) => {
+					await page.goto(Route.InnerTextTable);
+
+					const table = new PlaywrightTable(page.locator("table"));
+					const json = await table.getJson({
+						bodyRowOptions: {
+							cellContentType: testCase.cellContentType,
+						},
+					});
+
+					expect(json).toEqual(testCase.expected);
+				});
+			}
 		});
 	});
 

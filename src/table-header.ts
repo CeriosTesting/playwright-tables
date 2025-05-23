@@ -3,6 +3,16 @@ import { HeaderRow } from "./row";
 import { CellContentType } from "./cell-content-type";
 import { TableUtils } from "./table-utils";
 
+/**
+ * Options for configuring a table header row.
+ *
+ * @property cellContentType - The type of content allowed in the header cell.
+ * @property emptyCellReplacement - If true, replaces empty header cells with a default value.
+ * @property duplicateSuffix - If true, appends a suffix to duplicate header values.
+ * @property colspan - Configuration for column spanning in the header row.
+ * @property colspan.enabled - If true, enables column spanning.
+ * @property colspan.suffix - If true, appends a suffix to spanned columns.
+ */
 export type HeaderRowOptions = {
 	cellContentType?: CellContentType;
 	emptyCellReplacement?: boolean;
