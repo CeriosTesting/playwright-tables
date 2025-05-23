@@ -10,4 +10,6 @@ export enum Route {
 	RowspanHeaderTable = "/rowspan-header-table",
 	RowspanRowTable = "/rowspan-row-table",
 	SimpleTable = "/simple-table",
+	PrimitivesTable = "/primitives-table",
+	InnerTextTable = "/inner-text-table",
 }
