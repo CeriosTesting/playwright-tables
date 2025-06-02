@@ -26,7 +26,7 @@
 		"serve": "serve tests/demo-html -p 3000",
 		"check-exports": "attw --pack .",
 		"changeset": "npx changeset",
-		"changeset:version": "changeset version",
+		"changeset:version": "changeset version && npm i",
 		"changeset:publish": "changeset publish",
 		"compile": "tsc --noEmit",
 		"update-all-packages": "npx npm-check-updates -u && npm i"
