@@ -1,5 +1,11 @@
 # @cerios/playwright-table
 
+## 1.1.3
+
+### Patch Changes
+
+- ad31dea: exporting dist folder fix
+
 ## 1.1.2
 
 ### Patch Changes
