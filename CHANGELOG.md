@@ -1,5 +1,17 @@
 # @cerios/playwright-table
 
+## 1.1.2
+
+### Patch Changes
+
+- 245c893: Lower @playwright/test peer dependency
+
+## 1.1.1
+
+### Patch Changes
+
+- ae9acb4: Extra typescript documentation, extra load options for all methods and return values always of type string
+
 ## 1.1.0
 
 ### Minor Changes
