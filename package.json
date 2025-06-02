@@ -1,6 +1,6 @@
 {
 	"name": "@cerios/playwright-table",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"author": "Ronald Veth - Cerios",
 	"description": "Easy Html Tables handler for Playwright",
 	"license": "MIT",
@@ -26,7 +26,8 @@
 		"serve": "serve tests/demo-html -p 3000",
 		"check-exports": "attw --pack .",
 		"changeset": "npx changeset",
-		"local-release": "changeset version && changeset publish",
+		"changeset:version": "changeset version",
+		"changeset:publish": "changeset publish",
 		"compile": "tsc --noEmit",
 		"update-all-packages": "npx npm-check-updates -u && npm i"
 	},
@@ -35,15 +36,15 @@
 		"@changesets/cli": "^2.29.4",
 		"@playwright/test": "^1.52.0",
 		"husky": "^9.1.7",
-		"lint-staged": "^16.0.0",
+		"lint-staged": "^16.1.0",
 		"prettier": "^3.5.3",
 		"serve": "^14.2.4",
 		"ts-node": "^10.9.2",
-		"tsup": "^8.4.0",
+		"tsup": "^8.5.0",
 		"typescript": "^5.8.3"
 	},
 	"peerDependencies": {
-		"@playwright/test": "^1.51.1"
+		"@playwright/test": "^1.40.0"
 	},
 	"main": "./dist/index.js",
 	"module": "./dist/index.mjs",
