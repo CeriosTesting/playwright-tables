@@ -61,9 +61,8 @@ for (const rowTestRun of rowTestRuns) {
 				TableWait.waitForRows(page.locator(rowTestRun.rowSelector), rowTestRun.cellSelector, rowTestRun.rowKind, {
 					row: { cell: { totalCount: 10 } },
 				})
-			).rejects.toThrowError(`Expected amount of 10 ${rowTestRun.rowKind} cells for row not found`);
+			).rejects.toThrowError(`No ${rowTestRun.rowKind} rows found with exactly 10 cells`);
 		});
-
 		test("should NOT throw error when amount of cells is met", async ({ page }) => {
 			await page.goto(Route.DynamicLoadTable);
 
@@ -81,9 +80,8 @@ for (const rowTestRun of rowTestRuns) {
 				TableWait.waitForRows(page.locator(rowTestRun.rowSelector), rowTestRun.cellSelector, rowTestRun.rowKind, {
 					row: { cell: { contentCount: 10 } },
 				})
-			).rejects.toThrowError(`Expected amount of 10 ${rowTestRun.rowKind} cells with content for row not found`);
+			).rejects.toThrowError(`No ${rowTestRun.rowKind} rows found with exactly 10 cells containing content`);
 		});
-
 		test("should NOT throw error when amount of cells with content is met", async ({ page }) => {
 			await page.goto(Route.DynamicLoadTable);
 

@@ -5,7 +5,34 @@ export enum RowKind {
 	Body = "body",
 }
 
+/**
+ * Utility class for waiting and validating table row conditions.
+ * Provides methods to ensure table rows and cells meet expected criteria before proceeding.
+ */
 export abstract class TableWait {
+	/**
+	 * Waits for table rows to meet specified conditions regarding row count, cell count, and cell content.
+	 * This method validates table structure and content before allowing further operations.
+	 *
+	 * @param rowLocator - The Playwright locator for the table rows.
+	 * @param cellSelector - CSS selector for locating cells within rows (e.g., "td" or "th").
+	 * @param rowKind - The type of row being validated (Header or Body), used in error messages.
+	 * @param options - Optional validation criteria for rows and cells.
+	 * @param options.row.amount - Expected exact number of rows. If not specified, validates at least one row exists.
+	 * @param options.row.cell.totalCount - Expected number of cells per row (regardless of content).
+	 * @param options.row.cell.contentCount - Expected number of cells with non-empty content per row.
+	 *
+	 * @throws Error if validation fails - no rows found, row count mismatch, insufficient cells, or insufficient content.
+	 *
+	 * @example
+	 * // Wait for at least 3 body rows, each with 5 cells containing content
+	 * await TableWait.waitForRows(
+	 *   page.locator('tbody tr'),
+	 *   'td',
+	 *   RowKind.Body,
+	 *   { row: { amount: 3, cell: { totalCount: 5, contentCount: 5 } } }
+	 * );
+	 */
 	static async waitForRows(
 		rowLocator: Locator,
 		cellSelector: string,
@@ -20,84 +47,177 @@ export abstract class TableWait {
 			};
 		}
 	): Promise<void> {
-		const validateCellsWithContent = async (): Promise<void> => {
-			const cells = await rowLocator.locator(cellSelector).all();
-			const cellsWithContent = (
-				await Promise.all(
-					cells.map(async cell => {
-						const content = await cell.textContent();
-						return content !== null && content.trim() !== "" ? cell : null;
-					})
-				)
-			).filter(cell => cell !== null);
-			expect(cellsWithContent.length, `No ${rowKind} cells with content found`).toBeGreaterThan(0);
-		};
-
-		const validateRowAmount = (rows: Locator[], expectedAmount: number): void => {
-			expect(rows.length, `Expected ${expectedAmount} ${rowKind} rows, but found ${rows.length}`).toBe(expectedAmount);
-		};
-
-		const validateCellCount = async (rows: Locator[], expectedCount: number): Promise<void> => {
-			const rowsWithMatchingCells = (
-				await Promise.all(
-					rows.map(async row => {
-						const cellCount = await row.locator(cellSelector).count();
-						return cellCount === expectedCount ? row : null;
-					})
-				)
-			).filter(row => row !== null);
-			expect(
-				rowsWithMatchingCells.length,
-				`Expected amount of ${expectedCount} ${rowKind} cells for row not found`
-			).toBeGreaterThan(0);
-		};
-
-		const validateCellContentCount = async (rows: Locator[], expectedContentCount: number): Promise<void> => {
-			const rowsWithMatchingContent = (
-				await Promise.all(
-					rows.map(async row => {
-						const cells = await row.locator(cellSelector).all();
-						const cellsWithContent = (
-							await Promise.all(
-								cells.map(async cell => {
-									const content = await cell.textContent();
-									return content !== null && content.trim() !== "" ? cell : null;
-								})
-							)
-						).filter(cell => cell !== null);
-						return cellsWithContent.length === expectedContentCount ? row : null;
-					})
-				)
-			).filter(row => row !== null);
-			expect(
-				rowsWithMatchingContent.length,
-				`Expected amount of ${expectedContentCount} ${rowKind} cells with content for row not found`
-			).toBeGreaterThan(0);
-		};
+		this.validateInputs(cellSelector, options);
 
 		const rows = await rowLocator.all();
 
-		if (options?.row) {
-			if (options.row.amount) {
-				validateRowAmount(rows, options.row.amount);
-			} else {
-				expect(rows.length, `No ${rowKind} rows found`).toBeGreaterThan(0);
+		const expectedRowCount = options?.row?.amount;
+		if (expectedRowCount) {
+			this.validateExactRowCount(rows, expectedRowCount, rowKind);
+		} else {
+			this.validateHasRows(rows, rowKind);
+		}
+
+		const cellOptions = options?.row?.cell;
+		if (cellOptions) {
+			const validations: Promise<void>[] = [];
+
+			if (cellOptions.totalCount) {
+				validations.push(this.validateCellCount(rows, cellSelector, cellOptions.totalCount, rowKind));
 			}
 
-			if (options.row.cell) {
-				if (options.row.cell.totalCount) {
-					await validateCellCount(rows, options.row.cell.totalCount);
-				}
-				if (options.row.cell.contentCount) {
-					await validateCellContentCount(rows, options.row.cell.contentCount);
-				} else {
-					await validateCellsWithContent();
-				}
+			if (cellOptions.contentCount) {
+				validations.push(this.validateCellContentCount(rows, cellSelector, cellOptions.contentCount, rowKind));
 			} else {
-				await validateCellsWithContent();
+				validations.push(this.validateHasCellsWithContent(rowLocator, cellSelector, rowKind));
 			}
+
+			await Promise.all(validations);
 		} else {
-			await validateCellsWithContent();
+			await this.validateHasCellsWithContent(rowLocator, cellSelector, rowKind);
 		}
+	}
+
+	/**
+	 * Validates input parameters before processing.
+	 */
+	private static validateInputs(
+		cellSelector: string,
+		options?: {
+			row?: {
+				amount?: number;
+				cell?: {
+					totalCount?: number;
+					contentCount?: number;
+				};
+			};
+		}
+	): void {
+		if (!cellSelector || cellSelector.trim() === "") {
+			throw new Error("cellSelector cannot be empty");
+		}
+
+		this.validatePositiveInteger(options?.row?.amount, "row.amount");
+		this.validatePositiveInteger(options?.row?.cell?.totalCount, "row.cell.totalCount");
+		this.validatePositiveInteger(options?.row?.cell?.contentCount, "row.cell.contentCount");
+	}
+
+	/**
+	 * Validates a value is a positive integer if defined.
+	 */
+	private static validatePositiveInteger(value: number | undefined, paramName: string): void {
+		if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+			throw new Error(`${paramName} must be a positive integer, got: ${value}`);
+		}
+	}
+
+	/**
+	 * Checks if a cell has non-empty content.
+	 */
+	private static async cellHasContent(cell: Locator): Promise<boolean> {
+		const content = await cell.textContent();
+		return content !== null && content.trim() !== "";
+	}
+
+	/**
+	 * Filters cells to only those with content.
+	 */
+	private static async getCellsWithContent(cells: Locator[]): Promise<Locator[]> {
+		const results = await Promise.all(cells.map(async cell => ((await this.cellHasContent(cell)) ? cell : null)));
+		return results.filter((cell): cell is Locator => cell !== null);
+	}
+
+	/**
+	 * Validates that at least one row exists.
+	 */
+	private static validateHasRows(rows: Locator[], rowKind: RowKind): void {
+		expect(rows.length, `No ${rowKind} rows found`).toBeGreaterThan(0);
+	}
+
+	/**
+	 * Validates the exact number of rows.
+	 */
+	private static validateExactRowCount(rows: Locator[], expectedCount: number, rowKind: RowKind): void {
+		expect(rows.length, `Expected ${expectedCount} ${rowKind} rows, but found ${rows.length}`).toBe(expectedCount);
+	}
+
+	/**
+	 * Validates that at least some cells have content.
+	 */
+	private static async validateHasCellsWithContent(
+		rowLocator: Locator,
+		cellSelector: string,
+		rowKind: RowKind
+	): Promise<void> {
+		const cells = await rowLocator.locator(cellSelector).all();
+		const cellsWithContent = await this.getCellsWithContent(cells);
+		expect(cellsWithContent.length, `No ${rowKind} cells with content found`).toBeGreaterThan(0);
+	}
+
+	/**
+	 * Validates that at least one row has exactly the expected number of cells.
+	 */
+	private static async validateCellCount(
+		rows: Locator[],
+		cellSelector: string,
+		expectedCount: number,
+		rowKind: RowKind
+	): Promise<void> {
+		const matchingRows = await this.findRowsWithCellCount(rows, cellSelector, expectedCount);
+		expect(
+			matchingRows.length,
+			`No ${rowKind} rows found with exactly ${expectedCount} cells. Checked ${rows.length} rows.`
+		).toBeGreaterThan(0);
+	}
+
+	/**
+	 * Finds rows that have exactly the expected number of cells.
+	 */
+	private static async findRowsWithCellCount(
+		rows: Locator[],
+		cellSelector: string,
+		expectedCount: number
+	): Promise<Locator[]> {
+		const results = await Promise.all(
+			rows.map(async row => {
+				const cellCount = await row.locator(cellSelector).count();
+				return cellCount === expectedCount ? row : null;
+			})
+		);
+		return results.filter((row): row is Locator => row !== null);
+	}
+
+	/**
+	 * Validates that at least one row has exactly the expected number of cells with content.
+	 */
+	private static async validateCellContentCount(
+		rows: Locator[],
+		cellSelector: string,
+		expectedContentCount: number,
+		rowKind: RowKind
+	): Promise<void> {
+		const matchingRows = await this.findRowsWithContentCount(rows, cellSelector, expectedContentCount);
+		expect(
+			matchingRows.length,
+			`No ${rowKind} rows found with exactly ${expectedContentCount} cells containing content. Checked ${rows.length} rows.`
+		).toBeGreaterThan(0);
+	}
+
+	/**
+	 * Finds rows that have exactly the expected number of cells with content.
+	 */
+	private static async findRowsWithContentCount(
+		rows: Locator[],
+		cellSelector: string,
+		expectedContentCount: number
+	): Promise<Locator[]> {
+		const results = await Promise.all(
+			rows.map(async row => {
+				const cells = await row.locator(cellSelector).all();
+				const cellsWithContent = await this.getCellsWithContent(cells);
+				return cellsWithContent.length === expectedContentCount ? row : null;
+			})
+		);
+		return results.filter((row): row is Locator => row !== null);
 	}
 }

@@ -240,7 +240,7 @@ test.describe("Table Tests", () => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 
 			const table = new PlaywrightTable(page.locator("table"), { header: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header rows found");
 		});
 
 		test("No header row cells should throw exception", async ({ page }) => {
@@ -254,7 +254,7 @@ test.describe("Table Tests", () => {
 			await page.goto(Route.EmptyBodyRowsTable);
 
 			const table = new PlaywrightTable(page.locator("table"), { row: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
+			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body rows found");
 		});
 
 		test("No body row cells should throw exception", async ({ page }) => {

@@ -2,7 +2,7 @@
 	"name": "@cerios/playwright-table",
 	"version": "1.1.2",
 	"author": "Ronald Veth - Cerios",
-	"description": "Easy Html Tables handler for Playwright",
+	"description": "A high-performance Playwright library for testing HTML tables with comprehensive support for complex table structures including colspan, rowspan, multiple headers, and dynamic content. Features robust error handling, parallel data fetching, and intuitive APIs for table validation and data extraction.",
 	"license": "MIT",
 	"keywords": [
 		"playwright",

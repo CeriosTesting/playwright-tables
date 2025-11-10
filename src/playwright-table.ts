@@ -168,8 +168,22 @@ export class PlaywrightTable {
 	 * @param rowNumber - The row number (0-based index).
 	 * @param headerPosition - The header position (0-based index).
 	 * @returns A Playwright Locator for the specified cell.
+	 * @throws An error if the table data is not loaded or if indices are out of bounds.
 	 */
 	getBodyCellLocator(rowNumber: number, headerPosition: number): Locator {
+		if (this._rows.length === 0) {
+			throw new Error("Table has no body rows loaded. Call load() or getBodyRows() first.");
+		}
+		if (rowNumber < 0 || rowNumber >= this._rows.length) {
+			throw new Error(`Row index ${rowNumber} out of bounds. Table has ${this._rows.length} rows.`);
+		}
+		if (this._headers.length === 0) {
+			throw new Error("Table has no header rows loaded. Call load() or getHeaderRows() first.");
+		}
+		const columnCount = this.mainHeaderRow().length;
+		if (headerPosition < 0 || headerPosition >= columnCount) {
+			throw new Error(`Column index ${headerPosition} out of bounds. Table has ${columnCount} columns.`);
+		}
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
@@ -245,9 +259,14 @@ export class PlaywrightTable {
 	 * @param headerIndex - The header index (0-based).
 	 * @param options - See {@link LoadOptions} for available options.
 	 * @returns A promise that resolves to an array of Playwright Locators for the cells.
+	 * @throws An error if the header index is out of bounds.
 	 */
 	async getAllBodyCellLocatorsByHeaderIndex(headerIndex: number, options?: LoadOptions): Promise<Locator[]> {
 		await this.load(options);
+		const columnCount = this.mainHeaderRow().length;
+		if (headerIndex < 0 || headerIndex >= columnCount) {
+			throw new Error(`Header index ${headerIndex} out of bounds. Table has ${columnCount} columns.`);
+		}
 		const locators: Locator[] = [];
 		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
 			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
@@ -314,21 +333,38 @@ export class PlaywrightTable {
 
 	private async load(options?: LoadOptions): Promise<void> {
 		await expect(async () => {
-			await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header);
-			await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body);
+			await Promise.all([
+				TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header),
+				TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body),
+			]);
 		}).toPass({ timeout: options?.timeout });
 
-		this._headers = await TableHeader.getRows(
-			this._headerRowLocator,
-			this._headerColumnSelector,
-			options?.headerRowOptions
-		);
-		this._rows = await TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector, options?.bodyRowOptions);
+		const [headers, rows] = await Promise.all([
+			TableHeader.getRows(this._headerRowLocator, this._headerColumnSelector, options?.headerRowOptions),
+			TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector, options?.bodyRowOptions),
+		]);
+
+		this._headers = headers;
+		this._rows = rows;
+
+		if (this._headers.length === 0) {
+			throw new Error("No header rows found after loading table data");
+		}
+		if (this._rows.length === 0) {
+			throw new Error("No body rows found after loading table data");
+		}
 	}
 
 	private mainHeaderRow(): HeaderRow {
-		return this._options?.header?.setMainHeaderRow
-			? this._headers[this._options.header.setMainHeaderRow]
-			: this._headers[this._headers.length - 1];
+		if (this._headers.length === 0) {
+			throw new Error("No header rows available. Ensure table has been loaded.");
+		}
+
+		const headerIndex = this._options?.header?.setMainHeaderRow ?? this._headers.length - 1;
+		if (headerIndex < 0 || headerIndex >= this._headers.length) {
+			throw new Error(`Header row index ${headerIndex} out of bounds. Table has ${this._headers.length} header rows.`);
+		}
+
+		return this._headers[headerIndex];
 	}
 }
