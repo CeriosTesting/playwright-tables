@@ -3,49 +3,6 @@ import { PlaywrightTable } from "../src/playwright-table";
 import { Route } from "./demo-html/routes";
 
 test.describe("Error Handling Tests", () => {
-	test.describe("getBodyCellLocator validation", () => {
-		test("should throw error when accessing cell before loading data", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-			const table = new PlaywrightTable(page.locator("table"));
-
-			expect(() => table.getBodyCellLocator(0, 0)).toThrowError(
-				"Table has no body rows loaded. Call load() or getBodyRows() first."
-			);
-		});
-
-		test("should throw error when row index is negative", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(-1, 0)).toThrowError("Row index -1 out of bounds. Table has 2 rows.");
-		});
-
-		test("should throw error when row index exceeds table rows", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(10, 0)).toThrowError("Row index 10 out of bounds. Table has 2 rows.");
-		});
-
-		test("should throw error when column index is negative", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(0, -1)).toThrowError("Column index -1 out of bounds. Table has 3 columns.");
-		});
-
-		test("should throw error when column index exceeds table columns", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(0, 10)).toThrowError("Column index 10 out of bounds. Table has 3 columns.");
-		});
-	});
-
 	test.describe("mainHeaderRow validation", () => {
 		test("should throw error when setMainHeaderRow is out of bounds", async ({ page }) => {
 			await page.goto(Route.SimpleTable);

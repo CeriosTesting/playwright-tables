@@ -202,56 +202,6 @@ test.describe("Error Message Context Tests", () => {
 			}).rejects.toThrow(/Row locator:.*table.*tbody.*tr\.non-existent/);
 		});
 
-		test("getBodyCellLocator should throw error when table not loaded", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-
-			// Try to get cell locator before loading
-			expect(() => table.getBodyCellLocator(0, 0)).toThrow(/Table has no body rows loaded/);
-			expect(() => table.getBodyCellLocator(0, 0)).toThrow(/Body row locator:.*table.*tbody.*tr/);
-		});
-
-		test("getBodyCellLocator should throw error with context for row out of bounds", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(999, 0)).toThrow(/Row index 999 out of bounds/);
-			expect(() => table.getBodyCellLocator(999, 0)).toThrow(/Table has 2 rows/);
-			expect(() => table.getBodyCellLocator(999, 0)).toThrow(/Body row locator:.*table.*tbody.*tr/);
-		});
-
-		test("getBodyCellLocator should throw error with context for negative row index", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(-1, 0)).toThrow(/Row index -1 out of bounds/);
-		});
-
-		test("getBodyCellLocator should throw error with context for column out of bounds", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-			await table.getBodyRows();
-
-			expect(() => table.getBodyCellLocator(0, 999)).toThrow(/Column index 999 out of bounds/);
-			expect(() => table.getBodyCellLocator(0, 999)).toThrow(/Table has 3 columns/);
-			expect(() => table.getBodyCellLocator(0, 999)).toThrow(/Body row locator:.*table.*tbody.*tr/);
-		});
-
-		test("getBodyCellLocator should validate both headers and body are loaded", async ({ page }) => {
-			await page.goto(Route.SimpleTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-
-			expect(() => table.getBodyCellLocator(0, 0)).toThrow(/Table has no body rows loaded/);
-			expect(() => table.getBodyCellLocator(0, 0)).toThrow(/Body row locator:.*table.*tbody.*tr/);
-		});
-
 		test("mainHeaderRow should throw error when no headers available", async ({ page }) => {
 			await page.goto(Route.SimpleTable);
 

@@ -1,9 +1,10 @@
-import { expect, Locator } from "@playwright/test";
+import { Locator } from "@playwright/test";
 import { TableBody } from "./table-body";
 import { BodyRow, Cell, HeaderRow } from "./row";
 import { HeaderRowOptions, TableHeader } from "./table-header";
 import { RowKind, TableWait } from "./table-wait";
 import { CellContentType } from "./cell-content-type";
+import { toPassWithErrorContext } from "./polling";
 
 /**
  * Options for loading table data, headers, and rows.
@@ -24,6 +25,8 @@ import { CellContentType } from "./cell-content-type";
 export type LoadOptions = {
 	/** Timeout in milliseconds for loading table data. */
 	timeout?: number;
+	/** The `intervals` parameter can be used to establish the probing frequency or pattern. // Defaults to [100, 250, 500, 1000]. */
+	intervals?: number[];
 	/** See {@link HeaderRowOptions} for available options. */
 	headerRowOptions?: HeaderRowOptions;
 	/** Options for parsing body rows. */
@@ -50,6 +53,8 @@ export type LoadOptions = {
 export type WaitForTableRowsOptions = {
 	/** Timeout in milliseconds for waiting. */
 	timeout?: number;
+	/** The `intervals` parameter can be used to establish the probing frequency or pattern. // Defaults to [100, 250, 500, 1000]. */
+	intervals?: number[];
 	/** Row and cell count/content conditions. */
 	row?: {
 		/** Expected number of rows. */
@@ -141,7 +146,9 @@ export class PlaywrightTable {
 	 * @param options.headerRowOptions - See {@link HeaderRowOptions} for available options.
 	 * @returns A promise that resolves to the main header row.
 	 */
-	async getMainHeaderRow(options?: Pick<LoadOptions, "timeout" | "headerRowOptions">): Promise<HeaderRow> {
+	async getMainHeaderRow(
+		options?: Pick<LoadOptions, "timeout" | "intervals" | "headerRowOptions">
+	): Promise<HeaderRow> {
 		await this.load(options);
 		return this.mainHeaderRow();
 	}
@@ -152,7 +159,7 @@ export class PlaywrightTable {
 	 * @param options.bodyRowOptions.cellContentType - The content type for the body rows.
 	 * @returns A promise that resolves to an array of body rows.
 	 */
-	async getBodyRows(options?: Pick<LoadOptions, "timeout" | "bodyRowOptions">): Promise<BodyRow[]> {
+	async getBodyRows(options?: Pick<LoadOptions, "timeout" | "intervals" | "bodyRowOptions">): Promise<BodyRow[]> {
 		await this.load({
 			timeout: options?.timeout,
 			bodyRowOptions: options?.bodyRowOptions,
@@ -168,36 +175,8 @@ export class PlaywrightTable {
 	 * @param rowNumber - The row number (0-based index).
 	 * @param headerPosition - The header position (0-based index).
 	 * @returns A Playwright Locator for the specified cell.
-	 * @throws An error if the table data is not loaded or if indices are out of bounds.
 	 */
 	getBodyCellLocator(rowNumber: number, headerPosition: number): Locator {
-		const bodyLocatorDescription = this._bodyRowLocator.toString();
-
-		if (this._rows.length === 0) {
-			throw new Error(
-				`Table has no body rows loaded. Call load() or getBodyRows() first.\n` +
-					`Body row locator: ${bodyLocatorDescription}`
-			);
-		}
-		if (rowNumber < 0 || rowNumber >= this._rows.length) {
-			throw new Error(
-				`Row index ${rowNumber} out of bounds. Table has ${this._rows.length} rows.\n` +
-					`Body row locator: ${bodyLocatorDescription}`
-			);
-		}
-		if (this._headers.length === 0) {
-			throw new Error(
-				`Table has no header rows loaded. Call load() or getHeaderRows() first.\n` +
-					`Header row locator: ${this._headerRowLocator.toString()}`
-			);
-		}
-		const columnCount = this.mainHeaderRow().length;
-		if (headerPosition < 0 || headerPosition >= columnCount) {
-			throw new Error(
-				`Column index ${headerPosition} out of bounds. Table has ${columnCount} columns.\n` +
-					`Body row locator: ${bodyLocatorDescription}`
-			);
-		}
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
 
@@ -215,13 +194,13 @@ export class PlaywrightTable {
 		options?: LoadOptions
 	): Promise<Locator> {
 		await this.load(options);
-		const headers = await this.getMainHeaderRow();
+		const mainHeader = this.mainHeaderRow();
 
-		const targetHeaderIndex = headers.indexOf(targetHeader);
+		const targetHeaderIndex = mainHeader.indexOf(targetHeader);
 		if (targetHeaderIndex === -1) {
 			throw new Error(
 				`Header "${targetHeader}" not found.\n` +
-					`Available headers: [${headers.join(", ")}]\n` +
+					`Available headers: [${mainHeader.join(", ")}]\n` +
 					`Header row locator: ${this._headerRowLocator.toString()}`
 			);
 		}
@@ -231,11 +210,11 @@ export class PlaywrightTable {
 			let matches = true;
 
 			for (const [header, value] of Object.entries(conditions)) {
-				const headerIndex = headers.indexOf(header);
+				const headerIndex = mainHeader.indexOf(header);
 				if (headerIndex === -1) {
 					throw new Error(
 						`Header "${header}" not found.\n` +
-							`Available headers: [${headers.join(", ")}]\n` +
+							`Available headers: [${mainHeader.join(", ")}]\n` +
 							`Header row locator: ${this._headerRowLocator.toString()}`
 					);
 				}
@@ -344,12 +323,15 @@ export class PlaywrightTable {
 	 * @returns A promise that resolves when the header rows are loaded.
 	 */
 	async waitForHeaderRows(options?: WaitForTableRowsOptions): Promise<void> {
-		await expect(
-			async () =>
-				await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header, options)
-		).toPass({
-			timeout: options?.timeout,
-		});
+		await toPassWithErrorContext(
+			async () => {
+				await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header, options);
+			},
+			{
+				timeout: options?.timeout,
+				intervals: options?.intervals,
+			}
+		);
 	}
 
 	/**
@@ -358,20 +340,31 @@ export class PlaywrightTable {
 	 * @returns A promise that resolves when the body rows are loaded.
 	 */
 	async waitForBodyRows(options?: WaitForTableRowsOptions): Promise<void> {
-		await expect(
-			async () => await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body, options)
-		).toPass({
-			timeout: options?.timeout,
-		});
+		await toPassWithErrorContext(
+			async () => {
+				await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body, options);
+			},
+			{
+				timeout: options?.timeout,
+				intervals: options?.intervals,
+			}
+		);
 	}
 
 	private async load(options?: LoadOptions): Promise<void> {
-		await expect(async () => {
-			await Promise.all([
-				TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header),
-				TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body),
-			]);
-		}).toPass({ timeout: options?.timeout });
+		await toPassWithErrorContext(
+			async () => {
+				await Promise.all([
+					TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header),
+					TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body),
+				]);
+			},
+			{
+				timeout: options?.timeout,
+				intervals: options?.intervals,
+				context: "Loading table rows (header + body)",
+			}
+		);
 
 		const [headers, rows] = await Promise.all([
 			TableHeader.getRows(this._headerRowLocator, this._headerColumnSelector, options?.headerRowOptions),
