@@ -37,6 +37,7 @@ export abstract class TableBody {
 			throw new Error("columnsSelector cannot be empty");
 		}
 
+		const locatorDescription = rowLocator.toString();
 		const rows: BodyRow[] = [];
 		const rowsCount = await rowLocator.count();
 
@@ -60,7 +61,10 @@ export abstract class TableBody {
 				rows.push(columns as BodyRow);
 			} catch (error) {
 				throw new Error(
-					`Failed to process body row at index ${rowIndex}: ${error instanceof Error ? error.message : String(error)}`
+					`Failed to process body row at index ${rowIndex}.\n` +
+						`Body row locator: ${locatorDescription}\n` +
+						`Columns selector: "${columnsSelector}"\n` +
+						`Error: ${error instanceof Error ? error.message : String(error)}`
 				);
 			}
 		}

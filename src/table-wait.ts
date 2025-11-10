@@ -49,13 +49,14 @@ export abstract class TableWait {
 	): Promise<void> {
 		this.validateInputs(cellSelector, options);
 
+		const locatorDescription = rowLocator.toString();
 		const rows = await rowLocator.all();
 
 		const expectedRowCount = options?.row?.amount;
 		if (expectedRowCount) {
-			this.validateExactRowCount(rows, expectedRowCount, rowKind);
+			this.validateExactRowCount(rows, expectedRowCount, rowKind, locatorDescription);
 		} else {
-			this.validateHasRows(rows, rowKind);
+			this.validateHasRows(rows, rowKind, locatorDescription);
 		}
 
 		const cellOptions = options?.row?.cell;
@@ -63,18 +64,22 @@ export abstract class TableWait {
 			const validations: Promise<void>[] = [];
 
 			if (cellOptions.totalCount) {
-				validations.push(this.validateCellCount(rows, cellSelector, cellOptions.totalCount, rowKind));
+				validations.push(
+					this.validateCellCount(rows, cellSelector, cellOptions.totalCount, rowKind, locatorDescription)
+				);
 			}
 
 			if (cellOptions.contentCount) {
-				validations.push(this.validateCellContentCount(rows, cellSelector, cellOptions.contentCount, rowKind));
+				validations.push(
+					this.validateCellContentCount(rows, cellSelector, cellOptions.contentCount, rowKind, locatorDescription)
+				);
 			} else {
-				validations.push(this.validateHasCellsWithContent(rowLocator, cellSelector, rowKind));
+				validations.push(this.validateHasCellsWithContent(rowLocator, cellSelector, rowKind, locatorDescription));
 			}
 
 			await Promise.all(validations);
 		} else {
-			await this.validateHasCellsWithContent(rowLocator, cellSelector, rowKind);
+			await this.validateHasCellsWithContent(rowLocator, cellSelector, rowKind, locatorDescription);
 		}
 	}
 
@@ -130,15 +135,23 @@ export abstract class TableWait {
 	/**
 	 * Validates that at least one row exists.
 	 */
-	private static validateHasRows(rows: Locator[], rowKind: RowKind): void {
-		expect(rows.length, `No ${rowKind} rows found`).toBeGreaterThan(0);
+	private static validateHasRows(rows: Locator[], rowKind: RowKind, locatorDescription: string): void {
+		expect(rows.length, `No ${rowKind} rows found.\nRow locator: ${locatorDescription}`).toBeGreaterThan(0);
 	}
 
 	/**
 	 * Validates the exact number of rows.
 	 */
-	private static validateExactRowCount(rows: Locator[], expectedCount: number, rowKind: RowKind): void {
-		expect(rows.length, `Expected ${expectedCount} ${rowKind} rows, but found ${rows.length}`).toBe(expectedCount);
+	private static validateExactRowCount(
+		rows: Locator[],
+		expectedCount: number,
+		rowKind: RowKind,
+		locatorDescription: string
+	): void {
+		expect(
+			rows.length,
+			`Expected ${expectedCount} ${rowKind} rows, but found ${rows.length}.\nRow locator: ${locatorDescription}`
+		).toBe(expectedCount);
 	}
 
 	/**
@@ -147,11 +160,15 @@ export abstract class TableWait {
 	private static async validateHasCellsWithContent(
 		rowLocator: Locator,
 		cellSelector: string,
-		rowKind: RowKind
+		rowKind: RowKind,
+		locatorDescription: string
 	): Promise<void> {
 		const cells = await rowLocator.locator(cellSelector).all();
 		const cellsWithContent = await this.getCellsWithContent(cells);
-		expect(cellsWithContent.length, `No ${rowKind} cells with content found`).toBeGreaterThan(0);
+		expect(
+			cellsWithContent.length,
+			`No ${rowKind} cells with content found.\nRow locator: ${locatorDescription}\nCell selector: "${cellSelector}"`
+		).toBeGreaterThan(0);
 	}
 
 	/**
@@ -161,12 +178,14 @@ export abstract class TableWait {
 		rows: Locator[],
 		cellSelector: string,
 		expectedCount: number,
-		rowKind: RowKind
+		rowKind: RowKind,
+		locatorDescription: string
 	): Promise<void> {
 		const matchingRows = await this.findRowsWithCellCount(rows, cellSelector, expectedCount);
 		expect(
 			matchingRows.length,
-			`No ${rowKind} rows found with exactly ${expectedCount} cells. Checked ${rows.length} rows.`
+			`No ${rowKind} rows found with exactly ${expectedCount} cells. Checked ${rows.length} rows.\n` +
+				`Row locator: ${locatorDescription}\nCell selector: "${cellSelector}"`
 		).toBeGreaterThan(0);
 	}
 
@@ -194,12 +213,14 @@ export abstract class TableWait {
 		rows: Locator[],
 		cellSelector: string,
 		expectedContentCount: number,
-		rowKind: RowKind
+		rowKind: RowKind,
+		locatorDescription: string
 	): Promise<void> {
 		const matchingRows = await this.findRowsWithContentCount(rows, cellSelector, expectedContentCount);
 		expect(
 			matchingRows.length,
-			`No ${rowKind} rows found with exactly ${expectedContentCount} cells containing content. Checked ${rows.length} rows.`
+			`No ${rowKind} rows found with exactly ${expectedContentCount} cells containing content. Checked ${rows.length} rows.\n` +
+				`Row locator: ${locatorDescription}\nCell selector: "${cellSelector}"`
 		).toBeGreaterThan(0);
 	}
 

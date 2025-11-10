@@ -56,6 +56,7 @@ export abstract class TableHeader {
 			throw new Error("columnsSelector cannot be empty");
 		}
 
+		const locatorDescription = headerRowLocator.toString();
 		const options = this.getDefaultOptions(headerRowOptions);
 		const rows = await headerRowLocator.all();
 
@@ -74,7 +75,10 @@ export abstract class TableHeader {
 				headerRows.push(headerRow);
 			} catch (error) {
 				throw new Error(
-					`Failed to process header row at index ${rowIndex}: ${error instanceof Error ? error.message : String(error)}`
+					`Failed to process header row at index ${rowIndex}.\n` +
+						`Header row locator: ${locatorDescription}\n` +
+						`Columns selector: "${columnsSelector}"\n` +
+						`Error: ${error instanceof Error ? error.message : String(error)}`
 				);
 			}
 		}

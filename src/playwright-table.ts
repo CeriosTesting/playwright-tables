@@ -171,18 +171,32 @@ export class PlaywrightTable {
 	 * @throws An error if the table data is not loaded or if indices are out of bounds.
 	 */
 	getBodyCellLocator(rowNumber: number, headerPosition: number): Locator {
+		const bodyLocatorDescription = this._bodyRowLocator.toString();
+
 		if (this._rows.length === 0) {
-			throw new Error("Table has no body rows loaded. Call load() or getBodyRows() first.");
+			throw new Error(
+				`Table has no body rows loaded. Call load() or getBodyRows() first.\n` +
+					`Body row locator: ${bodyLocatorDescription}`
+			);
 		}
 		if (rowNumber < 0 || rowNumber >= this._rows.length) {
-			throw new Error(`Row index ${rowNumber} out of bounds. Table has ${this._rows.length} rows.`);
+			throw new Error(
+				`Row index ${rowNumber} out of bounds. Table has ${this._rows.length} rows.\n` +
+					`Body row locator: ${bodyLocatorDescription}`
+			);
 		}
 		if (this._headers.length === 0) {
-			throw new Error("Table has no header rows loaded. Call load() or getHeaderRows() first.");
+			throw new Error(
+				`Table has no header rows loaded. Call load() or getHeaderRows() first.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
 		}
 		const columnCount = this.mainHeaderRow().length;
 		if (headerPosition < 0 || headerPosition >= columnCount) {
-			throw new Error(`Column index ${headerPosition} out of bounds. Table has ${columnCount} columns.`);
+			throw new Error(
+				`Column index ${headerPosition} out of bounds. Table has ${columnCount} columns.\n` +
+					`Body row locator: ${bodyLocatorDescription}`
+			);
 		}
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
 	}
@@ -205,7 +219,11 @@ export class PlaywrightTable {
 
 		const targetHeaderIndex = headers.indexOf(targetHeader);
 		if (targetHeaderIndex === -1) {
-			throw new Error(`Header "${targetHeader}" not found.`);
+			throw new Error(
+				`Header "${targetHeader}" not found.\n` +
+					`Available headers: [${headers.join(", ")}]\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
 		}
 
 		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
@@ -215,7 +233,11 @@ export class PlaywrightTable {
 			for (const [header, value] of Object.entries(conditions)) {
 				const headerIndex = headers.indexOf(header);
 				if (headerIndex === -1) {
-					throw new Error(`Header "${header}" not found.`);
+					throw new Error(
+						`Header "${header}" not found.\n` +
+							`Available headers: [${headers.join(", ")}]\n` +
+							`Header row locator: ${this._headerRowLocator.toString()}`
+					);
 				}
 				const cellValue = row[headerIndex] ?? "";
 				if (cellValue !== value) {
@@ -229,7 +251,12 @@ export class PlaywrightTable {
 			}
 		}
 
-		throw new Error(`No row found matching conditions: ${JSON.stringify(conditions)}`);
+		throw new Error(
+			`No row found matching conditions: ${JSON.stringify(conditions)}\n` +
+				`Target header: "${targetHeader}"\n` +
+				`Searched ${this._rows.length} rows\n` +
+				`Body row locator: ${this._bodyRowLocator.toString()}`
+		);
 	}
 
 	/**
@@ -244,7 +271,11 @@ export class PlaywrightTable {
 		const headers = await this.getMainHeaderRow();
 		const headerIndex = headers.indexOf(header);
 		if (headerIndex === -1) {
-			throw new Error(`Header "${header}" not found.`);
+			throw new Error(
+				`Header "${header}" not found.\n` +
+					`Available headers: [${headers.join(", ")}]\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
 		}
 		const locators: Locator[] = [];
 		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
@@ -265,7 +296,10 @@ export class PlaywrightTable {
 		await this.load(options);
 		const columnCount = this.mainHeaderRow().length;
 		if (headerIndex < 0 || headerIndex >= columnCount) {
-			throw new Error(`Header index ${headerIndex} out of bounds. Table has ${columnCount} columns.`);
+			throw new Error(
+				`Header index ${headerIndex} out of bounds. Table has ${columnCount} columns.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
 		}
 		const locators: Locator[] = [];
 		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
@@ -348,21 +382,35 @@ export class PlaywrightTable {
 		this._rows = rows;
 
 		if (this._headers.length === 0) {
-			throw new Error("No header rows found after loading table data");
+			throw new Error(
+				`No header rows found after loading table data.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}\n` +
+					`Table locator: ${this._tableLocator.toString()}`
+			);
 		}
 		if (this._rows.length === 0) {
-			throw new Error("No body rows found after loading table data");
+			throw new Error(
+				`No body rows found after loading table data.\n` +
+					`Body row locator: ${this._bodyRowLocator.toString()}\n` +
+					`Table locator: ${this._tableLocator.toString()}`
+			);
 		}
 	}
 
 	private mainHeaderRow(): HeaderRow {
 		if (this._headers.length === 0) {
-			throw new Error("No header rows available. Ensure table has been loaded.");
+			throw new Error(
+				`No header rows available. Ensure table has been loaded.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
 		}
 
 		const headerIndex = this._options?.header?.setMainHeaderRow ?? this._headers.length - 1;
 		if (headerIndex < 0 || headerIndex >= this._headers.length) {
-			throw new Error(`Header row index ${headerIndex} out of bounds. Table has ${this._headers.length} header rows.`);
+			throw new Error(
+				`Header row index ${headerIndex} out of bounds. Table has ${this._headers.length} header rows.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
 		}
 
 		return this._headers[headerIndex];
