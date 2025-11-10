@@ -32,7 +32,6 @@ export abstract class TableBody {
 			cellContentType?: CellContentType;
 		}
 	): Promise<BodyRow[]> {
-		// Input validation
 		if (!columnsSelector || columnsSelector.trim() === "") {
 			throw new Error("columnsSelector cannot be empty");
 		}
@@ -41,7 +40,6 @@ export abstract class TableBody {
 		const rows: BodyRow[] = [];
 		const rowsCount = await rowLocator.count();
 
-		// Allow zero rows - validation happens at TableWait level
 		if (rowsCount === 0) {
 			return rows;
 		}
@@ -87,14 +85,12 @@ export abstract class TableBody {
 			return columns;
 		}
 
-		// Phase 1: Fetch all cell data in parallel (major performance win!)
 		const cellDataPromises = [];
 		for (let colIndex = 0; colIndex < columnCount; colIndex++) {
 			cellDataPromises.push(this.fetchCellData(columnLocators.nth(colIndex), cellContentType));
 		}
 		const cellDataArray = await Promise.all(cellDataPromises);
 
-		// Phase 2: Process cells sequentially with pre-fetched data
 		for (let colIndex = 0; colIndex < columnCount; colIndex++) {
 			const cellData = cellDataArray[colIndex];
 			this.processCellData(cellData, colIndex, columns, rowIndex, spannedCells);
@@ -113,7 +109,6 @@ export abstract class TableBody {
 		column: Locator,
 		cellContentType: CellContentType = CellContentType.InnerText
 	): Promise<{ content: string; rowspan: number; colspan: number }> {
-		// Fetch content and span attributes in parallel for each cell
 		const [content, spanAttributes] = await Promise.all([
 			TableUtils.getCellContent(column, cellContentType),
 			TableUtils.parseSpanAttributes(column),
@@ -139,7 +134,6 @@ export abstract class TableBody {
 	): void {
 		const { content, rowspan, colspan } = cellData;
 
-		// Validate indices
 		if (colIndex < 0) {
 			throw new Error(`Invalid column index: ${colIndex}. Must be non-negative.`);
 		}
@@ -147,12 +141,10 @@ export abstract class TableBody {
 			throw new Error(`Invalid row index: ${rowIndex}. Must be non-negative.`);
 		}
 
-		// Apply content across colspan
 		for (let span = 0; span < colspan; span++) {
 			columns[colIndex + span] = content;
 		}
 
-		// Store cells that span multiple rows
 		if (rowspan > 1) {
 			this.storeSpannedCells(rowIndex, colIndex, rowspan, content, spannedCells);
 		}

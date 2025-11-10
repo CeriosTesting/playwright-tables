@@ -51,7 +51,6 @@ export abstract class TableHeader {
 		columnsSelector: string,
 		headerRowOptions?: HeaderRowOptions
 	): Promise<HeaderRow[]> {
-		// Input validation
 		if (!columnsSelector || columnsSelector.trim() === "") {
 			throw new Error("columnsSelector cannot be empty");
 		}
@@ -62,7 +61,6 @@ export abstract class TableHeader {
 
 		const headerRows: HeaderRow[] = [];
 
-		// Allow zero rows - validation happens at TableWait level
 		if (rows.length === 0) {
 			return headerRows;
 		}
@@ -114,10 +112,8 @@ export abstract class TableHeader {
 			return headerRow;
 		}
 
-		// Phase 1: Fetch all cell data in parallel (major performance win!)
 		const cellDataArray = await Promise.all(cells.map(cell => this.fetchHeaderCellData(cell, options.cellContentType)));
 
-		// Phase 2: Process cells sequentially with pre-fetched data
 		let columnIndex = 0;
 		for (let i = 0; i < cellDataArray.length; i++) {
 			columnIndex = this.processHeaderCellData(
@@ -141,7 +137,6 @@ export abstract class TableHeader {
 		cell: Locator,
 		cellContentType: CellContentType
 	): Promise<{ text: string; rowspan: number; colspan: number }> {
-		// Fetch content and span attributes in parallel for each cell
 		const [text, spanAttributes] = await Promise.all([
 			TableUtils.getCellContent(cell, cellContentType),
 			TableUtils.parseSpanAttributes(cell),
@@ -165,14 +160,12 @@ export abstract class TableHeader {
 		columnIndex: number,
 		emptyCellReplacement: boolean
 	): number {
-		// Insert any rowspan cells that belong in this position
 		while (rowSpans.has(columnIndex)) {
 			headerRow.push(rowSpans.get(columnIndex)!);
 			rowSpans.delete(columnIndex);
 			columnIndex++;
 		}
 
-		// Apply empty cell replacement if needed
 		let text = cellData.text;
 		if (!text && emptyCellReplacement) {
 			text = this.EMPTY_CELL_PLACEHOLDER;
@@ -180,7 +173,6 @@ export abstract class TableHeader {
 
 		const { colspan, rowspan } = cellData;
 
-		// Add the cell and handle spanning
 		headerRow.push(text);
 		this.handleColspan(headerRow, text, colspan);
 		this.handleRowspan(rowSpans, text, columnIndex, colspan, rowspan);
