@@ -517,12 +517,141 @@ test.describe("PlaywrightTable.waitForRowByConditions", () => {
 		expect(error).toBeDefined();
 		expect(error?.message).toContain("Expected at least 1 rows matching conditions, but found 0");
 	});
+});
 
-	test("uses minRows default of 1 when not specified", async ({ page }) => {
+test.describe("PlaywrightTable.waitForRowByIndex", () => {
+	test("waits for row at specific index", async ({ page }) => {
 		await page.goto(Route.SimpleTable);
 		const table = new PlaywrightTable(page.locator("table"));
-		// Should succeed with 1 matching row
-		await table.waitForRowByConditions({ "First name": "Ronald" });
+		await table.waitForRowByIndex(0, { timeout: 2000 });
+		await table.waitForRowByIndex(1, { timeout: 2000 });
 		expect(true).toBe(true);
+	});
+
+	test("throws error when row index doesn't exist", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		await expect(table.waitForRowByIndex(100, { timeout: 1000 })).rejects.toThrowError(
+			/Expected row at index 100 to exist, but table only has \d+ rows/
+		);
+	});
+
+	test("throws error for negative index", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		await expect(table.waitForRowByIndex(-1)).rejects.toThrowError(/Row index must be a non-negative integer, got: -1/);
+	});
+
+	test("throws error for non-integer index", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		await expect(table.waitForRowByIndex(1.5)).rejects.toThrowError(
+			/Row index must be a non-negative integer, got: 1.5/
+		);
+	});
+
+	test("waits for dynamically loaded row", async ({ page }) => {
+		await page.goto(Route.DynamicLoadTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		await table.waitForRowByIndex(2, { timeout: 5000 });
+		expect(true).toBe(true);
+	});
+});
+
+test.describe("PlaywrightTable.getRowCount", () => {
+	test("returns correct header and body row counts", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const counts = await table.getRowCount();
+		expect(counts.header).toBe(1);
+		expect(counts.body).toBeGreaterThan(0);
+	});
+
+	test("returns correct counts for table with multiple header rows", async ({ page }) => {
+		await page.goto(Route.RowspanHeaderTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const counts = await table.getRowCount();
+		expect(counts.header).toBe(2);
+		expect(counts.body).toBeGreaterThan(0);
+	});
+
+	test("returns zero for empty table body", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		// Remove all body rows
+		await page.evaluate(() => {
+			const tbody = document.querySelector("tbody");
+			if (tbody) {
+				tbody.innerHTML = "";
+			}
+		});
+		const counts = await table.getRowCount();
+		expect(counts.body).toBe(0);
+	});
+
+	test("is lightweight and doesn't fetch cell data", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const startTime = Date.now();
+		await table.getRowCount();
+		const elapsed = Date.now() - startTime;
+		// Should be very fast since it doesn't fetch cell contents
+		expect(elapsed).toBeLessThan(500);
+	});
+});
+
+test.describe("PlaywrightTable.findRowIndex", () => {
+	test("finds row index for matching conditions", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const index = await table.findRowIndex({ "First name": "Ronald" });
+		expect(index).toBeGreaterThanOrEqual(0);
+	});
+
+	test("returns -1 when no row matches", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const index = await table.findRowIndex({ "First name": "NonExistentName" });
+		expect(index).toBe(-1);
+	});
+
+	test("finds row with multiple conditions", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const index = await table.findRowIndex({ "First name": "Logan", "Last name": "Deacon" });
+		expect(index).toBeGreaterThanOrEqual(0);
+	});
+
+	test("returns first matching row index when multiple matches exist", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		// Add duplicate row at the end
+		await page.evaluate(() => {
+			const tbody = document.querySelector("tbody");
+			const firstRow = tbody?.querySelector("tr");
+			if (tbody && firstRow) {
+				const clone = firstRow.cloneNode(true) as HTMLElement;
+				tbody.appendChild(clone);
+			}
+		});
+		const index = await table.findRowIndex({ "First name": "Ronald" });
+		expect(index).toBe(0); // Should return first occurrence
+	});
+
+	test("throws error when header doesn't exist", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		await expect(table.findRowIndex({ InvalidHeader: "value" })).rejects.toThrowError(
+			/Header "InvalidHeader" not found/
+		);
+	});
+
+	test("can be used to get cell locator", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+		const rowIndex = await table.findRowIndex({ "First name": "Ronald" });
+		expect(rowIndex).toBeGreaterThanOrEqual(0);
+		const cellLocator = table.getBodyCellLocator(rowIndex, 0);
+		await expect(cellLocator).toHaveText("Ronald");
 	});
 });

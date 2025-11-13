@@ -621,6 +621,125 @@ await expect(cell).toHaveText("john.doe@example.com");
 
 ---
 
+### 15. `waitForRowByIndex(index, options?)`
+
+Waits for a specific body row at the given index to exist. More efficient than loading all table data when you only need to verify row existence.
+
+**Parameters:**
+
+- `index: number` - The 0-based row index to wait for
+- `options?: PollingOptions` - Polling options (timeout, interval, retries)
+
+**Returns:** `Promise<void>`
+
+**Throws:**
+
+- Error if row at index doesn't exist within timeout period
+- Error if index is negative or not an integer
+
+**Example:**
+
+```ts
+// Wait for the 10th row to appear (index 9)
+await table.waitForRowByIndex(9, { timeout: 5000 });
+
+// Wait for first row after triggering load
+await page.locator("button.load-more").click();
+await table.waitForRowByIndex(0);
+
+// Useful for infinite scroll scenarios
+for (let i = 0; i < 20; i++) {
+	await table.waitForRowByIndex(i);
+	await page.mouse.wheel(0, 100); // Scroll to trigger more loading
+}
+```
+
+---
+
+### 16. `getRowCount()`
+
+Gets the count of header and body rows in the table. Lightweight method that doesn't fetch cell data, only counts rows.
+
+**Parameters:** None
+
+**Returns:** `Promise<{ header: number; body: number }>`
+
+**Example:**
+
+```ts
+// Get current row counts
+const counts = await table.getRowCount();
+console.log(`Headers: ${counts.header}, Body: ${counts.body}`);
+
+// Assert specific row count
+const { body } = await table.getRowCount();
+expect(body).toBe(10);
+
+// Check if table is empty efficiently
+const rowCounts = await table.getRowCount();
+if (rowCounts.body === 0) {
+	console.log("Table is empty");
+}
+```
+
+**Use Cases:**
+
+- Quick validation of table size without fetching data
+- Performance-sensitive checks in loops
+- Conditional logic based on row counts
+- Monitoring table size during pagination
+
+---
+
+### 17. `findRowIndex(conditions, options?)`
+
+Finds the index of the first body row matching the specified conditions. Returns -1 if no matching row is found.
+
+**Parameters:**
+
+- `conditions: Record<string, string>` - Record of header names and expected cell values to match
+- `options?: TableOptions` - Optional table loading options
+
+**Returns:** `Promise<number>` - The 0-based index of the first matching row, or -1 if not found
+
+**Throws:** Error if specified headers don't exist in the table
+
+**Example:**
+
+```ts
+// Find index of row where Status is "Active"
+const index = await table.findRowIndex({ Status: "Active" });
+if (index >= 0) {
+	console.log(`Found at row ${index}`);
+	const cell = table.getBodyCellLocator(index, 0);
+	await cell.click();
+}
+
+// Find row and interact with it
+const rowIndex = await table.findRowIndex({ Username: "john.doe" });
+if (rowIndex >= 0) {
+	const deleteButton = table.getBodyCellLocator(rowIndex, 3).locator("button.delete");
+	await deleteButton.click();
+} else {
+	console.log("User not found");
+}
+
+// Check if specific data exists before taking action
+const orderIndex = await table.findRowIndex({ "Order ID": "12345" });
+if (orderIndex === -1) {
+	throw new Error("Order not found in table");
+}
+```
+
+**Use Cases:**
+
+- Finding row position for interaction without fetching all data
+- Conditional logic based on row existence
+- Getting row indices for further locator operations
+- Checking data presence without waiting
+
+---
+
 ## Advanced Options
 
 ### Custom Selectors
@@ -766,6 +885,9 @@ import {
 	HeaderRowOptions,
 	TableOptions,
 	WaitForTableRowsOptions,
+	WaitForStableOptions,
+	WaitForRowByConditionsOptions,
+	PollingOptions,
 	RowKind,
 } from "@cerios/playwright-table";
 ```
