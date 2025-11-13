@@ -1,44 +1,28 @@
-import { expect } from "@playwright/test";
-
-type ToPassOptions = {
+export type PollingOptions = {
 	timeout?: number;
-	intervals?: number[];
-	context?: string;
+	interval?: number;
 };
 
-export async function toPassWithErrorContext(fn: () => Promise<void>, options?: ToPassOptions): Promise<void> {
+export async function Poll(fn: () => Promise<void>, options?: PollingOptions): Promise<void> {
 	if (!options) {
 		options = {};
 	}
 
-	if (!options.timeout) {
-		options.timeout = 30_000;
-	}
+	const timeout = options.timeout ?? 30_000;
+	const interval = options.interval ?? 100;
+	const startTime = Date.now();
+	let lastError: Error | undefined;
 
-	try {
-		await expect(async () => {
-			try {
-				await fn();
-			} catch (err) {
-				const e = err as Error;
+	while (Date.now() - startTime < timeout) {
+		try {
+			await fn();
+			return;
+		} catch (err) {
+			lastError = err as Error;
 
-				const prefix = options.context ? `\n[Context: ${options.context}]\n` : "\n";
-
-				throw new Error(prefix + e.message);
-			}
-		}).toPass({ timeout: options.timeout, intervals: options.intervals });
-	} catch (err) {
-		const e = err as Error;
-
-		// Extract the actual error message from the toPass timeout wrapper
-		// The error message contains our custom error before "Call Log:"
-		const callLogIndex = e.message.indexOf("\n\nCall Log:");
-		if (callLogIndex > 0) {
-			// Extract just the custom error message, removing the Playwright timeout wrapper
-			throw new Error(e.message.substring(0, callLogIndex));
+			await new Promise(resolve => setTimeout(resolve, interval));
 		}
-
-		// If the error doesn't match expected format, rethrow as-is
-		throw e;
 	}
+
+	throw lastError || new Error("Playwright Tables: Polling timeout reached");
 }

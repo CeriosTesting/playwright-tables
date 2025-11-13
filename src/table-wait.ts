@@ -7,22 +7,35 @@ export enum RowKind {
 
 /**
  * Utility class for waiting and validating table row conditions.
- * Provides methods to ensure table rows and cells meet expected criteria before proceeding.
+ * Provides static methods to ensure table rows and cells meet expected criteria before proceeding.
+ * This class is used internally by PlaywrightTable but can also be used directly for custom validations.
+ *
+ * @see {@link RowKind} for row type enumeration
  */
 export abstract class TableWait {
 	/**
 	 * Waits for table rows to meet specified conditions regarding row count, cell count, and cell content.
 	 * This method validates table structure and content before allowing further operations.
+	 * Used internally by PlaywrightTable.waitForHeaderRows() and PlaywrightTable.waitForBodyRows().
 	 *
-	 * @param rowLocator - The Playwright locator for the table rows.
-	 * @param cellSelector - CSS selector for locating cells within rows (e.g., "td" or "th").
-	 * @param rowKind - The type of row being validated (Header or Body), used in error messages.
+	 * @param rowLocator - The Playwright locator for the table rows (e.g., page.locator('tbody tr')).
+	 * @param cellSelector - CSS selector for locating cells within rows (e.g., "td" for body, "th" for header).
+	 * @param rowKind - The type of row being validated. See {@link RowKind}. Used in error messages for clarity.
 	 * @param options - Optional validation criteria for rows and cells.
+	 * @param options.row - Row-level validation options.
 	 * @param options.row.amount - Expected exact number of rows. If not specified, validates at least one row exists.
-	 * @param options.row.cell.totalCount - Expected number of cells per row (regardless of content).
-	 * @param options.row.cell.contentCount - Expected number of cells with non-empty content per row.
+	 * @param options.row.cell - Cell-level validation options.
+	 * @param options.row.cell.totalCount - Expected number of cells per row (regardless of content). At least one row must match.
+	 * @param options.row.cell.contentCount - Expected number of cells with non-empty content per row. At least one row must match.
 	 *
-	 * @throws Error if validation fails - no rows found, row count mismatch, insufficient cells, or insufficient content.
+	 * @returns Promise that resolves when all validations pass.
+	 * @throws Error if cellSelector is empty or whitespace.
+	 * @throws Error if any numeric option is not a positive integer.
+	 * @throws Error if no rows found matching the criteria.
+	 * @throws Error if row count doesn't match expected amount.
+	 * @throws Error if no rows have the expected cell count.
+	 * @throws Error if no rows have the expected content count.
+	 * @throws Error if no cells with content found (when no specific contentCount provided).
 	 *
 	 * @example
 	 * // Wait for at least 3 body rows, each with 5 cells containing content
@@ -31,6 +44,14 @@ export abstract class TableWait {
 	 *   'td',
 	 *   RowKind.Body,
 	 *   { row: { amount: 3, cell: { totalCount: 5, contentCount: 5 } } }
+	 * );
+	 *
+	 * @example
+	 * // Wait for any header rows with at least some content
+	 * await TableWait.waitForRows(
+	 *   page.locator('thead tr'),
+	 *   'th',
+	 *   RowKind.Header
 	 * );
 	 */
 	static async waitForRows(
