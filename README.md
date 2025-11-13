@@ -1,5 +1,10 @@
 # 🎭 Playwright Tables | By Cerios
 
+[![npm version](https://img.shields.io/npm/v/@cerios/playwright-table.svg?style=flat-square)](https://www.npmjs.com/package/@cerios/playwright-table)
+[![npm downloads](https://img.shields.io/npm/dm/@cerios/playwright-table.svg?style=flat-square)](https://www.npmjs.com/package/@cerios/playwright-table)
+[![license](https://img.shields.io/npm/l/@cerios/playwright-table.svg?style=flat-square)](https://github.com/CeriosTesting/playwright-tables/blob/main/LICENSE)
+[![Playwright](https://img.shields.io/badge/playwright-%3E%3D1.40.0-45ba4b.svg?style=flat-square&logo=playwright)](https://playwright.dev)
+
 ## Introduction
 
 Testing HTML tables can be challenging due to their complex structures with colspan, rowspan, dynamic content, and nested elements. This package simplifies the process by providing a comprehensive API to parse, validate, and interact with HTML tables in your Playwright tests.
@@ -539,7 +544,7 @@ expect(rows).toHaveLength(0);
 
 ### 13. `waitForNonEmpty(options?)`
 
-Waits for the table body to have at least one body row.
+Waits for the table body to have at least one body row with actual content. A row is considered valid if it has at least one cell containing text.
 
 **Parameters:**
 
@@ -547,7 +552,10 @@ Waits for the table body to have at least one body row.
 
 **Returns:** `Promise<void>`
 
-**Throws:** Error if table remains empty within timeout
+**Throws:**
+
+- Error if table remains empty (no rows) within timeout
+- Error if table has rows but all cells are empty within timeout
 
 **Example:**
 
@@ -555,12 +563,16 @@ Waits for the table body to have at least one body row.
 // Trigger data load
 await page.locator("button.load-data").click();
 
-// Wait for table to populate
+// Wait for table to populate with actual data
 await table.waitForNonEmpty({ timeout: 5000 });
 
-// Now safe to process data
+// Now safe to process data - guaranteed to have content
 const data = await table.getJson();
 expect(data.length).toBeGreaterThan(0);
+
+// Useful for dynamically loaded tables where structure appears before data
+await searchInput.fill("search term");
+await table.waitForNonEmpty(); // Waits for rows AND content, not just empty row elements
 ```
 
 ---

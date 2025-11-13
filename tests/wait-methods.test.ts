@@ -337,7 +337,7 @@ test.describe("PlaywrightTable.waitForEmpty", () => {
 });
 
 test.describe("PlaywrightTable.waitForNonEmpty", () => {
-	test("should wait for table to be non-empty", async ({ page }) => {
+	test("should wait for table to be non-empty with content", async ({ page }) => {
 		await page.goto(Route.DynamicLoadTable);
 		const table = new PlaywrightTable(page.locator("table"));
 
@@ -346,7 +346,7 @@ test.describe("PlaywrightTable.waitForNonEmpty", () => {
 		}).toPass();
 	});
 
-	test("should throw error when table is empty", async ({ page }) => {
+	test("should throw error when table has no rows", async ({ page }) => {
 		await page.goto(Route.SimpleTable);
 		const table = new PlaywrightTable(page.locator("table"));
 
@@ -361,6 +361,34 @@ test.describe("PlaywrightTable.waitForNonEmpty", () => {
 		await expect(table.waitForNonEmpty({ timeout: 2000 })).rejects.toThrowError(
 			/Expected table to be non-empty, but found 0 body rows/
 		);
+	});
+
+	test("should throw error when table has rows but all cells are empty", async ({ page }) => {
+		await page.goto(Route.EmptyBodyRowsTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(table.waitForNonEmpty({ timeout: 2000 })).rejects.toThrowError(
+			/Expected table to have at least one row with content, but all 2 rows are empty/
+		);
+	});
+
+	test("should succeed when at least one cell has content", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Clear all cells except one
+		await page.evaluate(() => {
+			const cells = document.querySelectorAll("tbody td");
+			cells.forEach((cell, index) => {
+				if (index !== 0) {
+					cell.textContent = "";
+				}
+			});
+		});
+
+		await expect(async () => {
+			await table.waitForNonEmpty({ timeout: 2000 });
+		}).toPass();
 	});
 });
 

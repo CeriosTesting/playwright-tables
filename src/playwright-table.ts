@@ -618,10 +618,11 @@ export class PlaywrightTable {
 	}
 
 	/**
-	 * Waits for the table body to be non-empty (at least one body row).
+	 * Waits for the table body to be non-empty (at least one body row with content).
+	 * A row is considered valid if it has at least one cell containing text.
 	 * @param options - Polling options (timeout, interval, retries).
-	 * @returns A promise that resolves when table has at least one body row.
-	 * @throws Error if table remains empty within timeout period.
+	 * @returns A promise that resolves when table has at least one body row with content.
+	 * @throws Error if table remains empty or has no rows with content within timeout period.
 	 *
 	 * @example
 	 * // Wait for table to populate after search
@@ -636,6 +637,27 @@ export class PlaywrightTable {
 			if (rows.length === 0) {
 				throw new Error(
 					`Expected table to be non-empty, but found 0 body rows.\n` +
+						`Body row locator: ${this._bodyRowLocator.toString()}`
+				);
+			}
+
+			// Check if at least one row has content in at least one cell
+			let hasRowWithContent = false;
+			for (const row of rows) {
+				const cells = await row.locator(this._bodyRowColumnSelector).all();
+				for (const cell of cells) {
+					const content = await cell.innerText();
+					if (content.trim().length > 0) {
+						hasRowWithContent = true;
+						break;
+					}
+				}
+				if (hasRowWithContent) break;
+			}
+
+			if (!hasRowWithContent) {
+				throw new Error(
+					`Expected table to have at least one row with content, but all ${rows.length} rows are empty.\n` +
 						`Body row locator: ${this._bodyRowLocator.toString()}`
 				);
 			}
