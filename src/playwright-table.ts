@@ -76,7 +76,9 @@ export type WaitForStableOptions = {
 	stabilityDuration?: number;
 	/** Interval in ms between stability checks. Defaults to 100. */
 	checkInterval?: number;
-} & PollingOptions;
+	/** Maximum time to wait in ms. Defaults to 30000. */
+	timeout?: number;
+};
 
 /**
  * Options for waiting for rows matching conditions.
@@ -523,6 +525,7 @@ export class PlaywrightTable {
 	 * @param options - Options for stability duration and polling. See {@link WaitForStableOptions}.
 	 * @returns A promise that resolves when table is stable.
 	 * @throws Error if table does not stabilize within timeout period.
+	 * @throws Error if configuration is invalid (negative values, checkInterval > stabilityDuration, stabilityDuration > timeout).
 	 *
 	 * @example
 	 * // Wait for table to remain unchanged for 500ms
@@ -536,6 +539,13 @@ export class PlaywrightTable {
 	 *   timeout: 10000
 	 * });
 	 *
+	 * @remarks
+	 * The method validates that:
+	 * - All timing values are positive
+	 * - checkInterval ≤ stabilityDuration / 2 (ensures at least 2 checks during stability period)
+	 * - stabilityDuration < timeout (must have time for both changes and stabilization)
+	 * - timeout ≥ checkInterval + stabilityDuration (must allow at least one full cycle)
+	 *
 	 * @see {@link waitForBodyRows} for waiting on row count/structure
 	 * @see {@link waitForNonEmpty} for waiting until table has data
 	 */
@@ -543,6 +553,36 @@ export class PlaywrightTable {
 		const stabilityDuration = options?.stabilityDuration ?? 500;
 		const checkInterval = options?.checkInterval ?? 100;
 		const timeout = options?.timeout ?? 30_000;
+
+		if (checkInterval <= 0) {
+			throw new Error(`checkInterval must be positive, got: ${checkInterval}ms`);
+		}
+		if (stabilityDuration <= 0) {
+			throw new Error(`stabilityDuration must be positive, got: ${stabilityDuration}ms`);
+		}
+		if (timeout <= 0) {
+			throw new Error(`timeout must be positive, got: ${timeout}ms`);
+		}
+		if (checkInterval > stabilityDuration / 2) {
+			throw new Error(
+				`checkInterval (${checkInterval}ms) cannot be greater than half of stabilityDuration (${stabilityDuration / 2}ms). ` +
+					`At least 2 checks are required during the stability period to ensure reliable detection.`
+			);
+		}
+		if (stabilityDuration >= timeout) {
+			throw new Error(
+				`stabilityDuration (${stabilityDuration}ms) must be less than timeout (${timeout}ms). ` +
+					`The timeout must allow time for both table changes and stabilization.`
+			);
+		}
+		const minimumTimeout = checkInterval + stabilityDuration;
+		if (timeout < minimumTimeout) {
+			throw new Error(
+				`timeout (${timeout}ms) is too short. Minimum required: ${minimumTimeout}ms ` +
+					`(checkInterval ${checkInterval}ms + stabilityDuration ${stabilityDuration}ms). ` +
+					`The timeout must allow at least one check plus full stabilization period.`
+			);
+		}
 
 		const startTime = Date.now();
 		let lastSnapshot: string | null = null;

@@ -481,7 +481,10 @@ Waits for the table to become stable (no changes for a specified duration). Usef
 
 **Returns:** `Promise<void>`
 
-**Throws:** Error if table doesn't stabilize within timeout
+**Throws:**
+
+- Error if table doesn't stabilize within timeout
+- Error if configuration is invalid (see validation rules below)
 
 **Examples:**
 
@@ -507,6 +510,43 @@ const results = await table.getJson();
 ```ts
 {
   stabilityDuration?: number,  // Duration table must remain unchanged (default: 500ms)
+  checkInterval?: number,      // Interval between checks (default: 100ms)
+  timeout?: number             // Maximum wait time (default: 30000ms)
+}
+```
+
+**Validation Rules:**
+
+The method validates configuration to prevent logical errors:
+
+- All timing values must be positive
+- `checkInterval` ≤ `stabilityDuration / 2` (ensures at least 2 checks during stability period for reliable detection)
+- `stabilityDuration` < `timeout` (must have time for both changes and stabilization)
+- `timeout` ≥ `checkInterval + stabilityDuration` (must allow at least one complete check cycle)
+
+Invalid configurations will throw an error immediately with a descriptive message.
+
+**Use Cases:**
+
+```ts
+// ✅ Valid: Check every 100ms for 500ms of stability with 5s timeout (100 ≤ 500/2)
+await table.waitForStable({ checkInterval: 100, stabilityDuration: 500, timeout: 5000 });
+
+// ❌ Invalid: checkInterval too large (needs at least 2 checks during stability)
+// await table.waitForStable({ checkInterval: 1000, stabilityDuration: 1000 });
+//   Error: checkInterval (1000ms) cannot be greater than half of stabilityDuration (500ms)
+
+// ❌ Invalid: Cannot require 10s stability with 5s timeout
+// await table.waitForStable({ stabilityDuration: 10000, timeout: 5000 });
+//   Error: stabilityDuration (10000ms) must be less than timeout (5000ms)
+
+// ❌ Invalid: Cannot have equal stabilityDuration and timeout
+// await table.waitForStable({ stabilityDuration: 5000, timeout: 5000 });
+//   Error: stabilityDuration (5000ms) must be less than timeout (5000ms)
+
+// ❌ Invalid: Timeout too short for one complete cycle
+// await table.waitForStable({ checkInterval: 2000, stabilityDuration: 3000, timeout: 4000 });
+//   Error: timeout (4000ms) is too short. Minimum required: 5000ms
   checkInterval?: number,      // Interval between checks (default: 100ms)
   timeout?: number            // Max wait time (default: 30000ms)
 }

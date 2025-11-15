@@ -432,3 +432,127 @@ test.describe("PlaywrightTable - Detailed Error Messages", () => {
 		}).rejects.toThrow(/Header index -1 out of bounds/);
 	});
 });
+
+test.describe("PlaywrightTable - waitForStable validation", () => {
+	test("should throw error when checkInterval is zero", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ checkInterval: 0 });
+		}).rejects.toThrowError("checkInterval must be positive, got: 0ms");
+	});
+
+	test("should throw error when checkInterval is negative", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ checkInterval: -100 });
+		}).rejects.toThrowError("checkInterval must be positive, got: -100ms");
+	});
+
+	test("should throw error when stabilityDuration is zero", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ stabilityDuration: 0 });
+		}).rejects.toThrowError("stabilityDuration must be positive, got: 0ms");
+	});
+
+	test("should throw error when stabilityDuration is negative", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ stabilityDuration: -500 });
+		}).rejects.toThrowError("stabilityDuration must be positive, got: -500ms");
+	});
+
+	test("should throw error when timeout is zero", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ timeout: 0 });
+		}).rejects.toThrowError("timeout must be positive, got: 0ms");
+	});
+
+	test("should throw error when timeout is negative", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ timeout: -5000 });
+		}).rejects.toThrowError("timeout must be positive, got: -5000ms");
+	});
+
+	test("should throw error when checkInterval is greater than half of stabilityDuration", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ checkInterval: 1000, stabilityDuration: 1000 });
+		}).rejects.toThrowError(
+			"checkInterval (1000ms) cannot be greater than half of stabilityDuration (500ms). " +
+				"At least 2 checks are required during the stability period to ensure reliable detection."
+		);
+	});
+
+	test("should throw error when stabilityDuration is greater than timeout", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ stabilityDuration: 10000, timeout: 5000 });
+		}).rejects.toThrowError(
+			"stabilityDuration (10000ms) must be less than timeout (5000ms). " +
+				"The timeout must allow time for both table changes and stabilization."
+		);
+	});
+
+	test("should throw error when stabilityDuration equals timeout", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.waitForStable({ stabilityDuration: 5000, timeout: 5000 });
+		}).rejects.toThrowError(
+			"stabilityDuration (5000ms) must be less than timeout (5000ms). " +
+				"The timeout must allow time for both table changes and stabilization."
+		);
+	});
+
+	test("should throw error when timeout is too short for one stability cycle", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// checkInterval (100) + stabilityDuration (500) = 600ms minimum, but timeout is only 550ms
+		// checkInterval (100) is valid as it's ≤ stabilityDuration/2 (250)
+		// stabilityDuration (500) < timeout (550), so that check passes too
+		await expect(async () => {
+			await table.waitForStable({ checkInterval: 100, stabilityDuration: 500, timeout: 550 });
+		}).rejects.toThrowError(
+			"timeout (550ms) is too short. Minimum required: 600ms " +
+				"(checkInterval 100ms + stabilityDuration 500ms). " +
+				"The timeout must allow at least one check plus full stabilization period."
+		);
+	});
+
+	test("should accept valid configuration with checkInterval at half of stabilityDuration", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Should not throw - checkInterval can be exactly half of stabilityDuration
+		await table.waitForStable({ checkInterval: 100, stabilityDuration: 200, timeout: 5000 });
+	});
+
+	test("should accept valid configuration when timeout is greater than stabilityDuration", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Should not throw validation error - timeout > stabilityDuration is valid
+		await table.waitForStable({ checkInterval: 50, stabilityDuration: 200, timeout: 5000 });
+	});
+});
