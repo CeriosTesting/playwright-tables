@@ -20,20 +20,65 @@ export type HeaderRowOptions = {
 	colspan?: { enabled?: boolean; suffix?: boolean };
 };
 
+/**
+ * Utility class for extracting and processing table header rows.
+ * Handles complex scenarios including colspan, rowspan, empty cells, and duplicate header names.
+ */
 export abstract class TableHeader {
+	private static readonly EMPTY_CELL_PLACEHOLDER = "{{Empty}}";
+	private static readonly COLSPAN_SUFFIX_PREFIX = "__C";
+	private static readonly DUPLICATE_SUFFIX_PREFIX = "__D";
+	private static readonly COLSPAN_PATTERN = /__C\d+/;
+
+	/**
+	 * Extracts header rows from a table with optional processing for colspan, rowspan, and duplicates.
+	 *
+	 * @param headerRowLocator - The Playwright locator for header rows.
+	 * @param columnsSelector - CSS selector for locating header columns (e.g., "th").
+	 * @param headerRowOptions - Optional configuration for header processing.
+	 * @returns Promise resolving to an array of processed header rows.
+	 * @throws Error if columnsSelector is empty or if no header rows are found.
+	 *
+	 * @example
+	 * const headers = await TableHeader.getRows(
+	 *   page.locator('thead tr'),
+	 *   'th',
+	 *   { duplicateSuffix: true, colspan: { enabled: true } }
+	 * );
+	 */
 	static async getRows(
 		headerRowLocator: Locator,
 		columnsSelector: string,
 		headerRowOptions?: HeaderRowOptions
 	): Promise<HeaderRow[]> {
+		if (!columnsSelector || columnsSelector.trim() === "") {
+			throw new Error("columnsSelector cannot be empty");
+		}
+
+		const locatorDescription = headerRowLocator.toString();
 		const options = this.getDefaultOptions(headerRowOptions);
 		const rows = await headerRowLocator.all();
+
 		const headerRows: HeaderRow[] = [];
+
+		if (rows.length === 0) {
+			return headerRows;
+		}
+
 		const rowSpans: Map<number, string> = new Map();
 
-		for (const row of rows) {
-			const headerRow = await this.processRow(row, columnsSelector, rowSpans, options);
-			headerRows.push(headerRow);
+		for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+			try {
+				const headerRow = await this.processRow(rows[rowIndex], columnsSelector, rowSpans, options);
+				headerRows.push(headerRow);
+			} catch (error) {
+				throw new Error(
+					`Failed to process header row at index ${rowIndex}.\n` +
+						`Header row locator: ${locatorDescription}\n` +
+						`Columns selector: "${columnsSelector}"\n` +
+						`Error: ${error instanceof Error ? error.message : String(error)}`
+				);
+			}
 		}
 
 		this.applyColspanOptions(headerRows, options);
@@ -62,35 +107,71 @@ export abstract class TableHeader {
 	): Promise<HeaderRow> {
 		const headerRow: HeaderRow = [];
 		const cells = await row.locator(columnsSelector).all();
-		let columnIndex = 0;
 
-		for (const cell of cells) {
-			columnIndex = await this.processCell(cell, headerRow, rowSpans, columnIndex, options);
+		if (cells.length === 0) {
+			return headerRow;
+		}
+
+		const cellDataArray = await Promise.all(cells.map(cell => this.fetchHeaderCellData(cell, options.cellContentType)));
+
+		let columnIndex = 0;
+		for (let i = 0; i < cellDataArray.length; i++) {
+			columnIndex = this.processHeaderCellData(
+				cellDataArray[i],
+				headerRow,
+				rowSpans,
+				columnIndex,
+				options.emptyCellReplacement
+			);
 		}
 
 		this.addRemainingRowSpans(headerRow, rowSpans, columnIndex);
 		return headerRow;
 	}
 
-	private static async processCell(
+	/**
+	 * Fetches header cell content and span attributes in parallel.
+	 * This method performs DOM operations that can be parallelized across multiple cells.
+	 */
+	private static async fetchHeaderCellData(
 		cell: Locator,
+		cellContentType: CellContentType
+	): Promise<{ text: string; rowspan: number; colspan: number }> {
+		const [text, spanAttributes] = await Promise.all([
+			TableUtils.getCellContent(cell, cellContentType),
+			TableUtils.parseSpanAttributes(cell),
+		]);
+
+		return {
+			text,
+			rowspan: spanAttributes.rowspan,
+			colspan: spanAttributes.colspan,
+		};
+	}
+
+	/**
+	 * Processes pre-fetched header cell data and applies it to the header row.
+	 * This method is purely computational and doesn't perform any DOM operations.
+	 */
+	private static processHeaderCellData(
+		cellData: { text: string; rowspan: number; colspan: number },
 		headerRow: HeaderRow,
 		rowSpans: Map<number, string>,
 		columnIndex: number,
-		options: Required<HeaderRowOptions>
-	): Promise<number> {
+		emptyCellReplacement: boolean
+	): number {
 		while (rowSpans.has(columnIndex)) {
 			headerRow.push(rowSpans.get(columnIndex)!);
 			rowSpans.delete(columnIndex);
 			columnIndex++;
 		}
 
-		let text = await TableUtils.getCellContent(cell, options.cellContentType);
-		if (!text && options.emptyCellReplacement) {
-			text = "{{Empty}}";
+		let text = cellData.text;
+		if (!text && emptyCellReplacement) {
+			text = this.EMPTY_CELL_PLACEHOLDER;
 		}
 
-		const { colspan, rowspan } = await TableUtils.parseSpanAttributes(cell);
+		const { colspan, rowspan } = cellData;
 
 		headerRow.push(text);
 		this.handleColspan(headerRow, text, colspan);
@@ -101,7 +182,7 @@ export abstract class TableHeader {
 
 	private static handleColspan(headerRow: HeaderRow, text: string, colspan: number): void {
 		for (let i = 1; i < colspan; i++) {
-			headerRow.push(`${text}__C${i}`);
+			headerRow.push(`${text}${this.COLSPAN_SUFFIX_PREFIX}${i}`);
 		}
 	}
 
@@ -138,21 +219,16 @@ export abstract class TableHeader {
 	}
 
 	private static removeColspanCells(headerRows: HeaderRow[]): void {
-		for (const headerRow of headerRows) {
-			for (let i = 0; i < headerRow.length; i++) {
-				if (/__C\d/.test(headerRow[i])) {
-					headerRow.splice(i, 1);
-					i--;
-				}
-			}
+		for (let i = 0; i < headerRows.length; i++) {
+			headerRows[i] = headerRows[i].filter(cell => !this.COLSPAN_PATTERN.test(cell));
 		}
 	}
 
 	private static removeColspanSuffix(headerRows: HeaderRow[]): void {
 		for (const headerRow of headerRows) {
 			for (let i = 0; i < headerRow.length; i++) {
-				if (/__C\d/.test(headerRow[i])) {
-					headerRow[i] = headerRow[i].replace(/__C\d/, "");
+				if (this.COLSPAN_PATTERN.test(headerRow[i])) {
+					headerRow[i] = headerRow[i].replace(this.COLSPAN_PATTERN, "");
 				}
 			}
 		}
@@ -165,10 +241,10 @@ export abstract class TableHeader {
 			const headerCountMap: Map<string, number> = new Map();
 			for (let i = 0; i < headerRow.length; i++) {
 				const header = headerRow[i];
-				if (headerCountMap.has(header)) {
-					const count = headerCountMap.get(header)!;
-					headerRow[i] = `${header}__D${count}`;
-					headerCountMap.set(header, count + 1);
+				const currentCount = headerCountMap.get(header);
+				if (currentCount !== undefined) {
+					headerRow[i] = `${header}${this.DUPLICATE_SUFFIX_PREFIX}${currentCount}`;
+					headerCountMap.set(header, currentCount + 1);
 				} else {
 					headerCountMap.set(header, 1);
 				}

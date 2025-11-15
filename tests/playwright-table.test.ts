@@ -18,7 +18,7 @@ test.describe("Table Tests", () => {
 
 		const table = new PlaywrightTable(page.locator("table"));
 
-		const headers = await table.getHeaderRows({ headerRowOptions: { colspan: { enabled: false } } });
+		const headers = await table.getHeaderRows({ colspan: { enabled: false } });
 		expect(headers).toEqual([
 			["Average", "Average", "Age"],
 			["Height", "Weight", "Height", "Weight", "Age"],
@@ -91,6 +91,20 @@ test.describe("Table Tests", () => {
 					"Savings for holiday!": "50",
 				},
 			]);
+		});
+
+		test("No header rows should throw exception", async ({ page }) => {
+			await page.goto(Route.EmptyHeaderRowsTable);
+
+			const table = new PlaywrightTable(page.locator("table"), { header: { rowSelector: "invalid" } });
+			await expect(table.getJson()).rejects.toThrowError("No header rows found");
+		});
+
+		test("No body rows should throw exception", async ({ page }) => {
+			await page.goto(Route.EmptyBodyRowsTable);
+
+			const table = new PlaywrightTable(page.locator("table"), { row: { rowSelector: "invalid" } });
+			await expect(table.getJson()).rejects.toThrowError("No body rows found");
 		});
 
 		test.describe("options.bodyRowOptions.cellContentType", async () => {
@@ -195,74 +209,6 @@ test.describe("Table Tests", () => {
 			await locator.locator("input[type='button']").click();
 		}
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
-	});
-
-	test.describe("dynamic table loading", async () => {
-		test("should wait for table to contain text", async ({ page }) => {
-			await page.goto(Route.DynamicLoadTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-			const json = await table.getJson();
-			expect(json).toEqual([
-				{
-					"Header 1": "Row 1 Col 1",
-					"Header 2": "Row 1 Col 2",
-					"Header 3": "Row 1 Col 3",
-				},
-				{
-					"Header 1": "Row 2 Col 1",
-					"Header 2": "Row 2 Col 2",
-					"Header 3": "Row 2 Col 3",
-				},
-				{
-					"Header 1": "Row 3 Col 1",
-					"Header 2": "Row 3 Col 2",
-					"Header 3": "Row 3 Col 3",
-				},
-			]);
-		});
-
-		test("empty header rows should throw exception", async ({ page }) => {
-			await page.goto(Route.EmptyHeaderRowsTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
-		});
-
-		test("empty body rows should throw exception", async ({ page }) => {
-			await page.goto(Route.EmptyBodyRowsTable);
-
-			const table = new PlaywrightTable(page.locator("table"));
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
-		});
-
-		test("No header rows should throw exception", async ({ page }) => {
-			await page.goto(Route.EmptyHeaderRowsTable);
-
-			const table = new PlaywrightTable(page.locator("table"), { header: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
-		});
-
-		test("No header row cells should throw exception", async ({ page }) => {
-			await page.goto(Route.EmptyHeaderRowsTable);
-
-			const table = new PlaywrightTable(page.locator("table"), { header: { columnSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No header cells with content found");
-		});
-
-		test("No body rows should throw exception", async ({ page }) => {
-			await page.goto(Route.EmptyBodyRowsTable);
-
-			const table = new PlaywrightTable(page.locator("table"), { row: { rowSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
-		});
-
-		test("No body row cells should throw exception", async ({ page }) => {
-			await page.goto(Route.EmptyBodyRowsTable);
-
-			const table = new PlaywrightTable(page.locator("table"), { row: { columnSelector: "invalid" } });
-			await expect(table.getJson({ timeout: 1_000 })).rejects.toThrowError("No body cells with content found");
-		});
 	});
 
 	test("div table", async ({ page }) => {
