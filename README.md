@@ -233,11 +233,11 @@ await cellLocator.click();
 
 ### 5. `getBodyCellLocatorByRowConditions(conditions, targetHeader, options?)`
 
-Finds a cell by matching row conditions and returns the locator for a specific column.
+Finds a cell by matching row conditions and returns the locator for a specific column. Supports both object syntax (multiple conditions) and tuple syntax (single condition).
 
 **Parameters:**
 
-- `conditions: Record<string, string>` - Header-value pairs to match
+- `conditions: Record<string, string> | [string, string]` - Header-value pairs to match (object) or single [header, value] tuple
 - `targetHeader: string` - Column name to retrieve
 - `options?: TableOptions` - Table loading options
 
@@ -251,13 +251,16 @@ Finds a cell by matching row conditions and returns the locator for a specific c
 **Example:**
 
 ```ts
-// Find "Email" cell where "First name" is "John" and "Status" is "Active"
+// Find cell with multiple conditions (object syntax)
 const emailCell = await table.getBodyCellLocatorByRowConditions({ "First name": "John", Status: "Active" }, "Email");
 await expect(emailCell).toContainText("@example.com");
 
-// Click button in Actions column for specific user
-const actionCell = await table.getBodyCellLocatorByRowConditions({ Username: "john.doe" }, "Actions");
+// Find cell with single condition (tuple syntax)
+const actionCell = await table.getBodyCellLocatorByRowConditions(["Username", "john.doe"], "Actions");
 await actionCell.locator("button.delete").click();
+
+// Find cell with single condition (object syntax also works)
+const statusCell = await table.getBodyCellLocatorByRowConditions({ Username: "john.doe" }, "Status");
 ```
 
 ---
@@ -696,7 +699,96 @@ for (let i = 0; i < 20; i++) {
 
 ---
 
-### 16. `getRowCount()`
+### 16. `waitForCellText(conditions, targetHeader, expectedText, options?)`
+
+Waits for a specific cell to contain expected text. Finds the cell by matching row conditions and target header, then validates the text content. Supports both string (exact match) and RegExp (pattern match).
+
+**Parameters:**
+
+- `conditions: Record<string, string> | [string, string]` - Record of header names and expected cell values to match the row, or single [header, value] tuple
+- `targetHeader: string` - The header name of the column containing the cell to check
+- `expectedText: string | RegExp` - Expected cell text (string for exact match or RegExp for pattern match)
+- `options?: PollingOptions` - Polling options (timeout, interval, retries)
+
+**Returns:** `Promise<void>`
+
+**Throws:**
+
+- Error if cell text doesn't match within timeout period
+- Error if specified headers don't exist in the table
+- Error if no row matches the specified conditions
+
+**Example:**
+
+```ts
+// Wait for exact text match with single condition (tuple syntax)
+await table.waitForCellText(["Username", "john.doe"], "Status", "Active", { timeout: 5000 });
+
+// Wait for regex pattern match
+await table.waitForCellText({ "Order ID": "12345" }, "Status", /Processing|Completed/, { timeout: 10000 });
+
+// Wait for email to appear after user creation
+await page.locator("button.create-user").click();
+await table.waitForCellText({ "First name": "John", "Last name": "Doe" }, "Email", "john.doe@example.com");
+
+// Verify status change after action
+await page.locator("button.approve").click();
+await table.waitForCellText({ "Request ID": "REQ-123" }, "Status", "Approved");
+```
+
+**Use Cases:**
+
+- Waiting for specific cell values after actions
+- Verifying data updates in real-time
+- Polling for status changes in specific cells
+- Validating computed or dynamic cell content
+
+---
+
+### 17. `waitForExactRowCount(count, options?)`
+
+Waits for the table to have exactly the specified number of body rows. More precise than `waitForBodyRows` when you need an exact count.
+
+**Parameters:**
+
+- `count: number` - The exact number of rows expected
+- `options?: PollingOptions` - Polling options (timeout, interval, retries)
+
+**Returns:** `Promise<void>`
+
+**Throws:**
+
+- Error if row count doesn't match within timeout
+- Error if count is negative or not an integer
+
+**Example:**
+
+```ts
+// Wait for table to have exactly 10 rows
+await table.waitForExactRowCount(10, { timeout: 5000 });
+
+// Verify table has exactly 0 rows (alternative to waitForEmpty)
+await table.waitForExactRowCount(0);
+
+// Wait after pagination change
+await page.locator("button.page-2").click();
+await table.waitForExactRowCount(25);
+
+// Verify filtered results
+await page.locator("input.search").fill("admin");
+await table.waitForExactRowCount(3); // Expect exactly 3 admin users
+```
+
+**Use Cases:**
+
+- Verifying exact result counts after filtering
+- Validating pagination behavior
+- Testing data deletion/addition
+- Ensuring precise table state for assertions
+
+---
+
+### 18. `getRowCount()`
 
 Gets the count of header and body rows in the table. Lightweight method that doesn't fetch cell data, only counts rows.
 
@@ -731,7 +823,53 @@ if (rowCounts.body === 0) {
 
 ---
 
-### 17. `findRowIndex(conditions, options?)`
+### 19. `getDistinctColumnValues(headerName, options?)`
+
+Gets all distinct (unique) values from a specific column. Returns a sorted array of unique string values, excluding empty values.
+
+**Parameters:**
+
+- `headerName: string` - The header name of the column to extract distinct values from
+- `options?: TableOptions` - Optional table loading options
+
+**Returns:** `Promise<string[]>` - Sorted array of distinct values
+
+**Throws:** Error if the specified header is not found in the table
+
+**Example:**
+
+```ts
+// Get all unique status values
+const statuses = await table.getDistinctColumnValues("Status");
+// Result: ["Active", "Inactive", "Pending"]
+
+// Get distinct countries for filtering
+const countries = await table.getDistinctColumnValues("Country");
+console.log(`Available countries: ${countries.join(", ")}`);
+
+// Verify expected values exist
+const roles = await table.getDistinctColumnValues("Role");
+expect(roles).toContain("Admin");
+expect(roles).toHaveLength(3);
+
+// Build dynamic filters from table data
+const categories = await table.getDistinctColumnValues("Category");
+for (const category of categories) {
+	await page.locator(`button[data-filter="${category}"]`).click();
+	// Verify filtering works
+}
+```
+
+**Use Cases:**
+
+- Extracting filter options from table data
+- Validating data variety and uniqueness
+- Building dynamic test data sets
+- Verifying dropdown/select options match table content
+
+---
+
+### 20. `findRowIndex(conditions, options?)`
 
 Finds the index of the first body row matching the specified conditions. Returns -1 if no matching row is found.
 

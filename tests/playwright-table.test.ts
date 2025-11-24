@@ -180,6 +180,74 @@ test.describe("Table Tests", () => {
 		expect(await table.getBodyRows()).toHaveLength(2);
 	});
 
+	test("getBodyCellLocatorByRowConditions should work with tuple syntax", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Using tuple syntax for single condition
+		const cellLocator = await table.getBodyCellLocatorByRowConditions(["First name", "Ronald"], "Last name");
+
+		await expect(cellLocator).toHaveText("Veth");
+	});
+
+	test("getBodyCellLocatorByRowConditions should work with object syntax for single condition", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Using object syntax for single condition
+		const cellLocator = await table.getBodyCellLocatorByRowConditions({ "First name": "Ronald" }, "Last name");
+
+		await expect(cellLocator).toHaveText("Veth");
+	});
+
+	test("getBodyCellLocatorByRowConditions should work with multiple conditions", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Using object syntax for multiple conditions
+		const cellLocator = await table.getBodyCellLocatorByRowConditions(
+			{ "First name": "Logan", "Last name": "Deacon" },
+			"Date of birth"
+		);
+
+		await expect(cellLocator).toHaveText("01-10-2002");
+	});
+
+	test("getBodyCellLocatorByRowConditions tuple syntax should throw error for non-existent header", async ({
+		page,
+	}) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.getBodyCellLocatorByRowConditions(["NonExistent", "value"], "Last name");
+		}).rejects.toThrow(/Header "NonExistent" not found/);
+	});
+
+	test("getBodyCellLocatorByRowConditions tuple syntax should throw error for non-matching value", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.getBodyCellLocatorByRowConditions(["First name", "NonExistent"], "Last name");
+		}).rejects.toThrow(/No row found matching conditions/);
+	});
+
+	test("getBodyCellLocatorByRowConditions tuple and object syntax should return same cell", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Tuple syntax
+		const cell1 = await table.getBodyCellLocatorByRowConditions(["First name", "Ronald"], "Date of birth");
+
+		// Object syntax
+		const cell2 = await table.getBodyCellLocatorByRowConditions({ "First name": "Ronald" }, "Date of birth");
+
+		// Both should return the same cell
+		await expect(cell1).toHaveText("22-12-1987");
+		await expect(cell2).toHaveText("22-12-1987");
+	});
+
 	test("getAllBodyCellLocatorsByHeaderName returns locators", async ({ page }) => {
 		await page.goto(Route.ButtonTable);
 
@@ -243,5 +311,127 @@ test.describe("Table Tests", () => {
 				Specialty: "Anonymity",
 			},
 		]);
+	});
+});
+
+test.describe("getDistinctColumnValues", () => {
+	test("should return sorted distinct values from a column", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const firstNames = await table.getDistinctColumnValues("First name");
+
+		expect(firstNames).toEqual(["Logan", "Ronald"]);
+	});
+
+	test("should exclude empty values", async ({ page }) => {
+		await page.goto(Route.EmptyBodyRowsTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const values = await table.getDistinctColumnValues("Rows");
+
+		// Should return empty array since all values are empty or whitespace
+		expect(values).toEqual([]);
+	});
+
+	test("should return unique values only", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Add duplicate rows
+		await page.evaluate(() => {
+			const tbody = document.querySelector("tbody");
+			if (tbody) {
+				const newRow = tbody.insertRow();
+				newRow.insertCell(0).textContent = "Ronald";
+				newRow.insertCell(1).textContent = "Smith";
+				newRow.insertCell(2).textContent = "01-01-1990";
+			}
+		});
+
+		const firstNames = await table.getDistinctColumnValues("First name");
+
+		// Should have only 2 unique first names: Logan and Ronald
+		expect(firstNames).toEqual(["Logan", "Ronald"]);
+	});
+
+	test("should throw error when header not found", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.getDistinctColumnValues("NonExistentHeader");
+		}).rejects.toThrow(/Header "NonExistentHeader" not found/);
+	});
+
+	test("should include available headers in error message", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		await expect(async () => {
+			await table.getDistinctColumnValues("NonExistent");
+		}).rejects.toThrow(/Available headers/);
+	});
+
+	test("should work with different column types", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const lastNames = await table.getDistinctColumnValues("Last name");
+		const dates = await table.getDistinctColumnValues("Date of birth");
+
+		expect(lastNames).toEqual(["Deacon", "Veth"]);
+		expect(dates).toHaveLength(2);
+	});
+
+	test("should trim whitespace from values", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Add row with whitespace
+		await page.evaluate(() => {
+			const tbody = document.querySelector("tbody");
+			if (tbody) {
+				const newRow = tbody.insertRow();
+				newRow.insertCell(0).textContent = "  Ronald  ";
+				newRow.insertCell(1).textContent = "Test";
+				newRow.insertCell(2).textContent = "01-01-2000";
+			}
+		});
+
+		const firstNames = await table.getDistinctColumnValues("First name");
+
+		// Should have only 2 values, with whitespace trimmed
+		expect(firstNames).toEqual(["Logan", "Ronald"]);
+	});
+
+	test("should return empty array when all values are empty", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Clear all first names
+		await page.evaluate(() => {
+			const cells = document.querySelectorAll("tbody tr td:first-child");
+			cells.forEach(cell => (cell.textContent = ""));
+		});
+
+		const firstNames = await table.getDistinctColumnValues("First name");
+
+		expect(firstNames).toEqual([]);
+	});
+
+	test("should work with single value in column", async ({ page }) => {
+		await page.goto(Route.SimpleTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// Set all first names to same value
+		await page.evaluate(() => {
+			const cells = document.querySelectorAll("tbody tr td:first-child");
+			cells.forEach(cell => (cell.textContent = "John"));
+		});
+
+		const firstNames = await table.getDistinctColumnValues("First name");
+
+		expect(firstNames).toEqual(["John"]);
 	});
 });

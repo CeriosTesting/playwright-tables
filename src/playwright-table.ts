@@ -255,7 +255,7 @@ export class PlaywrightTable {
 	/**
 	 * Retrieves a cell locator in the body of the table based on row conditions and a target header.
 	 * Finds the first row where all conditions match, then returns the cell in the target column.
-	 * @param conditions - An object where keys are header names and values are expected cell contents.
+	 * @param conditions - An object where keys are header names and values are expected cell contents, or a single [header, value] tuple.
 	 * @param targetHeader - The header name of the column containing the cell to retrieve.
 	 * @param options - Optional table loading options. See {@link TableOptions}.
 	 * @returns A promise that resolves to a Playwright Locator for the matching cell.
@@ -263,7 +263,7 @@ export class PlaywrightTable {
 	 * @throws Error if any condition header or target header is not found in the table.
 	 *
 	 * @example
-	 * // Find cell in "Email" column where "First name" is "John" and "Status" is "Active"
+	 * // Find cell with multiple conditions
 	 * const emailLocator = await table.getBodyCellLocatorByRowConditions(
 	 *   { "First name": "John", "Status": "Active" },
 	 *   "Email"
@@ -271,18 +271,25 @@ export class PlaywrightTable {
 	 * await expect(emailLocator).toContainText('@example.com');
 	 *
 	 * @example
-	 * // Click button in "Actions" column for specific user
+	 * // Find cell with single condition using tuple syntax
 	 * const actionCell = await table.getBodyCellLocatorByRowConditions(
-	 *   { "Username": "john.doe" },
+	 *   ["Username", "john.doe"],
 	 *   "Actions"
 	 * );
 	 * await actionCell.locator('button').click();
+	 *
+	 * @example
+	 * // Find cell with single condition using object syntax
+	 * const statusCell = await table.getBodyCellLocatorByRowConditions(
+	 *   { "Username": "john.doe" },
+	 *   "Status"
+	 * );
 	 *
 	 * @see {@link getBodyCellLocator} for getting cells by direct index
 	 * @see {@link getAllBodyCellLocatorsByHeaderName} for getting all cells in a column
 	 */
 	async getBodyCellLocatorByRowConditions(
-		conditions: Record<string, string>,
+		conditions: Record<string, string> | [string, string],
 		targetHeader: string,
 		options?: TableOptions
 	): Promise<Locator> {
@@ -298,11 +305,14 @@ export class PlaywrightTable {
 			);
 		}
 
+		// Normalize conditions to object format
+		const conditionsObj = Array.isArray(conditions) ? { [conditions[0]]: conditions[1] } : conditions;
+
 		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
 			const row = table.bodyRows[rowIndex];
 			let matches = true;
 
-			for (const [header, value] of Object.entries(conditions)) {
+			for (const [header, value] of Object.entries(conditionsObj)) {
 				const headerIndex = mainHeader.indexOf(header);
 				if (headerIndex === -1) {
 					throw new Error(
@@ -324,7 +334,7 @@ export class PlaywrightTable {
 		}
 
 		throw new Error(
-			`No row found matching conditions: ${JSON.stringify(conditions)}\n` +
+			`No row found matching conditions: ${JSON.stringify(conditionsObj)}\n` +
 				`Target header: "${targetHeader}"\n` +
 				`Searched ${table.bodyRows.length} rows\n` +
 				`Body row locator: ${this._bodyRowLocator.toString()}`
@@ -823,6 +833,100 @@ export class PlaywrightTable {
 	}
 
 	/**
+	 * Waits for a specific cell to contain expected text.
+	 * Finds the cell by matching row conditions and target header, then validates the text.
+	 * @param conditions - Record of header names and expected cell values to match the row, or a single [header, value] tuple.
+	 * @param targetHeader - The header name of the column containing the cell to check.
+	 * @param expectedText - Expected cell text (string for exact match or RegExp for pattern match).
+	 * @param options - Polling options (timeout, interval, retries).
+	 * @returns A promise that resolves when the cell contains the expected text.
+	 * @throws Error if cell text doesn't match within timeout period.
+	 * @throws Error if specified headers don't exist in the table.
+	 * @throws Error if no row matches the specified conditions.
+	 *
+	 * @example
+	 * // Wait for cell with single condition using tuple
+	 * await table.waitForCellText(
+	 *   ["Username", "john.doe"],
+	 *   "Email",
+	 *   /.*@example\.com$/,
+	 *   { timeout: 5000 }
+	 * );
+	 *
+	 * @example
+	 * // Wait for cell with multiple conditions
+	 * await table.waitForCellText(
+	 *   { "First name": "John", "Last name": "Doe" },
+	 *   "Status",
+	 *   "Active"
+	 * );
+	 *
+	 * @see {@link getBodyCellLocatorByRowConditions} for getting cell locators
+	 * @see {@link waitForRowByConditions} for waiting on row existence
+	 */
+	async waitForCellText(
+		conditions: Record<string, string> | [string, string],
+		targetHeader: string,
+		expectedText: string | RegExp,
+		options?: PollingOptions
+	): Promise<void> {
+		await Poll(async () => {
+			const cellLocator = await this.getBodyCellLocatorByRowConditions(conditions, targetHeader);
+			const text = await cellLocator.textContent();
+			const actualText = text?.trim() ?? "";
+			const matches = typeof expectedText === "string" ? actualText === expectedText : expectedText.test(actualText);
+
+			// Normalize conditions for error message
+			const conditionsObj = Array.isArray(conditions) ? { [conditions[0]]: conditions[1] } : conditions;
+
+			if (!matches) {
+				throw new Error(
+					`Cell text does not match.\n` +
+						`Expected: ${expectedText}\n` +
+						`Actual: "${actualText}"\n` +
+						`Conditions: ${JSON.stringify(conditionsObj)}\n` +
+						`Target header: "${targetHeader}"`
+				);
+			}
+		}, options);
+	}
+
+	/**
+	 * Waits for the table body to have exactly N rows.
+	 * More precise than waitForBodyRows when you need an exact count.
+	 * @param count - The exact number of body rows expected.
+	 * @param options - Polling options (timeout, interval, retries).
+	 * @returns A promise that resolves when the table has exactly the specified number of rows.
+	 * @throws Error if row count doesn't match within timeout period.
+	 *
+	 * @example
+	 * // Wait for exactly 10 rows after pagination
+	 * await table.waitForExactRowCount(10, { timeout: 5000 });
+	 *
+	 * @example
+	 * // Verify table has exactly 0 rows (alternative to waitForEmpty)
+	 * await table.waitForExactRowCount(0);
+	 *
+	 * @see {@link waitForBodyRows} for waiting with minimum row count and cell validation
+	 * @see {@link getRowCount} for getting current row counts
+	 */
+	async waitForExactRowCount(count: number, options?: PollingOptions): Promise<void> {
+		if (count < 0 || !Number.isInteger(count)) {
+			throw new Error(`Row count must be a non-negative integer, got: ${count}`);
+		}
+
+		await Poll(async () => {
+			const rows = await this._bodyRowLocator.all();
+			if (rows.length !== count) {
+				throw new Error(
+					`Expected exactly ${count} rows, but found ${rows.length}.\n` +
+						`Body row locator: ${this._bodyRowLocator.toString()}`
+				);
+			}
+		}, options);
+	}
+
+	/**
 	 * Gets the count of header and body rows in the table.
 	 * Lightweight method that doesn't fetch cell data, only counts rows.
 	 * @returns A promise that resolves to an object with header and body row counts.
@@ -845,6 +949,55 @@ export class PlaywrightTable {
 			header: headerRows.length,
 			body: bodyRows.length,
 		};
+	}
+
+	/**
+	 * Gets all distinct (unique) values from a specific column.
+	 * Returns a sorted array of unique string values, excluding empty values.
+	 * @param headerName - The header name of the column to extract distinct values from.
+	 * @param options - Optional table loading options. See {@link TableOptions}.
+	 * @returns A promise that resolves to a sorted array of distinct values.
+	 * @throws Error if the specified header is not found in the table.
+	 *
+	 * @example
+	 * // Get all unique status values
+	 * const statuses = await table.getDistinctColumnValues("Status");
+	 * // Result: ["Active", "Inactive", "Pending"]
+	 *
+	 * @example
+	 * // Get distinct countries for filtering
+	 * const countries = await table.getDistinctColumnValues("Country");
+	 * console.log(`Available countries: ${countries.join(", ")}`);
+	 *
+	 * @example
+	 * // Verify expected values exist
+	 * const roles = await table.getDistinctColumnValues("Role");
+	 * expect(roles).toContain("Admin");
+	 * expect(roles).toHaveLength(3);
+	 *
+	 * @see {@link getAllBodyCellLocatorsByHeaderName} for getting all cell locators in a column
+	 * @see {@link getJson} for getting full table data
+	 */
+	async getDistinctColumnValues(headerName: string, options?: TableOptions): Promise<string[]> {
+		const table = await this.getTable(options);
+		const mainHeader = this.mainHeaderRow(table.headerRows);
+		const headerIndex = mainHeader.indexOf(headerName);
+
+		if (headerIndex === -1) {
+			throw new Error(
+				`Header "${headerName}" not found.\n` +
+					`Available headers: [${mainHeader.join(", ")}]\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
+		}
+
+		const values = new Set<string>();
+		for (const row of table.bodyRows) {
+			const value = String(row[headerIndex] ?? "").trim();
+			if (value) values.add(value);
+		}
+
+		return Array.from(values).sort();
 	}
 
 	/**
