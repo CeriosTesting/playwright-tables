@@ -1,4 +1,5 @@
 import { Locator } from "@playwright/test";
+
 import { CellContentType } from "./cell-content-type";
 
 export abstract class TableUtils {

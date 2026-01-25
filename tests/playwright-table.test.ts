@@ -1,8 +1,9 @@
 import test, { expect } from "@playwright/test";
-import { PlaywrightTable } from "src/playwright-table";
-import { Route } from "./demo-html/routes";
-import { TableBody } from "src/table-body";
 import { CellContentType } from "src";
+import { PlaywrightTable } from "src/playwright-table";
+import { TableBody } from "src/table-body";
+
+import { Route } from "./demo-html/routes";
 
 test.describe("Table Tests", () => {
 	test("getMainHeaderRow returns headers used for table", async ({ page }) => {

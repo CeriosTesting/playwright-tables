@@ -1,6 +1,7 @@
 import { Locator } from "@playwright/test";
-import { BodyRow, Cell } from "./row";
+
 import { CellContentType } from "./cell-content-type";
+import { BodyRow, Cell } from "./row";
 import { TableUtils } from "./table-utils";
 
 /**

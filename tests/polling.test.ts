@@ -1,12 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { Poll } from "../src/polling";
+
+import { pollTable } from "../src/polling";
 
 test.describe("toPassWithErrorContext", () => {
 	test("should strip Playwright's generic timeout error and preserve custom error message", async () => {
 		const errorMessage = "Cell not found in table at row 5";
 
 		try {
-			await Poll(
+			await pollTable(
 				async () => {
 					throw new Error(errorMessage);
 				},
@@ -25,7 +26,7 @@ test.describe("toPassWithErrorContext", () => {
 		const errorMessage = 'Failed to get cell\nLocator: table > tbody > tr\nValue: {"key": "value"}';
 
 		await expect(async () => {
-			await Poll(
+			await pollTable(
 				async () => {
 					throw new Error(errorMessage);
 				},
@@ -36,7 +37,7 @@ test.describe("toPassWithErrorContext", () => {
 
 	test("should not add context prefix when not provided", async () => {
 		try {
-			await Poll(
+			await pollTable(
 				async () => {
 					throw new Error("Error message");
 				},
@@ -50,7 +51,7 @@ test.describe("toPassWithErrorContext", () => {
 	});
 
 	test("should pass when function succeeds", async () => {
-		await Poll(async () => {
+		await pollTable(async () => {
 			// Success
 		});
 	});
@@ -58,7 +59,7 @@ test.describe("toPassWithErrorContext", () => {
 	test("should retry until success", async () => {
 		let attempts = 0;
 
-		await Poll(
+		await pollTable(
 			async () => {
 				attempts++;
 				if (attempts < 3) {

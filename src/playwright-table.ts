@@ -1,10 +1,10 @@
 import { Locator } from "@playwright/test";
-import { TableBody } from "./table-body";
-import { BodyRow, Cell, HeaderRow } from "./row";
-import { HeaderRowOptions, TableHeader } from "./table-header";
-import { RowKind, TableWait } from "./table-wait";
+
 import { CellContentType } from "./cell-content-type";
-import { Poll, PollingOptions } from "./polling";
+import { pollTable, PollingOptions } from "./polling";
+import { BodyRow, Cell, HeaderRow } from "./row";
+import { TableBody } from "./table-body";
+import { HeaderRowOptions, TableHeader } from "./table-header";
 
 /**
  * Options for loading table data, headers, and rows.
@@ -27,75 +27,6 @@ export type TableOptions = {
 	/** Options for parsing body rows. */
 	bodyRowOptions?: { cellContentType?: CellContentType };
 };
-
-/**
- * Options for waiting for table rows to appear or meet certain conditions.
- *
- * @property row - Row validation criteria.
- * @property row.amount - Expected exact number of rows. If not specified, validates at least one row exists.
- * @property row.cell - Cell validation criteria.
- * @property row.cell.totalCount - Expected number of cells per row (regardless of content).
- * @property row.cell.contentCount - Expected number of cells with non-empty content per row.
- *
- * @example
- * // Wait for at least 3 body rows, each with 3 cells containing content
- * const waitOptions: WaitForTableRowsOptions = {
- *   row: {
- *     amount: 3,
- *     cell: {
- *       totalCount: 3,
- *       contentCount: 3,
- *     },
- *   },
- * };
- * await table.waitForBodyRows(waitOptions);
- */
-export type WaitForTableRowsOptions = {
-	/** Row and cell count/content conditions. */
-	row?: {
-		/** Expected number of rows. */
-		amount?: number;
-		cell?: {
-			/** Expected number of cells per row. */
-			totalCount?: number;
-			/** Expected number of cells with content per row. */
-			contentCount?: number;
-		};
-	};
-};
-
-/**
- * Options for waiting for table stability.
- *
- * @property stabilityDuration - Duration in ms that table must remain unchanged. Defaults to 500ms.
- * @property checkInterval - Interval in ms between stability checks. Defaults to 100ms.
- * @property timeout - Maximum time to wait in ms. Defaults to 30000ms (30 seconds).
- */
-export type WaitForStableOptions = {
-	/** Duration in ms that table must remain unchanged. Defaults to 500. */
-	stabilityDuration?: number;
-	/** Interval in ms between stability checks. Defaults to 100. */
-	checkInterval?: number;
-	/** Maximum time to wait in ms. Defaults to 30000. */
-	timeout?: number;
-};
-
-/**
- * Options for waiting for rows matching conditions.
- *
- * @property minRows - Minimum number of rows that must match the conditions. Defaults to 1.
- *
- * @example
- * // Wait for at least 3 rows where Country is "USA"
- * await table.waitForRowByConditions(
- *   { Country: "USA" },
- *   { minRows: 3, timeout: 10000 }
- * );
- */
-export type WaitForRowByConditionsOptions = {
-	/** Minimum number of matching rows expected. Defaults to 1. */
-	minRows?: number;
-} & PollingOptions;
 
 /**
  * Represents a table in Playwright, providing methods to interact with its headers, rows, and cells.
@@ -469,180 +400,6 @@ export class PlaywrightTable {
 	}
 
 	/**
-	 * Waits for the header rows to be loaded and meet specified conditions.
-	 * Uses polling to retry until conditions are met or timeout is reached.
-	 * @param options - Row validation and polling options.
-	 * @returns A promise that resolves when the header rows meet the specified conditions.
-	 * @throws Error if conditions are not met within the timeout period.
-	 *
-	 * @example
-	 * // Wait for at least 1 header row with 5 cells
-	 * await table.waitForHeaderRows({
-	 *   row: {
-	 *     amount: 1,
-	 *     cell: { totalCount: 5 }
-	 *   },
-	 *   timeout: 5000
-	 * });
-	 *
-	 * @see {@link waitForBodyRows} for waiting on body rows
-	 * @see {@link WaitForTableRowsOptions} for all validation options
-	 */
-	async waitForHeaderRows(options?: WaitForTableRowsOptions & PollingOptions): Promise<void> {
-		await Poll(async () => {
-			await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header, options);
-		}, options);
-	}
-
-	/**
-	 * Waits for the body rows to be loaded and meet specified conditions.
-	 * Uses polling to retry until conditions are met or timeout is reached.
-	 * @param options - Row validation and polling options.
-	 * @returns A promise that resolves when the body rows meet the specified conditions.
-	 * @throws Error if conditions are not met within the timeout period.
-	 *
-	 * @example
-	 * // Wait for at least 10 body rows
-	 * await table.waitForBodyRows({
-	 *   row: { amount: 10 },
-	 *   timeout: 10000
-	 * });
-	 *
-	 * @example
-	 * // Wait for rows with specific structure
-	 * await table.waitForBodyRows({
-	 *   row: {
-	 *     amount: 5,
-	 *     cell: {
-	 *       totalCount: 4,
-	 *       contentCount: 4
-	 *     }
-	 *   }
-	 * });
-	 *
-	 * @see {@link waitForHeaderRows} for waiting on header rows
-	 * @see {@link WaitForTableRowsOptions} for all validation options
-	 */
-	async waitForBodyRows(options?: WaitForTableRowsOptions & PollingOptions): Promise<void> {
-		await Poll(async () => {
-			await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body, options);
-		}, options);
-	}
-
-	/**
-	 * Waits for the table to become stable (no changes for a specified duration).
-	 * Useful for tables with lazy loading, streaming data, or animations.
-	 * @param options - Options for stability duration and polling. See {@link WaitForStableOptions}.
-	 * @returns A promise that resolves when table is stable.
-	 * @throws Error if table does not stabilize within timeout period.
-	 * @throws Error if configuration is invalid (negative values, checkInterval > stabilityDuration, stabilityDuration > timeout).
-	 *
-	 * @example
-	 * // Wait for table to remain unchanged for 500ms
-	 * await table.waitForStable({ stabilityDuration: 500 });
-	 *
-	 * @example
-	 * // Wait with custom check interval
-	 * await table.waitForStable({
-	 *   stabilityDuration: 1000,
-	 *   checkInterval: 100,
-	 *   timeout: 10000
-	 * });
-	 *
-	 * @remarks
-	 * The method validates that:
-	 * - All timing values are positive
-	 * - checkInterval ≤ stabilityDuration / 2 (ensures at least 2 checks during stability period)
-	 * - stabilityDuration < timeout (must have time for both changes and stabilization)
-	 * - timeout ≥ checkInterval + stabilityDuration (must allow at least one full cycle)
-	 *
-	 * @see {@link waitForBodyRows} for waiting on row count/structure
-	 * @see {@link waitForNonEmpty} for waiting until table has data
-	 */
-	async waitForStable(options?: WaitForStableOptions): Promise<void> {
-		const stabilityDuration = options?.stabilityDuration ?? 500;
-		const checkInterval = options?.checkInterval ?? 100;
-		const timeout = options?.timeout ?? 30_000;
-
-		if (checkInterval <= 0) {
-			throw new Error(`checkInterval must be positive, got: ${checkInterval}ms`);
-		}
-		if (stabilityDuration <= 0) {
-			throw new Error(`stabilityDuration must be positive, got: ${stabilityDuration}ms`);
-		}
-		if (timeout <= 0) {
-			throw new Error(`timeout must be positive, got: ${timeout}ms`);
-		}
-		if (checkInterval > stabilityDuration / 2) {
-			throw new Error(
-				`checkInterval (${checkInterval}ms) cannot be greater than half of stabilityDuration (${stabilityDuration / 2}ms). ` +
-					`At least 2 checks are required during the stability period to ensure reliable detection.`
-			);
-		}
-		if (stabilityDuration >= timeout) {
-			throw new Error(
-				`stabilityDuration (${stabilityDuration}ms) must be less than timeout (${timeout}ms). ` +
-					`The timeout must allow time for both table changes and stabilization.`
-			);
-		}
-		const minimumTimeout = checkInterval + stabilityDuration;
-		if (timeout < minimumTimeout) {
-			throw new Error(
-				`timeout (${timeout}ms) is too short. Minimum required: ${minimumTimeout}ms ` +
-					`(checkInterval ${checkInterval}ms + stabilityDuration ${stabilityDuration}ms). ` +
-					`The timeout must allow at least one check plus full stabilization period.`
-			);
-		}
-
-		const startTime = Date.now();
-		let lastSnapshot: string | null = null;
-		let stableStartTime: number | null = null;
-
-		while (Date.now() - startTime < timeout) {
-			try {
-				const table = await this.getTable({
-					headerRowOptions: { colspan: { enabled: true } },
-				});
-
-				// Create a snapshot of current table state
-				const currentSnapshot = JSON.stringify({
-					rowCount: table.bodyRows.length,
-					data: table.bodyRows,
-				});
-
-				if (lastSnapshot === null) {
-					// First check
-					lastSnapshot = currentSnapshot;
-					stableStartTime = Date.now();
-				} else if (currentSnapshot === lastSnapshot) {
-					// Table hasn't changed
-					const stableDuration = Date.now() - (stableStartTime ?? Date.now());
-					if (stableDuration >= stabilityDuration) {
-						// Table has been stable long enough
-						return;
-					}
-				} else {
-					// Table changed, reset stability timer
-					lastSnapshot = currentSnapshot;
-					stableStartTime = Date.now();
-				}
-			} catch (error) {
-				// If table not loaded yet, reset
-				lastSnapshot = null;
-				stableStartTime = null;
-			}
-
-			await new Promise(resolve => setTimeout(resolve, checkInterval));
-		}
-
-		throw new Error(
-			`Table did not stabilize within ${timeout}ms.\n` +
-				`Stability duration required: ${stabilityDuration}ms\n` +
-				`Table locator: ${this._tableLocator.toString()}`
-		);
-	}
-
-	/**
 	 * Waits for the table body to be empty (no body rows).
 	 * @param options - Polling options (timeout, interval, retries).
 	 * @returns A promise that resolves when table body is empty.
@@ -653,10 +410,9 @@ export class PlaywrightTable {
 	 * await table.waitForEmpty({ timeout: 5000 });
 	 *
 	 * @see {@link waitForNonEmpty} for waiting until table has data
-	 * @see {@link waitForBodyRows} for waiting on specific row counts
 	 */
 	async waitForEmpty(options?: PollingOptions): Promise<void> {
-		await Poll(async () => {
+		await pollTable(async () => {
 			const rows = await this._bodyRowLocator.all();
 			if (rows.length > 0) {
 				throw new Error(
@@ -679,10 +435,9 @@ export class PlaywrightTable {
 	 * await table.waitForNonEmpty({ timeout: 5000 });
 	 *
 	 * @see {@link waitForEmpty} for waiting until table is cleared
-	 * @see {@link waitForBodyRows} for waiting on specific row counts
 	 */
 	async waitForNonEmpty(options?: PollingOptions): Promise<void> {
-		await Poll(async () => {
+		await pollTable(async () => {
 			const rows = await this._bodyRowLocator.all();
 			if (rows.length === 0) {
 				throw new Error(
@@ -715,183 +470,6 @@ export class PlaywrightTable {
 	}
 
 	/**
-	 * Waits for at least one row (or N rows) matching the specified conditions.
-	 * Useful for waiting for specific data to appear in the table.
-	 * @param conditions - Record of header names and expected cell values to match.
-	 * @param options - Options including minimum rows and polling. See {@link WaitForRowByConditionsOptions}.
-	 * @returns A promise that resolves when matching rows are found.
-	 * @throws Error if conditions not met within timeout.
-	 * @throws Error if specified headers don't exist in the table.
-	 *
-	 * @example
-	 * // Wait for at least one row where Status="Active" and Type="User"
-	 * await table.waitForRowByConditions({ Status: "Active", Type: "User" });
-	 *
-	 * @example
-	 * // Wait for at least 3 rows matching conditions
-	 * await table.waitForRowByConditions(
-	 *   { Country: "USA" },
-	 *   { minRows: 3, timeout: 10000 }
-	 * );
-	 *
-	 * @example
-	 * // Wait for specific user after search
-	 * await searchInput.fill('john.doe');
-	 * await table.waitForRowByConditions(
-	 *   { Username: "john.doe", Status: "Active" },
-	 *   { timeout: 5000 }
-	 * );
-	 *
-	 * @see {@link getBodyCellLocatorByRowConditions} for getting cells from matching rows
-	 * @see {@link waitForBodyRows} for waiting on row counts without content matching
-	 */
-	async waitForRowByConditions(
-		conditions: Record<string, string>,
-		options?: WaitForRowByConditionsOptions
-	): Promise<void> {
-		const minRows = options?.minRows ?? 1;
-
-		await Poll(async () => {
-			const table = await this.getTable({
-				headerRowOptions: { colspan: { enabled: true } },
-			});
-			const mainHeader = this.mainHeaderRow(table.headerRows);
-
-			// Validate all condition headers exist
-			for (const header of Object.keys(conditions)) {
-				if (!mainHeader.includes(header)) {
-					throw new Error(
-						`Header "${header}" not found.\n` +
-							`Available headers: [${mainHeader.join(", ")}]\n` +
-							`Header row locator: ${this._headerRowLocator.toString()}`
-					);
-				}
-			}
-
-			// Count matching rows
-			let matchingRowCount = 0;
-			for (const row of table.bodyRows) {
-				let rowMatches = true;
-				for (const [header, expectedValue] of Object.entries(conditions)) {
-					const headerIndex = mainHeader.indexOf(header);
-					const cellValue = String(row[headerIndex] ?? "");
-					if (cellValue !== expectedValue) {
-						rowMatches = false;
-						break;
-					}
-				}
-				if (rowMatches) {
-					matchingRowCount++;
-				}
-			}
-
-			if (matchingRowCount < minRows) {
-				throw new Error(
-					`Expected at least ${minRows} rows matching conditions, but found ${matchingRowCount}.\n` +
-						`Conditions: ${JSON.stringify(conditions)}\n` +
-						`Total rows searched: ${table.bodyRows.length}\n` +
-						`Body row locator: ${this._bodyRowLocator.toString()}`
-				);
-			}
-		}, options);
-	}
-
-	/**
-	 * Waits for a specific body row at the given index to exist.
-	 * More efficient than loading all table data when you only need to verify row existence.
-	 * @param index - The 0-based row index to wait for.
-	 * @param options - Polling options (timeout, interval, retries).
-	 * @returns A promise that resolves when the row at the specified index exists.
-	 * @throws Error if row at index doesn't exist within timeout period.
-	 *
-	 * @example
-	 * // Wait for the 10th row to appear (index 9)
-	 * await table.waitForRowByIndex(9, { timeout: 5000 });
-	 *
-	 * @example
-	 * // Wait for first row after triggering load
-	 * await page.locator('button.load-more').click();
-	 * await table.waitForRowByIndex(0);
-	 *
-	 * @see {@link waitForBodyRows} for waiting on row counts with content validation
-	 * @see {@link getRowCount} for getting current row counts
-	 */
-	async waitForRowByIndex(index: number, options?: PollingOptions): Promise<void> {
-		if (index < 0 || !Number.isInteger(index)) {
-			throw new Error(`Row index must be a non-negative integer, got: ${index}`);
-		}
-
-		await Poll(async () => {
-			const rows = await this._bodyRowLocator.all();
-			if (rows.length <= index) {
-				throw new Error(
-					`Expected row at index ${index} to exist, but table only has ${rows.length} rows.\n` +
-						`Body row locator: ${this._bodyRowLocator.toString()}`
-				);
-			}
-		}, options);
-	}
-
-	/**
-	 * Waits for a specific cell to contain expected text.
-	 * Finds the cell by matching row conditions and target header, then validates the text.
-	 * @param conditions - Record of header names and expected cell values to match the row, or a single [header, value] tuple.
-	 * @param targetHeader - The header name of the column containing the cell to check.
-	 * @param expectedText - Expected cell text (string for exact match or RegExp for pattern match).
-	 * @param options - Polling options (timeout, interval, retries).
-	 * @returns A promise that resolves when the cell contains the expected text.
-	 * @throws Error if cell text doesn't match within timeout period.
-	 * @throws Error if specified headers don't exist in the table.
-	 * @throws Error if no row matches the specified conditions.
-	 *
-	 * @example
-	 * // Wait for cell with single condition using tuple
-	 * await table.waitForCellText(
-	 *   ["Username", "john.doe"],
-	 *   "Email",
-	 *   /.*@example\.com$/,
-	 *   { timeout: 5000 }
-	 * );
-	 *
-	 * @example
-	 * // Wait for cell with multiple conditions
-	 * await table.waitForCellText(
-	 *   { "First name": "John", "Last name": "Doe" },
-	 *   "Status",
-	 *   "Active"
-	 * );
-	 *
-	 * @see {@link getBodyCellLocatorByRowConditions} for getting cell locators
-	 * @see {@link waitForRowByConditions} for waiting on row existence
-	 */
-	async waitForCellText(
-		conditions: Record<string, string> | [string, string],
-		targetHeader: string,
-		expectedText: string | RegExp,
-		options?: PollingOptions
-	): Promise<void> {
-		await Poll(async () => {
-			const cellLocator = await this.getBodyCellLocatorByRowConditions(conditions, targetHeader);
-			const text = await cellLocator.textContent();
-			const actualText = text?.trim() ?? "";
-			const matches = typeof expectedText === "string" ? actualText === expectedText : expectedText.test(actualText);
-
-			// Normalize conditions for error message
-			const conditionsObj = Array.isArray(conditions) ? { [conditions[0]]: conditions[1] } : conditions;
-
-			if (!matches) {
-				throw new Error(
-					`Cell text does not match.\n` +
-						`Expected: ${expectedText}\n` +
-						`Actual: "${actualText}"\n` +
-						`Conditions: ${JSON.stringify(conditionsObj)}\n` +
-						`Target header: "${targetHeader}"`
-				);
-			}
-		}, options);
-	}
-
-	/**
 	 * Waits for the table body to have exactly N rows.
 	 * More precise than waitForBodyRows when you need an exact count.
 	 * @param count - The exact number of body rows expected.
@@ -907,7 +485,6 @@ export class PlaywrightTable {
 	 * // Verify table has exactly 0 rows (alternative to waitForEmpty)
 	 * await table.waitForExactRowCount(0);
 	 *
-	 * @see {@link waitForBodyRows} for waiting with minimum row count and cell validation
 	 * @see {@link getRowCount} for getting current row counts
 	 */
 	async waitForExactRowCount(count: number, options?: PollingOptions): Promise<void> {
@@ -915,7 +492,7 @@ export class PlaywrightTable {
 			throw new Error(`Row count must be a non-negative integer, got: ${count}`);
 		}
 
-		await Poll(async () => {
+		await pollTable(async () => {
 			const rows = await this._bodyRowLocator.all();
 			if (rows.length !== count) {
 				throw new Error(
@@ -940,8 +517,6 @@ export class PlaywrightTable {
 	 * // Assert specific row count
 	 * const { body } = await table.getRowCount();
 	 * expect(body).toBe(10);
-	 *
-	 * @see {@link waitForBodyRows} for waiting until specific row count is reached
 	 */
 	async getRowCount(): Promise<{ header: number; body: number }> {
 		const [headerRows, bodyRows] = await Promise.all([this._headerRowLocator.all(), this._bodyRowLocator.all()]);

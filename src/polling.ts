@@ -3,7 +3,7 @@ export type PollingOptions = {
 	interval?: number;
 };
 
-export async function Poll(fn: () => Promise<void>, options?: PollingOptions): Promise<void> {
+export async function pollTable(fn: () => Promise<void>, options?: PollingOptions): Promise<void> {
 	if (!options) {
 		options = {};
 	}

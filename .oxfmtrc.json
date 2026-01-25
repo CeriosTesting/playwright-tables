@@ -1,0 +1,24 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"trailingComma": "es5",
+	"tabWidth": 2,
+	"useTabs": true,
+	"semi": true,
+	"singleQuote": false,
+	"endOfLine": "lf",
+	"printWidth": 120,
+	"bracketSpacing": true,
+	"arrowParens": "avoid",
+	"ignorePatterns": [".husky", "**/dist", "**/node_modules", "**/test-results", "**/playwright-report"],
+	"experimentalSortImports": {
+		"groups": [
+			["side-effect"],
+			["builtin"],
+			["external", "external-type"],
+			["internal", "internal-type"],
+			["parent", "parent-type"],
+			["sibling", "sibling-type"],
+			["index", "index-type"]
+		]
+	}
+}

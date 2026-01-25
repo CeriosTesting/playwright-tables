@@ -1,6 +1,7 @@
 import { Locator } from "@playwright/test";
-import { HeaderRow } from "./row";
+
 import { CellContentType } from "./cell-content-type";
+import { HeaderRow } from "./row";
 import { TableUtils } from "./table-utils";
 
 /**
