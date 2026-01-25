@@ -227,14 +227,7 @@ export class PlaywrightTable {
 		const table = await this.getTable(options);
 		const mainHeader = this.mainHeaderRow(table.headerRows);
 
-		const targetHeaderIndex = mainHeader.indexOf(targetHeader);
-		if (targetHeaderIndex === -1) {
-			throw new Error(
-				`Header "${targetHeader}" not found.\n` +
-					`Available headers: [${mainHeader.join(", ")}]\n` +
-					`Header row locator: ${this._headerRowLocator.toString()}`
-			);
-		}
+		const targetHeaderIndex = this.getHeaderIndex(targetHeader, mainHeader);
 
 		// Normalize conditions to object format
 		const conditionsObj = Array.isArray(conditions) ? { [conditions[0]]: conditions[1] } : conditions;
@@ -244,14 +237,7 @@ export class PlaywrightTable {
 			let matches = true;
 
 			for (const [header, value] of Object.entries(conditionsObj)) {
-				const headerIndex = mainHeader.indexOf(header);
-				if (headerIndex === -1) {
-					throw new Error(
-						`Header "${header}" not found.\n` +
-							`Available headers: [${mainHeader.join(", ")}]\n` +
-							`Header row locator: ${this._headerRowLocator.toString()}`
-					);
-				}
+				const headerIndex = this.getHeaderIndex(header, mainHeader);
 				const cellValue = row[headerIndex] ?? "";
 				if (cellValue !== value) {
 					matches = false;
@@ -298,14 +284,7 @@ export class PlaywrightTable {
 	async getAllBodyCellLocatorsByHeaderName(header: string, options?: TableOptions): Promise<Locator[]> {
 		const table = await this.getTable(options);
 		const headers = this.mainHeaderRow(table.headerRows);
-		const headerIndex = headers.indexOf(header);
-		if (headerIndex === -1) {
-			throw new Error(
-				`Header "${header}" not found.\n` +
-					`Available headers: [${headers.join(", ")}]\n` +
-					`Header row locator: ${this._headerRowLocator.toString()}`
-			);
-		}
+		const headerIndex = this.getHeaderIndex(header, headers);
 		const locators: Locator[] = [];
 		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
 			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
@@ -376,7 +355,7 @@ export class PlaywrightTable {
 	 *   }
 	 * });
 	 */
-	async getJson(options?: TableOptions): Promise<any> {
+	async getJson(options?: TableOptions): Promise<Record<string, string>[]> {
 		const table = await this.getTable({
 			bodyRowOptions: options?.bodyRowOptions,
 			headerRowOptions: {
@@ -556,15 +535,7 @@ export class PlaywrightTable {
 	async getDistinctColumnValues(headerName: string, options?: TableOptions): Promise<string[]> {
 		const table = await this.getTable(options);
 		const mainHeader = this.mainHeaderRow(table.headerRows);
-		const headerIndex = mainHeader.indexOf(headerName);
-
-		if (headerIndex === -1) {
-			throw new Error(
-				`Header "${headerName}" not found.\n` +
-					`Available headers: [${mainHeader.join(", ")}]\n` +
-					`Header row locator: ${this._headerRowLocator.toString()}`
-			);
-		}
+		const headerIndex = this.getHeaderIndex(headerName, mainHeader);
 
 		const values = new Set<string>();
 		for (const row of table.bodyRows) {
@@ -608,15 +579,10 @@ export class PlaywrightTable {
 		});
 		const mainHeader = this.mainHeaderRow(table.headerRows);
 
-		// Validate all condition headers exist
+		// Validate all condition headers exist and get their indices
+		const headerIndices = new Map<string, number>();
 		for (const header of Object.keys(conditions)) {
-			if (!mainHeader.includes(header)) {
-				throw new Error(
-					`Header "${header}" not found.\n` +
-						`Available headers: [${mainHeader.join(", ")}]\n` +
-						`Header row locator: ${this._headerRowLocator.toString()}`
-				);
-			}
+			headerIndices.set(header, this.getHeaderIndex(header, mainHeader));
 		}
 
 		// Find first matching row
@@ -625,7 +591,7 @@ export class PlaywrightTable {
 			let rowMatches = true;
 
 			for (const [header, expectedValue] of Object.entries(conditions)) {
-				const headerIndex = mainHeader.indexOf(header);
+				const headerIndex = headerIndices.get(header)!;
 				const cellValue = String(row[headerIndex] ?? "");
 				if (cellValue !== expectedValue) {
 					rowMatches = false;
@@ -682,5 +648,24 @@ export class PlaywrightTable {
 		}
 
 		return headers[headerIndex];
+	}
+
+	/**
+	 * Gets the index of a header in the main header row, throwing an error if not found.
+	 * @param header - The header name to find.
+	 * @param mainHeader - The main header row to search in.
+	 * @returns The 0-based index of the header.
+	 * @throws Error if the header is not found.
+	 */
+	private getHeaderIndex(header: string, mainHeader: HeaderRow): number {
+		const index = mainHeader.indexOf(header);
+		if (index === -1) {
+			throw new Error(
+				`Header "${header}" not found.\n` +
+					`Available headers: [${mainHeader.join(", ")}]\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
+		}
+		return index;
 	}
 }

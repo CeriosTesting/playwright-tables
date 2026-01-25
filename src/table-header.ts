@@ -24,8 +24,12 @@ export type HeaderRowOptions = {
 /**
  * Utility class for extracting and processing table header rows.
  * Handles complex scenarios including colspan, rowspan, empty cells, and duplicate header names.
+ * Contains only static methods - cannot be instantiated.
  */
-export abstract class TableHeader {
+export class TableHeader {
+	private constructor() {
+		// Prevent instantiation - this class only has static methods
+	}
 	private static readonly EMPTY_CELL_PLACEHOLDER = "{{Empty}}";
 	private static readonly COLSPAN_SUFFIX_PREFIX = "__C";
 	private static readonly DUPLICATE_SUFFIX_PREFIX = "__D";

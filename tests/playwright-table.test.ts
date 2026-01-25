@@ -94,6 +94,37 @@ test.describe("Table Tests", () => {
 			]);
 		});
 
+		test("getJson with combined rowspan and colspan handles correctly", async ({ page }) => {
+			await page.goto(Route.CombinedSpanTable);
+
+			const table = new PlaywrightTable(page.locator("table"));
+			const json = await table.getJson();
+
+			expect(json).toEqual([
+				{
+					Region: "North",
+					Q1: "Combined N+S Q1-Q2",
+					Q2: "Combined N+S Q1-Q2",
+					Q3: "300",
+					Q4: "400",
+				},
+				{
+					Region: "South",
+					Q1: "Combined N+S Q1-Q2",
+					Q2: "Combined N+S Q1-Q2",
+					Q3: "350",
+					Q4: "450",
+				},
+				{
+					Region: "East",
+					Q1: "500",
+					Q2: "600",
+					Q3: "700",
+					Q4: "800",
+				},
+			]);
+		});
+
 		test("No header rows should throw exception", async ({ page }) => {
 			await page.goto(Route.EmptyHeaderRowsTable);
 

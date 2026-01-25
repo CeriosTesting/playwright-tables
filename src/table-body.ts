@@ -7,8 +7,12 @@ import { TableUtils } from "./table-utils";
 /**
  * Utility class for extracting and processing table body rows.
  * Handles rowspan and colspan attributes to properly structure table data.
+ * Contains only static methods - cannot be instantiated.
  */
-export abstract class TableBody {
+export class TableBody {
+	private constructor() {
+		// Prevent instantiation - this class only has static methods
+	}
 	/**
 	 * Extracts body rows from a table with proper handling of rowspan and colspan.
 	 *
@@ -83,6 +87,8 @@ export abstract class TableBody {
 		const columnCount = await columnLocators.count();
 
 		if (columnCount === 0) {
+			// Still apply any spanned cells even if this row has no DOM cells
+			this.applySpannedCells(spannedCells, rowIndex, columns);
 			return columns;
 		}
 
@@ -92,9 +98,29 @@ export abstract class TableBody {
 		}
 		const cellDataArray = await Promise.all(cellDataPromises);
 
-		for (let colIndex = 0; colIndex < columnCount; colIndex++) {
-			const cellData = cellDataArray[colIndex];
-			this.processCellData(cellData, colIndex, columns, rowIndex, spannedCells);
+		// First, determine which column positions are occupied by rowspans from above
+		const spannedPositions = new Set<number>();
+		if (spannedCells[rowIndex]) {
+			spannedCells[rowIndex].forEach((_, colIndex) => {
+				if (spannedCells[rowIndex][colIndex] !== undefined) {
+					spannedPositions.add(colIndex);
+				}
+			});
+		}
+
+		// Process cells, accounting for spanned positions
+		let actualColIndex = 0;
+		for (let domCellIndex = 0; domCellIndex < columnCount; domCellIndex++) {
+			// Skip columns that are occupied by rowspans from above
+			while (spannedPositions.has(actualColIndex)) {
+				actualColIndex++;
+			}
+
+			const cellData = cellDataArray[domCellIndex];
+			this.processCellData(cellData, actualColIndex, columns, rowIndex, spannedCells);
+
+			// Move past this cell and any colspan it creates
+			actualColIndex += cellData.colspan;
 		}
 
 		this.applySpannedCells(spannedCells, rowIndex, columns);
@@ -147,7 +173,7 @@ export abstract class TableBody {
 		}
 
 		if (rowspan > 1) {
-			this.storeSpannedCells(rowIndex, colIndex, rowspan, content, spannedCells);
+			this.storeSpannedCells(rowIndex, colIndex, rowspan, colspan, content, spannedCells);
 		}
 	}
 
@@ -155,14 +181,18 @@ export abstract class TableBody {
 		rowIndex: number,
 		colIndex: number,
 		rowspan: number,
+		colspan: number,
 		content: Cell,
 		spannedCells: Record<number, Cell[]>
 	): void {
-		for (let span = 1; span < rowspan; span++) {
-			if (!spannedCells[rowIndex + span]) {
-				spannedCells[rowIndex + span] = [];
+		for (let rowSpan = 1; rowSpan < rowspan; rowSpan++) {
+			if (!spannedCells[rowIndex + rowSpan]) {
+				spannedCells[rowIndex + rowSpan] = [];
 			}
-			spannedCells[rowIndex + span][colIndex] = content;
+			// Store the content for each column covered by colspan
+			for (let colSpan = 0; colSpan < colspan; colSpan++) {
+				spannedCells[rowIndex + rowSpan][colIndex + colSpan] = content;
+			}
 		}
 	}
 

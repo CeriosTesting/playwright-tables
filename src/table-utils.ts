@@ -2,7 +2,14 @@ import { Locator } from "@playwright/test";
 
 import { CellContentType } from "./cell-content-type";
 
-export abstract class TableUtils {
+/**
+ * Utility class for extracting table cell content and attributes.
+ * Contains only static methods - cannot be instantiated.
+ */
+export class TableUtils {
+	private constructor() {
+		// Prevent instantiation - this class only has static methods
+	}
 	/**
 	 * Extracts text content from a table cell.
 	 * @param cell - The Playwright locator for the cell.

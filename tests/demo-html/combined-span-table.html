@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>Cell with both rowspan and colspan</title>
+		<style>
+			table,
+			th,
+			td {
+				border: 1px solid black;
+				border-collapse: collapse;
+			}
+
+			th,
+			td {
+				padding: 5px;
+				text-align: left;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Cell with both rowspan and colspan</h2>
+
+		<table style="width: 50%">
+			<thead>
+				<tr>
+					<th>Region</th>
+					<th>Q1</th>
+					<th>Q2</th>
+					<th>Q3</th>
+					<th>Q4</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>North</td>
+					<td rowspan="2" colspan="2">Combined N+S Q1-Q2</td>
+					<td>300</td>
+					<td>400</td>
+				</tr>
+				<tr>
+					<td>South</td>
+					<td>350</td>
+					<td>450</td>
+				</tr>
+				<tr>
+					<td>East</td>
+					<td>500</td>
+					<td>600</td>
+					<td>700</td>
+					<td>800</td>
+				</tr>
+			</tbody>
+		</table>
+	</body>
+</html>

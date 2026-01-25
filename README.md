@@ -24,7 +24,7 @@ Testing HTML tables can be challenging due to their complex structures with cols
 
 ## Installation
 
-First, ensure you have Playwright installed:  
+First, ensure you have Playwright installed:
 [Playwright Documentation](https://github.com/microsoft/playwright/blob/main/README.md)
 
 Then, install this package:
@@ -61,10 +61,7 @@ const cell = table.getBodyCellLocator(0, 1); // Row 0, Column 1
 await expect(cell).toHaveText("30");
 
 // Wait for dynamic content
-await table.waitForBodyRows({
-	row: { amount: 5 },
-	timeout: 10000,
-});
+await table.waitForExactRowCount(5, { timeout: 10000 });
 ```
 
 ### Default Selectors
