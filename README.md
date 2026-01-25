@@ -558,6 +558,8 @@ await table.waitForStable({ checkInterval: 100, stabilityDuration: 500, timeout:
 
 Waits for the table body to be completely empty (no body rows).
 
+> 💡 **Tip:** Consider using `expect.poll` for more flexibility: `await expect.poll(async () => (await table.getBodyRows()).length).toBe(0);`
+
 **Parameters:**
 
 - `options?: PollingOptions`
@@ -585,6 +587,8 @@ expect(rows).toHaveLength(0);
 ### 13. `waitForNonEmpty(options?)`
 
 Waits for the table body to have at least one body row with actual content. A row is considered valid if it has at least one cell containing text.
+
+> 💡 **Tip:** Consider using `expect.poll` for more flexibility: `await expect.poll(async () => (await table.getBodyRows()).length).toBeGreaterThan(0);`
 
 **Parameters:**
 
@@ -1008,7 +1012,46 @@ await table.waitForBodyRows({ row: { amount: 5 } });
 const data = await table.getJson();
 ```
 
-### 2. Use Appropriate Content Type
+### 2. Use `expect.poll` for Flexible Waiting
+
+While this library provides dedicated wait methods, Playwright's `expect.poll` offers more flexibility when combined with retrieval methods:
+
+```ts
+import { expect } from "@playwright/test";
+
+// Wait for exact row count
+await expect.poll(async () => (await table.getBodyRows()).length).toBe(10);
+
+// Wait for table to be empty
+await expect.poll(async () => (await table.getJson()).length).toBe(0);
+
+// Wait for at least N rows
+await expect.poll(async () => (await table.getBodyRows()).length).toBeGreaterThanOrEqual(5);
+
+// Wait for specific data to appear
+await expect.poll(() => table.getJson()).toContainEqual({ Name: "John", Status: "Active" });
+
+// Wait for column to have specific value
+await expect.poll(() => table.getDistinctColumnValues("Status")).toContain("Completed");
+
+// Custom timeout and intervals
+await expect
+	.poll(async () => (await table.getBodyRows()).length, {
+		message: "Waiting for table to have 10 rows",
+		timeout: 10000,
+		intervals: [100, 250, 500, 1000],
+	})
+	.toBe(10);
+```
+
+**Benefits of `expect.poll`:**
+
+- ✅ Native Playwright API with familiar assertion syntax
+- ✅ Rich assertion library (`toBe`, `toContain`, `toEqual`, `toMatch`, etc.)
+- ✅ Better error messages with actual vs expected values
+- ✅ Works with any retrieval method (`getBodyRows`, `getJson`, `getDistinctColumnValues`, etc.)
+
+### 3. Use Appropriate Content Type
 
 ```ts
 // For visible text only (respects CSS visibility)
@@ -1022,7 +1065,7 @@ const rows = await table.getBodyRows({
 });
 ```
 
-### 3. Handle Complex Tables
+### 4. Handle Complex Tables
 
 ```ts
 // Enable all options for complex tables with colspan/rowspan
@@ -1035,7 +1078,7 @@ const json = await table.getJson({
 });
 ```
 
-### 4. Leverage Cell Locators for Interactions
+### 5. Leverage Cell Locators for Interactions
 
 ```ts
 // Get locator first, then interact

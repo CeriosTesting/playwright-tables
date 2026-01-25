@@ -389,6 +389,12 @@ export class PlaywrightTable {
 	 * await table.waitForEmpty({ timeout: 5000 });
 	 *
 	 * @see {@link waitForNonEmpty} for waiting until table has data
+	 *
+	 * @remarks
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * ```ts
+	 * await expect.poll(async () => (await table.getBodyRows()).length).toBe(0);
+	 * ```
 	 */
 	async waitForEmpty(options?: PollingOptions): Promise<void> {
 		await pollTable(async () => {
@@ -414,6 +420,12 @@ export class PlaywrightTable {
 	 * await table.waitForNonEmpty({ timeout: 5000 });
 	 *
 	 * @see {@link waitForEmpty} for waiting until table is cleared
+	 *
+	 * @remarks
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * ```ts
+	 * await expect.poll(async () => (await table.getBodyRows()).length).toBeGreaterThan(0);
+	 * ```
 	 */
 	async waitForNonEmpty(options?: PollingOptions): Promise<void> {
 		await pollTable(async () => {
@@ -465,6 +477,12 @@ export class PlaywrightTable {
 	 * await table.waitForExactRowCount(0);
 	 *
 	 * @see {@link getRowCount} for getting current row counts
+	 *
+	 * @remarks
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * ```ts
+	 * await expect.poll(async () => (await table.getBodyRows()).length).toBe(10);
+	 * ```
 	 */
 	async waitForExactRowCount(count: number, options?: PollingOptions): Promise<void> {
 		if (count < 0 || !Number.isInteger(count)) {
