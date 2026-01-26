@@ -1,17 +1,17 @@
-import { expect, Locator } from "@playwright/test";
-import { TableBody } from "./table-body";
-import { BodyRow, Cell, HeaderRow } from "./row";
-import { HeaderRowOptions, TableHeader } from "./table-header";
-import { RowKind, TableWait } from "./table-wait";
+import { Locator } from "@playwright/test";
+
 import { CellContentType } from "./cell-content-type";
+import { pollTable, PollingOptions } from "./polling";
+import { BodyRow, Cell, HeaderRow } from "./row";
+import { TableBody } from "./table-body";
+import { HeaderRowOptions, TableHeader } from "./table-header";
 
 /**
  * Options for loading table data, headers, and rows.
  *
  * @example
- * // Wait up to 5 seconds and use custom cell content type for body rows
- * const options: LoadOptions = {
- *   timeout: 5000,
+ * // Use custom cell content type for body rows and header options
+ * const options: TableOptions = {
  *   bodyRowOptions: { cellContentType: CellContentType.TextContent },
  *   headerRowOptions: {
  *     colspan: { enabled: true, suffix: true },
@@ -21,9 +21,7 @@ import { CellContentType } from "./cell-content-type";
  * };
  * await table.getBodyRows(options);
  */
-export type LoadOptions = {
-	/** Timeout in milliseconds for loading table data. */
-	timeout?: number;
+export type TableOptions = {
 	/** See {@link HeaderRowOptions} for available options. */
 	headerRowOptions?: HeaderRowOptions;
 	/** Options for parsing body rows. */
@@ -31,44 +29,9 @@ export type LoadOptions = {
 };
 
 /**
- * Options for waiting for table rows to appear or meet certain conditions.
- *
- * @example
- * // Wait for at least 3 body rows, each with 3 cells containing content, within 2 seconds
- * const waitOptions: WaitForTableRowsOptions = {
- *   timeout: 2000,
- *   row: {
- *     amount: 3,
- *     cell: {
- *       totalCount: 3,
- *       contentCount: 3,
- *     },
- *   },
- * };
- * await table.waitForBodyRows(waitOptions);
- */
-export type WaitForTableRowsOptions = {
-	/** Timeout in milliseconds for waiting. */
-	timeout?: number;
-	/** Row and cell count/content conditions. */
-	row?: {
-		/** Expected number of rows. */
-		amount?: number;
-		cell?: {
-			/** Expected number of cells per row. */
-			totalCount?: number;
-			/** Expected number of cells with content per row. */
-			contentCount?: number;
-		};
-	};
-};
-
-/**
  * Represents a table in Playwright, providing methods to interact with its headers, rows, and cells.
  */
 export class PlaywrightTable {
-	private _headers: HeaderRow[] = [];
-	private _rows: BodyRow[] = [];
 	private _bodyRowLocator: Locator;
 	private _bodyRowColumnSelector: string;
 	private _headerRowLocator: Locator;
@@ -124,50 +87,97 @@ export class PlaywrightTable {
 
 	/**
 	 * Retrieves all header rows of the table.
-	 * @param options - Optional parameters for timeout and header row options.
-	 * @param options.timeout - Timeout in milliseconds for loading table data.
-	 * @param options.headerRowOptions - See {@link HeaderRowOptions} for available options.
+	 * @param options - Optional parameters for header row parsing configuration.
 	 * @returns A promise that resolves to an array of header rows.
+	 * @throws Error if no header rows found after table loads.
+	 *
+	 * @example
+	 * // Get headers with colspan enabled
+	 * const headers = await table.getHeaderRows({
+	 *   colspan: { enabled: true, suffix: true },
+	 *   duplicateSuffix: true
+	 * });
+	 *
+	 * @see {@link getMainHeaderRow} for getting only the main header row
+	 * @see {@link HeaderRowOptions} for all available configuration options
 	 */
-	async getHeaderRows(options?: Pick<LoadOptions, "timeout" | "headerRowOptions">): Promise<HeaderRow[]> {
-		await this.load(options);
-		return this._headers;
+	async getHeaderRows(options?: HeaderRowOptions): Promise<HeaderRow[]> {
+		const table = await this.getTable({
+			headerRowOptions: options,
+		});
+		return table.headerRows;
 	}
 
 	/**
 	 * Retrieves the main header row of the table.
-	 * @param options - Optional parameters for timeout and header row options.
-	 * @param options.timeout - Timeout in milliseconds for loading table data.
-	 * @param options.headerRowOptions - See {@link HeaderRowOptions} for available options.
+	 * By default, uses the last header row if multiple exist. Can be customized via constructor.
+	 * @param options - Optional parameters for header row parsing configuration.
 	 * @returns A promise that resolves to the main header row.
+	 * @throws Error if no header rows available.
+	 * @throws Error if setMainHeaderRow index is out of bounds (negative or >= header row count).
+	 *
+	 * @example
+	 * // Get main header with custom index set in constructor
+	 * const table = new PlaywrightTable(page.locator('table'), {
+	 *   header: { setMainHeaderRow: 0 }  // Use first row as main header
+	 * });
+	 * const mainHeader = await table.getMainHeaderRow();
+	 *
+	 * @see {@link getHeaderRows} for getting all header rows
 	 */
-	async getMainHeaderRow(options?: Pick<LoadOptions, "timeout" | "headerRowOptions">): Promise<HeaderRow> {
-		await this.load(options);
-		return this.mainHeaderRow();
+	async getMainHeaderRow(options?: HeaderRowOptions): Promise<HeaderRow> {
+		const table = await this.getTable({
+			headerRowOptions: options,
+		});
+		return this.mainHeaderRow(table.headerRows);
 	}
 
 	/**
 	 * Retrieves all body rows of the table.
-	 * @param options.timout - Timeout in milliseconds for loading table data.
-	 * @param options.bodyRowOptions.cellContentType - The content type for the body rows.
+	 * @param options - Optional configuration for body row parsing.
+	 * @param options.cellContentType - Content extraction type. See {@link CellContentType}. Defaults to InnerText.
 	 * @returns A promise that resolves to an array of body rows.
+	 * @throws Error if no body rows found after table loads.
+	 *
+	 * @example
+	 * // Get body rows with TextContent (includes hidden elements)
+	 * const rows = await table.getBodyRows({
+	 *   cellContentType: CellContentType.TextContent
+	 * });
+	 *
+	 * @example
+	 * // Get body rows with default InnerText
+	 * const rows = await table.getBodyRows();
 	 */
-	async getBodyRows(options?: Pick<LoadOptions, "timeout" | "bodyRowOptions">): Promise<BodyRow[]> {
-		await this.load({
-			timeout: options?.timeout,
-			bodyRowOptions: options?.bodyRowOptions,
+	async getBodyRows(options?: { cellContentType?: CellContentType }): Promise<BodyRow[]> {
+		const table = await this.getTable({
+			bodyRowOptions: options,
 			headerRowOptions: {
 				colspan: { enabled: true },
 			},
 		});
-		return this._rows;
+		return table.bodyRows;
 	}
 
 	/**
-	 * Retrieves a specific cell locator in the body of the table.
+	 * Retrieves a specific cell locator in the body of the table by row and column index.
 	 * @param rowNumber - The row number (0-based index).
-	 * @param headerPosition - The header position (0-based index).
+	 * @param headerPosition - The column/header position (0-based index).
 	 * @returns A Playwright Locator for the specified cell.
+	 *
+	 * @example
+	 * // Get cell at row 1, column 2
+	 * const cellLocator = table.getBodyCellLocator(1, 2);
+	 * await expect(cellLocator).toHaveText('Expected Text');
+	 *
+	 * @example
+	 * // Get first cell in first row
+	 * const firstCell = table.getBodyCellLocator(0, 0);
+	 * await firstCell.click();
+	 *
+	 * @see {@link getBodyCellLocatorByRowConditions} for finding cells by content matching
+	 * @see {@link getAllBodyCellLocatorsByHeaderIndex} for getting all cells in a column
+	 * @see {@link getAllBodyCellLocatorsByHeaderName} for getting all cells under a header
 	 */
 	getBodyCellLocator(rowNumber: number, headerPosition: number): Locator {
 		return this._bodyRowLocator.nth(rowNumber).locator(this._bodyRowColumnSelector).nth(headerPosition);
@@ -175,34 +185,59 @@ export class PlaywrightTable {
 
 	/**
 	 * Retrieves a cell locator in the body of the table based on row conditions and a target header.
-	 * @param conditions - A record of header names and their expected values.
-	 * @param targetHeader - The target header name for the desired cell.
-	 * @param options - See {@link LoadOptions} for available options.
+	 * Finds the first row where all conditions match, then returns the cell in the target column.
+	 * @param conditions - An object where keys are header names and values are expected cell contents, or a single [header, value] tuple.
+	 * @param targetHeader - The header name of the column containing the cell to retrieve.
+	 * @param options - Optional table loading options. See {@link TableOptions}.
 	 * @returns A promise that resolves to a Playwright Locator for the matching cell.
-	 * @throws An error if no matching row is found or if a header is not found.
+	 * @throws Error if no row matches all specified conditions.
+	 * @throws Error if any condition header or target header is not found in the table.
+	 *
+	 * @example
+	 * // Find cell with multiple conditions
+	 * const emailLocator = await table.getBodyCellLocatorByRowConditions(
+	 *   { "First name": "John", "Status": "Active" },
+	 *   "Email"
+	 * );
+	 * await expect(emailLocator).toContainText('@example.com');
+	 *
+	 * @example
+	 * // Find cell with single condition using tuple syntax
+	 * const actionCell = await table.getBodyCellLocatorByRowConditions(
+	 *   ["Username", "john.doe"],
+	 *   "Actions"
+	 * );
+	 * await actionCell.locator('button').click();
+	 *
+	 * @example
+	 * // Find cell with single condition using object syntax
+	 * const statusCell = await table.getBodyCellLocatorByRowConditions(
+	 *   { "Username": "john.doe" },
+	 *   "Status"
+	 * );
+	 *
+	 * @see {@link getBodyCellLocator} for getting cells by direct index
+	 * @see {@link getAllBodyCellLocatorsByHeaderName} for getting all cells in a column
 	 */
 	async getBodyCellLocatorByRowConditions(
-		conditions: Record<string, string>,
+		conditions: Record<string, string> | [string, string],
 		targetHeader: string,
-		options?: LoadOptions
+		options?: TableOptions
 	): Promise<Locator> {
-		await this.load(options);
-		const headers = await this.getMainHeaderRow();
+		const table = await this.getTable(options);
+		const mainHeader = this.mainHeaderRow(table.headerRows);
 
-		const targetHeaderIndex = headers.indexOf(targetHeader);
-		if (targetHeaderIndex === -1) {
-			throw new Error(`Header "${targetHeader}" not found.`);
-		}
+		const targetHeaderIndex = this.getHeaderIndex(targetHeader, mainHeader);
 
-		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
-			const row = this._rows[rowIndex];
+		// Normalize conditions to object format
+		const conditionsObj = Array.isArray(conditions) ? { [conditions[0]]: conditions[1] } : conditions;
+
+		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
+			const row = table.bodyRows[rowIndex];
 			let matches = true;
 
-			for (const [header, value] of Object.entries(conditions)) {
-				const headerIndex = headers.indexOf(header);
-				if (headerIndex === -1) {
-					throw new Error(`Header "${header}" not found.`);
-				}
+			for (const [header, value] of Object.entries(conditionsObj)) {
+				const headerIndex = this.getHeaderIndex(header, mainHeader);
 				const cellValue = row[headerIndex] ?? "";
 				if (cellValue !== value) {
 					matches = false;
@@ -215,25 +250,43 @@ export class PlaywrightTable {
 			}
 		}
 
-		throw new Error(`No row found matching conditions: ${JSON.stringify(conditions)}`);
+		throw new Error(
+			`No row found matching conditions: ${JSON.stringify(conditionsObj)}\n` +
+				`Target header: "${targetHeader}"\n` +
+				`Searched ${table.bodyRows.length} rows\n` +
+				`Body row locator: ${this._bodyRowLocator.toString()}`
+		);
 	}
 
 	/**
 	 * Retrieves all cell locators in the body of the table for a specific header name.
-	 * @param header - The header name.
-	 * @param options - See {@link LoadOptions} for available options.
-	 * @returns A promise that resolves to an array of Playwright Locators for the cells.
-	 * @throws An error if the header is not found.
+	 * Returns locators for every cell in the column identified by the header.
+	 * @param header - The header name identifying the column.
+	 * @param options - Optional table loading options. See {@link TableOptions}.
+	 * @returns A promise that resolves to an array of Playwright Locators for all cells in the column.
+	 * @throws Error if the header is not found in the table.
+	 *
+	 * @example
+	 * // Get all cells in the "Status" column
+	 * const statusCells = await table.getAllBodyCellLocatorsByHeaderName("Status");
+	 * for (const cell of statusCells) {
+	 *   await expect(cell).toHaveText(/Active|Inactive/);
+	 * }
+	 *
+	 * @example
+	 * // Get text from all cells in "Name" column
+	 * const nameCells = await table.getAllBodyCellLocatorsByHeaderName("Name");
+	 * const names = await Promise.all(nameCells.map(cell => cell.textContent()));
+	 *
+	 * @see {@link getAllBodyCellLocatorsByHeaderIndex} for getting cells by column index
+	 * @see {@link getBodyCellLocatorByRowConditions} for finding specific cells by content
 	 */
-	async getAllBodyCellLocatorsByHeaderName(header: string, options?: LoadOptions): Promise<Locator[]> {
-		await this.load(options);
-		const headers = await this.getMainHeaderRow();
-		const headerIndex = headers.indexOf(header);
-		if (headerIndex === -1) {
-			throw new Error(`Header "${header}" not found.`);
-		}
+	async getAllBodyCellLocatorsByHeaderName(header: string, options?: TableOptions): Promise<Locator[]> {
+		const table = await this.getTable(options);
+		const headers = this.mainHeaderRow(table.headerRows);
+		const headerIndex = this.getHeaderIndex(header, headers);
 		const locators: Locator[] = [];
-		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
+		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
 			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
 			locators.push(cellLocator);
 		}
@@ -242,14 +295,38 @@ export class PlaywrightTable {
 
 	/**
 	 * Retrieves all cell locators in the body of the table for a specific header index.
-	 * @param headerIndex - The header index (0-based).
-	 * @param options - See {@link LoadOptions} for available options.
-	 * @returns A promise that resolves to an array of Playwright Locators for the cells.
+	 * Returns locators for every cell in the column at the specified position.
+	 * @param headerIndex - The header/column index (0-based).
+	 * @param options - Optional table loading options. See {@link TableOptions}.
+	 * @returns A promise that resolves to an array of Playwright Locators for all cells in the column.
+	 * @throws Error if the header index is out of bounds (negative or >= column count).
+	 *
+	 * @example
+	 * // Get all cells in the third column (index 2)
+	 * const thirdColumnCells = await table.getAllBodyCellLocatorsByHeaderIndex(2);
+	 * for (const cell of thirdColumnCells) {
+	 *   await expect(cell).toBeVisible();
+	 * }
+	 *
+	 * @example
+	 * // Get all cells in first column
+	 * const firstColumnCells = await table.getAllBodyCellLocatorsByHeaderIndex(0);
+	 * const values = await Promise.all(firstColumnCells.map(c => c.textContent()));
+	 *
+	 * @see {@link getAllBodyCellLocatorsByHeaderName} for getting cells by header name
+	 * @see {@link getBodyCellLocator} for getting a specific cell by row and column index
 	 */
-	async getAllBodyCellLocatorsByHeaderIndex(headerIndex: number, options?: LoadOptions): Promise<Locator[]> {
-		await this.load(options);
+	async getAllBodyCellLocatorsByHeaderIndex(headerIndex: number, options?: TableOptions): Promise<Locator[]> {
+		const table = await this.getTable(options);
+		const columnCount = this.mainHeaderRow(table.headerRows).length;
+		if (headerIndex < 0 || headerIndex >= columnCount) {
+			throw new Error(
+				`Header index ${headerIndex} out of bounds. Table has ${columnCount} columns.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
+		}
 		const locators: Locator[] = [];
-		for (let rowIndex = 0; rowIndex < this._rows.length; rowIndex++) {
+		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
 			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
 			locators.push(cellLocator);
 		}
@@ -257,13 +334,29 @@ export class PlaywrightTable {
 	}
 
 	/**
-	 * Converts the table data into a JSON object.
-	 * @param options - See {@link LoadOptions} for available options.
-	 * @returns A promise that resolves to a JSON representation of the table.
+	 * Converts the table data into a JSON array where each object represents a row.
+	 * Keys are header names, values are cell contents.
+	 * @param options - Optional table loading options. See {@link TableOptions}.
+	 * @returns A promise that resolves to an array of objects representing table rows.
+	 * @throws Error if no header rows or body rows found.
+	 *
+	 * @example
+	 * // Convert table to JSON with default options
+	 * const data = await table.getJson();
+	 * // Result: [{"Name": "John", "Age": "30"}, {"Name": "Jane", "Age": "25"}]
+	 *
+	 * @example
+	 * // Convert with colspan enabled and duplicate suffix
+	 * const data = await table.getJson({
+	 *   headerRowOptions: {
+	 *     colspan: { enabled: true, suffix: true },
+	 *     duplicateSuffix: true,
+	 *     emptyCellReplacement: true
+	 *   }
+	 * });
 	 */
-	async getJson(options?: LoadOptions): Promise<any> {
-		await this.load({
-			timeout: options?.timeout,
+	async getJson(options?: TableOptions): Promise<Record<string, string>[]> {
+		const table = await this.getTable({
 			bodyRowOptions: options?.bodyRowOptions,
 			headerRowOptions: {
 				colspan: {
@@ -275,8 +368,8 @@ export class PlaywrightTable {
 			},
 		});
 
-		const headers = this.mainHeaderRow();
-		return this._rows.map(row => {
+		const headers = this.mainHeaderRow(table.headerRows);
+		return table.bodyRows.map(row => {
 			const rowObj: Record<string, Cell> = {};
 			headers.forEach((header, index) => {
 				rowObj[header] = row[index] || "";
@@ -286,49 +379,310 @@ export class PlaywrightTable {
 	}
 
 	/**
-	 * Waits for the header rows to be loaded.
-	 * @param options - See {@link WaitForTableRowsOptions} for available options.
-	 * @returns A promise that resolves when the header rows are loaded.
+	 * Waits for the table body to be empty (no body rows).
+	 * @param options - Polling options (timeout, interval, retries).
+	 * @returns A promise that resolves when table body is empty.
+	 * @throws Error if table is not empty within timeout period.
+	 *
+	 * @example
+	 * // Wait for table to clear after delete operation
+	 * await table.waitForEmpty({ timeout: 5000 });
+	 *
+	 * @see {@link waitForNonEmpty} for waiting until table has data
+	 *
+	 * @remarks
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * ```ts
+	 * await expect.poll(async () => (await table.getBodyRows()).length).toBe(0);
+	 * ```
 	 */
-	async waitForHeaderRows(options?: WaitForTableRowsOptions): Promise<void> {
-		await expect(
-			async () =>
-				await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header, options)
-		).toPass({
-			timeout: options?.timeout,
-		});
+	async waitForEmpty(options?: PollingOptions): Promise<void> {
+		await pollTable(async () => {
+			const rows = await this._bodyRowLocator.all();
+			if (rows.length > 0) {
+				throw new Error(
+					`Expected table to be empty, but found ${rows.length} body rows.\n` +
+						`Body row locator: ${this._bodyRowLocator.toString()}`
+				);
+			}
+		}, options);
 	}
 
 	/**
-	 * Waits for the body rows to be loaded.
-	 * @param options - See {@link WaitForTableRowsOptions} for available options.
-	 * @returns A promise that resolves when the body rows are loaded.
+	 * Waits for the table body to be non-empty (at least one body row with content).
+	 * A row is considered valid if it has at least one cell containing text.
+	 * @param options - Polling options (timeout, interval, retries).
+	 * @returns A promise that resolves when table has at least one body row with content.
+	 * @throws Error if table remains empty or has no rows with content within timeout period.
+	 *
+	 * @example
+	 * // Wait for table to populate after search
+	 * await table.waitForNonEmpty({ timeout: 5000 });
+	 *
+	 * @see {@link waitForEmpty} for waiting until table is cleared
+	 *
+	 * @remarks
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * ```ts
+	 * await expect.poll(async () => (await table.getBodyRows()).length).toBeGreaterThan(0);
+	 * ```
 	 */
-	async waitForBodyRows(options?: WaitForTableRowsOptions): Promise<void> {
-		await expect(
-			async () => await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body, options)
-		).toPass({
-			timeout: options?.timeout,
+	async waitForNonEmpty(options?: PollingOptions): Promise<void> {
+		await pollTable(async () => {
+			const rows = await this._bodyRowLocator.all();
+			if (rows.length === 0) {
+				throw new Error(
+					`Expected table to be non-empty, but found 0 body rows.\n` +
+						`Body row locator: ${this._bodyRowLocator.toString()}`
+				);
+			}
+
+			// Check if at least one row has content in at least one cell
+			let hasRowWithContent = false;
+			for (const row of rows) {
+				const cells = await row.locator(this._bodyRowColumnSelector).all();
+				for (const cell of cells) {
+					const content = await cell.innerText();
+					if (content.trim().length > 0) {
+						hasRowWithContent = true;
+						break;
+					}
+				}
+				if (hasRowWithContent) break;
+			}
+
+			if (!hasRowWithContent) {
+				throw new Error(
+					`Expected table to have at least one row with content, but all ${rows.length} rows are empty.\n` +
+						`Body row locator: ${this._bodyRowLocator.toString()}`
+				);
+			}
+		}, options);
+	}
+
+	/**
+	 * Waits for the table body to have exactly N rows.
+	 * @param count - The exact number of body rows expected.
+	 * @param options - Polling options (timeout, interval, retries).
+	 * @returns A promise that resolves when the table has exactly the specified number of rows.
+	 * @throws Error if row count doesn't match within timeout period.
+	 *
+	 * @example
+	 * // Wait for exactly 10 rows after pagination
+	 * await table.waitForExactRowCount(10, { timeout: 5000 });
+	 *
+	 * @example
+	 * // Verify table has exactly 0 rows (alternative to waitForEmpty)
+	 * await table.waitForExactRowCount(0);
+	 *
+	 * @see {@link getRowCount} for getting current row counts
+	 *
+	 * @remarks
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * ```ts
+	 * await expect.poll(async () => (await table.getBodyRows()).length).toBe(10);
+	 * ```
+	 */
+	async waitForExactRowCount(count: number, options?: PollingOptions): Promise<void> {
+		if (count < 0 || !Number.isInteger(count)) {
+			throw new Error(`Row count must be a non-negative integer, got: ${count}`);
+		}
+
+		await pollTable(async () => {
+			const rows = await this._bodyRowLocator.all();
+			if (rows.length !== count) {
+				throw new Error(
+					`Expected exactly ${count} rows, but found ${rows.length}.\n` +
+						`Body row locator: ${this._bodyRowLocator.toString()}`
+				);
+			}
+		}, options);
+	}
+
+	/**
+	 * Gets the count of header and body rows in the table.
+	 * Lightweight method that doesn't fetch cell data, only counts rows.
+	 * @returns A promise that resolves to an object with header and body row counts.
+	 *
+	 * @example
+	 * // Get current row counts
+	 * const counts = await table.getRowCount();
+	 * console.log(`Headers: ${counts.header}, Body: ${counts.body}`);
+	 *
+	 * @example
+	 * // Assert specific row count
+	 * const { body } = await table.getRowCount();
+	 * expect(body).toBe(10);
+	 */
+	async getRowCount(): Promise<{ header: number; body: number }> {
+		const [headerRows, bodyRows] = await Promise.all([this._headerRowLocator.all(), this._bodyRowLocator.all()]);
+		return {
+			header: headerRows.length,
+			body: bodyRows.length,
+		};
+	}
+
+	/**
+	 * Gets all distinct (unique) values from a specific column.
+	 * Returns a sorted array of unique string values, excluding empty values.
+	 * @param headerName - The header name of the column to extract distinct values from.
+	 * @param options - Optional table loading options. See {@link TableOptions}.
+	 * @returns A promise that resolves to a sorted array of distinct values.
+	 * @throws Error if the specified header is not found in the table.
+	 *
+	 * @example
+	 * // Get all unique status values
+	 * const statuses = await table.getDistinctColumnValues("Status");
+	 * // Result: ["Active", "Inactive", "Pending"]
+	 *
+	 * @example
+	 * // Get distinct countries for filtering
+	 * const countries = await table.getDistinctColumnValues("Country");
+	 * console.log(`Available countries: ${countries.join(", ")}`);
+	 *
+	 * @example
+	 * // Verify expected values exist
+	 * const roles = await table.getDistinctColumnValues("Role");
+	 * expect(roles).toContain("Admin");
+	 * expect(roles).toHaveLength(3);
+	 *
+	 * @see {@link getAllBodyCellLocatorsByHeaderName} for getting all cell locators in a column
+	 * @see {@link getJson} for getting full table data
+	 */
+	async getDistinctColumnValues(headerName: string, options?: TableOptions): Promise<string[]> {
+		const table = await this.getTable(options);
+		const mainHeader = this.mainHeaderRow(table.headerRows);
+		const headerIndex = this.getHeaderIndex(headerName, mainHeader);
+
+		const values = new Set<string>();
+		for (const row of table.bodyRows) {
+			const value = String(row[headerIndex] ?? "").trim();
+			if (value) values.add(value);
+		}
+
+		return Array.from(values).sort();
+	}
+
+	/**
+	 * Finds the index of the first body row matching the specified conditions.
+	 * Returns -1 if no matching row is found.
+	 * @param conditions - Record of header names and expected cell values to match.
+	 * @param options - Optional table loading options. See {@link TableOptions}.
+	 * @returns A promise that resolves to the 0-based index of the first matching row, or -1 if not found.
+	 * @throws Error if specified headers don't exist in the table.
+	 *
+	 * @example
+	 * // Find index of row where Status is "Active"
+	 * const index = await table.findRowIndex({ Status: "Active" });
+	 * if (index >= 0) {
+	 *   console.log(`Found at row ${index}`);
+	 * }
+	 *
+	 * @example
+	 * // Find row and interact with it
+	 * const rowIndex = await table.findRowIndex({ Username: "john.doe" });
+	 * if (rowIndex >= 0) {
+	 *   const cell = table.getBodyCellLocator(rowIndex, 0);
+	 *   await cell.click();
+	 * }
+	 *
+	 * @see {@link getBodyCellLocatorByRowConditions} for getting cell locators from matching rows
+	 * @see {@link waitForRowByConditions} for waiting until matching row appears
+	 */
+	async findRowIndex(conditions: Record<string, string>, options?: TableOptions): Promise<number> {
+		const table = await this.getTable({
+			headerRowOptions: { colspan: { enabled: true }, ...options?.headerRowOptions },
+			bodyRowOptions: options?.bodyRowOptions,
 		});
+		const mainHeader = this.mainHeaderRow(table.headerRows);
+
+		// Validate all condition headers exist and get their indices
+		const headerIndices = new Map<string, number>();
+		for (const header of Object.keys(conditions)) {
+			headerIndices.set(header, this.getHeaderIndex(header, mainHeader));
+		}
+
+		// Find first matching row
+		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
+			const row = table.bodyRows[rowIndex];
+			let rowMatches = true;
+
+			for (const [header, expectedValue] of Object.entries(conditions)) {
+				const headerIndex = headerIndices.get(header)!;
+				const cellValue = String(row[headerIndex] ?? "");
+				if (cellValue !== expectedValue) {
+					rowMatches = false;
+					break;
+				}
+			}
+
+			if (rowMatches) {
+				return rowIndex;
+			}
+		}
+
+		return -1;
 	}
 
-	private async load(options?: LoadOptions): Promise<void> {
-		await expect(async () => {
-			await TableWait.waitForRows(this._headerRowLocator, this._headerColumnSelector, RowKind.Header);
-			await TableWait.waitForRows(this._bodyRowLocator, this._bodyRowColumnSelector, RowKind.Body);
-		}).toPass({ timeout: options?.timeout });
+	private async getTable(options?: TableOptions): Promise<{ headerRows: HeaderRow[]; bodyRows: BodyRow[] }> {
+		const [headerRows, bodyRows] = await Promise.all([
+			TableHeader.getRows(this._headerRowLocator, this._headerColumnSelector, options?.headerRowOptions),
+			TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector, options?.bodyRowOptions),
+		]);
 
-		this._headers = await TableHeader.getRows(
-			this._headerRowLocator,
-			this._headerColumnSelector,
-			options?.headerRowOptions
-		);
-		this._rows = await TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector, options?.bodyRowOptions);
+		if (headerRows.length === 0) {
+			throw new Error(
+				`No header rows found, is table loaded completely?\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}\n` +
+					`Table locator: ${this._tableLocator.toString()}`
+			);
+		}
+		if (bodyRows.length === 0) {
+			throw new Error(
+				`No body rows found, is table loaded completely?\n` +
+					`Body row locator: ${this._bodyRowLocator.toString()}\n` +
+					`Table locator: ${this._tableLocator.toString()}`
+			);
+		}
+
+		return { headerRows, bodyRows };
 	}
 
-	private mainHeaderRow(): HeaderRow {
-		return this._options?.header?.setMainHeaderRow
-			? this._headers[this._options.header.setMainHeaderRow]
-			: this._headers[this._headers.length - 1];
+	private mainHeaderRow(headers: HeaderRow[]): HeaderRow {
+		if (headers.length === 0) {
+			throw new Error(
+				`No header rows available. Ensure table has been loaded.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
+		}
+
+		const headerIndex = this._options?.header?.setMainHeaderRow ?? headers.length - 1;
+		if (headerIndex < 0 || headerIndex >= headers.length) {
+			throw new Error(
+				`Header row index ${headerIndex} out of bounds. Table has ${headers.length} header rows.\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
+		}
+
+		return headers[headerIndex];
+	}
+
+	/**
+	 * Gets the index of a header in the main header row, throwing an error if not found.
+	 * @param header - The header name to find.
+	 * @param mainHeader - The main header row to search in.
+	 * @returns The 0-based index of the header.
+	 * @throws Error if the header is not found.
+	 */
+	private getHeaderIndex(header: string, mainHeader: HeaderRow): number {
+		const index = mainHeader.indexOf(header);
+		if (index === -1) {
+			throw new Error(
+				`Header "${header}" not found.\n` +
+					`Available headers: [${mainHeader.join(", ")}]\n` +
+					`Header row locator: ${this._headerRowLocator.toString()}`
+			);
+		}
+		return index;
 	}
 }

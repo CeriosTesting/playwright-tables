@@ -1,0 +1,9 @@
+{
+	"files.eol": "\n",
+	"files.trimTrailingWhitespace": true,
+	"typescript.tsdk": "node_modules/typescript/lib",
+	"typescript.enablePromptUseWorkspaceTsdk": true,
+	"typescript.preferences.importModuleSpecifier": "non-relative",
+	"editor.defaultFormatter": "oxc.oxc-vscode",
+	"editor.formatOnSave": true
+}

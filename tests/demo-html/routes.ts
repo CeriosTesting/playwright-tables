@@ -2,6 +2,7 @@ export enum Route {
 	ButtonTable = "/button-table",
 	ColspanHeaderTable = "/colspan-header-table",
 	ColspanRowTable = "/colspan-row-table",
+	CombinedSpanTable = "/combined-span-table",
 	DivTable = "/div-table",
 	DuplicateEmptyHeadersTable = "/duplicate-empty-headers-table",
 	DynamicLoadTable = "/dynamic-load-table",
