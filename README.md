@@ -39,6 +39,8 @@ Or as a dev dependency:
 npm i -D @cerios/playwright-table
 ```
 
+> ⚠️ **Upgrading from v1.x?** See the [Migration Guide](./MIGRATIONv2.md) for breaking changes and upgrade instructions.
+
 ---
 
 ## Quick Start
@@ -389,172 +391,7 @@ const json = await table.getJson({
 
 ## Waiting Methods
 
-### 9. `waitForHeaderRows(options?)`
-
-Waits for header rows to be loaded and meet specified conditions. Uses polling with retry logic.
-
-**Parameters:**
-
-- `options?: WaitForTableRowsOptions & PollingOptions`
-
-**Returns:** `Promise<void>`
-
-**Throws:** Error if conditions not met within timeout
-
-**Example:**
-
-```ts
-// Wait for at least 1 header row with 5 cells
-await table.waitForHeaderRows({
-	row: {
-		amount: 1,
-		cell: { totalCount: 5 },
-	},
-	timeout: 5000,
-	interval: 100,
-});
-```
-
----
-
-### 10. `waitForBodyRows(options?)`
-
-Waits for body rows to be loaded and meet specified conditions.
-
-**Parameters:**
-
-- `options?: WaitForTableRowsOptions & PollingOptions`
-
-**Returns:** `Promise<void>`
-
-**Throws:** Error if conditions not met within timeout
-
-**Examples:**
-
-```ts
-// Wait for at least 10 body rows
-await table.waitForBodyRows({
-	row: { amount: 10 },
-	timeout: 10000,
-});
-
-// Wait for rows with specific structure
-await table.waitForBodyRows({
-	row: {
-		amount: 5,
-		cell: {
-			totalCount: 4, // 4 cells per row
-			contentCount: 4, // All cells must have content
-		},
-	},
-});
-
-// Wait for any rows with content (minimal check)
-await table.waitForBodyRows({ timeout: 5000 });
-```
-
-**Options:**
-
-```ts
-{
-  row?: {
-    amount?: number,           // Expected exact number of rows
-    cell?: {
-      totalCount?: number,     // Expected cells per row (regardless of content)
-      contentCount?: number    // Expected cells with non-empty content per row
-    }
-  },
-  timeout?: number,            // Max wait time in ms (default: 30000)
-  interval?: number            // Check interval in ms (default: 100)
-}
-```
-
----
-
-### 11. `waitForStable(options?)`
-
-Waits for the table to become stable (no changes for a specified duration). Useful for lazy-loading, streaming data, or animations.
-
-**Parameters:**
-
-- `options?: WaitForStableOptions`
-
-**Returns:** `Promise<void>`
-
-**Throws:**
-
-- Error if table doesn't stabilize within timeout
-- Error if configuration is invalid (see validation rules below)
-
-**Examples:**
-
-```ts
-// Wait for table to remain unchanged for 500ms
-await table.waitForStable({ stabilityDuration: 500 });
-
-// Custom stability check with fast polling
-await table.waitForStable({
-	stabilityDuration: 1000, // Must be stable for 1 second
-	checkInterval: 100, // Check every 100ms
-	timeout: 10000, // Give up after 10 seconds
-});
-
-// Use after triggering search/filter
-await searchInput.fill("test query");
-await table.waitForStable(); // Wait for results to finish loading
-const results = await table.getJson();
-```
-
-**Options:**
-
-```ts
-{
-  stabilityDuration?: number,  // Duration table must remain unchanged (default: 500ms)
-  checkInterval?: number,      // Interval between checks (default: 100ms)
-  timeout?: number             // Maximum wait time (default: 30000ms)
-}
-```
-
-**Validation Rules:**
-
-The method validates configuration to prevent logical errors:
-
-- All timing values must be positive
-- `checkInterval` ≤ `stabilityDuration / 2` (ensures at least 2 checks during stability period for reliable detection)
-- `stabilityDuration` < `timeout` (must have time for both changes and stabilization)
-- `timeout` ≥ `checkInterval + stabilityDuration` (must allow at least one complete check cycle)
-
-Invalid configurations will throw an error immediately with a descriptive message.
-
-**Use Cases:**
-
-```ts
-// ✅ Valid: Check every 100ms for 500ms of stability with 5s timeout (100 ≤ 500/2)
-await table.waitForStable({ checkInterval: 100, stabilityDuration: 500, timeout: 5000 });
-
-// ❌ Invalid: checkInterval too large (needs at least 2 checks during stability)
-// await table.waitForStable({ checkInterval: 1000, stabilityDuration: 1000 });
-//   Error: checkInterval (1000ms) cannot be greater than half of stabilityDuration (500ms)
-
-// ❌ Invalid: Cannot require 10s stability with 5s timeout
-// await table.waitForStable({ stabilityDuration: 10000, timeout: 5000 });
-//   Error: stabilityDuration (10000ms) must be less than timeout (5000ms)
-
-// ❌ Invalid: Cannot have equal stabilityDuration and timeout
-// await table.waitForStable({ stabilityDuration: 5000, timeout: 5000 });
-//   Error: stabilityDuration (5000ms) must be less than timeout (5000ms)
-
-// ❌ Invalid: Timeout too short for one complete cycle
-// await table.waitForStable({ checkInterval: 2000, stabilityDuration: 3000, timeout: 4000 });
-//   Error: timeout (4000ms) is too short. Minimum required: 5000ms
-  checkInterval?: number,      // Interval between checks (default: 100ms)
-  timeout?: number            // Max wait time (default: 30000ms)
-}
-```
-
----
-
-### 12. `waitForEmpty(options?)`
+### 9. `waitForEmpty(options?)`
 
 Waits for the table body to be completely empty (no body rows).
 
@@ -584,7 +421,7 @@ expect(rows).toHaveLength(0);
 
 ---
 
-### 13. `waitForNonEmpty(options?)`
+### 10. `waitForNonEmpty(options?)`
 
 Waits for the table body to have at least one body row with actual content. A row is considered valid if it has at least one cell containing text.
 
@@ -621,139 +458,16 @@ await table.waitForNonEmpty(); // Waits for rows AND content, not just empty row
 
 ---
 
-### 14. `waitForRowByConditions(conditions, options?)`
+### 11. `waitForExactRowCount(count, options?)`
 
-Waits for at least one row (or N rows) matching the specified column conditions. Useful for waiting for specific data to appear in the table.
+Waits for the table to have exactly the specified number of body rows.
 
-**Parameters:**
-
-- `conditions: Record<string, string>` - Object with header names as keys and expected cell values
-- `options?: WaitForRowByConditionsOptions` - Options including `minRows` and polling settings
-
-**Returns:** `Promise<void>`
-
-**Throws:**
-
-- Error if conditions not met within timeout
-- Error if specified headers don't exist in the table
-
-**Example:**
-
-```ts
-// Wait for a specific user to appear
-await searchInput.fill("john.doe");
-await table.waitForRowByConditions({ Username: "john.doe", Status: "Active" }, { timeout: 5000 });
-
-// Wait for at least 3 rows from USA
-await table.waitForRowByConditions({ Country: "USA" }, { minRows: 3, timeout: 10000 });
-
-// Wait for order status after submission
-await page.locator("button.submit-order").click();
-await table.waitForRowByConditions({ "Order ID": "12345", Status: "Processing" });
-
-// Now safe to verify the row exists
-const cell = await table.getBodyCellLocatorByRowConditions({ Username: "john.doe" }, "Email");
-await expect(cell).toHaveText("john.doe@example.com");
-```
-
-**Use Cases:**
-
-- Waiting for search results to appear with specific values
-- Verifying data updates after form submission
-- Ensuring filtered data meets criteria before assertions
-- Polling for status changes in specific rows
-
----
-
-### 15. `waitForRowByIndex(index, options?)`
-
-Waits for a specific body row at the given index to exist. More efficient than loading all table data when you only need to verify row existence.
-
-**Parameters:**
-
-- `index: number` - The 0-based row index to wait for
-- `options?: PollingOptions` - Polling options (timeout, interval, retries)
-
-**Returns:** `Promise<void>`
-
-**Throws:**
-
-- Error if row at index doesn't exist within timeout period
-- Error if index is negative or not an integer
-
-**Example:**
-
-```ts
-// Wait for the 10th row to appear (index 9)
-await table.waitForRowByIndex(9, { timeout: 5000 });
-
-// Wait for first row after triggering load
-await page.locator("button.load-more").click();
-await table.waitForRowByIndex(0);
-
-// Useful for infinite scroll scenarios
-for (let i = 0; i < 20; i++) {
-	await table.waitForRowByIndex(i);
-	await page.mouse.wheel(0, 100); // Scroll to trigger more loading
-}
-```
-
----
-
-### 16. `waitForCellText(conditions, targetHeader, expectedText, options?)`
-
-Waits for a specific cell to contain expected text. Finds the cell by matching row conditions and target header, then validates the text content. Supports both string (exact match) and RegExp (pattern match).
-
-**Parameters:**
-
-- `conditions: Record<string, string> | [string, string]` - Record of header names and expected cell values to match the row, or single [header, value] tuple
-- `targetHeader: string` - The header name of the column containing the cell to check
-- `expectedText: string | RegExp` - Expected cell text (string for exact match or RegExp for pattern match)
-- `options?: PollingOptions` - Polling options (timeout, interval, retries)
-
-**Returns:** `Promise<void>`
-
-**Throws:**
-
-- Error if cell text doesn't match within timeout period
-- Error if specified headers don't exist in the table
-- Error if no row matches the specified conditions
-
-**Example:**
-
-```ts
-// Wait for exact text match with single condition (tuple syntax)
-await table.waitForCellText(["Username", "john.doe"], "Status", "Active", { timeout: 5000 });
-
-// Wait for regex pattern match
-await table.waitForCellText({ "Order ID": "12345" }, "Status", /Processing|Completed/, { timeout: 10000 });
-
-// Wait for email to appear after user creation
-await page.locator("button.create-user").click();
-await table.waitForCellText({ "First name": "John", "Last name": "Doe" }, "Email", "john.doe@example.com");
-
-// Verify status change after action
-await page.locator("button.approve").click();
-await table.waitForCellText({ "Request ID": "REQ-123" }, "Status", "Approved");
-```
-
-**Use Cases:**
-
-- Waiting for specific cell values after actions
-- Verifying data updates in real-time
-- Polling for status changes in specific cells
-- Validating computed or dynamic cell content
-
----
-
-### 17. `waitForExactRowCount(count, options?)`
-
-Waits for the table to have exactly the specified number of body rows. More precise than `waitForBodyRows` when you need an exact count.
+> 💡 **Tip:** Consider using `expect.poll` for more flexibility: `await expect.poll(async () => (await table.getBodyRows()).length).toBe(10);`
 
 **Parameters:**
 
 - `count: number` - The exact number of rows expected
-- `options?: PollingOptions` - Polling options (timeout, interval, retries)
+- `options?: PollingOptions` - Polling options (timeout, interval)
 
 **Returns:** `Promise<void>`
 
@@ -789,7 +503,7 @@ await table.waitForExactRowCount(3); // Expect exactly 3 admin users
 
 ---
 
-### 18. `getRowCount()`
+### 12. `getRowCount()`
 
 Gets the count of header and body rows in the table. Lightweight method that doesn't fetch cell data, only counts rows.
 
@@ -824,7 +538,7 @@ if (rowCounts.body === 0) {
 
 ---
 
-### 19. `getDistinctColumnValues(headerName, options?)`
+### 13. `getDistinctColumnValues(headerName, options?)`
 
 Gets all distinct (unique) values from a specific column. Returns a sorted array of unique string values, excluding empty values.
 
@@ -870,7 +584,7 @@ for (const category of categories) {
 
 ---
 
-### 20. `findRowIndex(conditions, options?)`
+### 14. `findRowIndex(conditions, options?)`
 
 Finds the index of the first body row matching the specified conditions. Returns -1 if no matching row is found.
 
@@ -1008,7 +722,15 @@ try {
 const data = await table.getJson();
 
 // ✅ Good - wait for content first
-await table.waitForBodyRows({ row: { amount: 5 } });
+await table.waitForNonEmpty();
+const data = await table.getJson();
+
+// ✅ Good - wait for specific row count
+await table.waitForExactRowCount(5);
+const data = await table.getJson();
+
+// ✅ Good - use expect.poll for flexible waiting
+await expect.poll(async () => (await table.getBodyRows()).length).toBe(5);
 const data = await table.getJson();
 ```
 
@@ -1102,9 +824,6 @@ import {
 	CellContentType,
 	HeaderRowOptions,
 	TableOptions,
-	WaitForTableRowsOptions,
-	WaitForStableOptions,
-	WaitForRowByConditionsOptions,
 	PollingOptions,
 	RowKind,
 } from "@cerios/playwright-table";

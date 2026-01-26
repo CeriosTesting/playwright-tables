@@ -462,7 +462,6 @@ export class PlaywrightTable {
 
 	/**
 	 * Waits for the table body to have exactly N rows.
-	 * More precise than waitForBodyRows when you need an exact count.
 	 * @param count - The exact number of body rows expected.
 	 * @param options - Polling options (timeout, interval, retries).
 	 * @returns A promise that resolves when the table has exactly the specified number of rows.
