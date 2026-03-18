@@ -26,6 +26,45 @@ test.describe("Table Tests", () => {
 		]);
 	});
 
+	test("getMainHeaderRow supports header sanitization options", async ({ page }) => {
+		await page.setContent(`
+			<div role="treegrid">
+				<div data-kind="header-group">
+					<div role="row">
+						<div role="columnheader">Account name<span>&#xEE68;</span></div>
+						<div role="columnheader">Phone
+						<span>number</span></div>
+					</div>
+				</div>
+				<div data-kind="body-group">
+					<div role="row">
+						<div role="gridcell">Mr Test</div>
+						<div role="gridcell">+31612345678</div>
+					</div>
+				</div>
+			</div>
+		`);
+
+		const table = new PlaywrightTable(page.locator("[role='treegrid']"), {
+			header: {
+				setMainHeaderRow: 0,
+				rowSelector: "[data-kind='header-group'] > div[role='row']",
+				columnSelector: "div[role='columnheader']",
+			},
+			row: {
+				rowSelector: "[data-kind='body-group'] > div[role='row']",
+				columnSelector: "div[role='gridcell']",
+			},
+		});
+
+		const mainHeader = await table.getMainHeaderRow({
+			normalizeWhitespace: true,
+			stripIconGlyphs: true,
+		});
+
+		expect(mainHeader).toEqual(["Account name", "Phone number"]);
+	});
+
 	test.describe("getBodyRows", async () => {
 		test("getBodyRows returns body rows", async ({ page }) => {
 			await page.goto(Route.SimpleTable);
@@ -50,6 +89,50 @@ test.describe("Table Tests", () => {
 					expect(typeof cell).toBe("string");
 				}
 			}
+		});
+
+		test("accepts full TableOptions in getBodyRows", async ({ page }) => {
+			await page.setContent(`
+				<div role="treegrid">
+					<div data-kind="header-group">
+						<div role="row">
+							<div role="columnheader">Account name<span>&#xEE68;</span></div>
+							<div role="columnheader">Phone
+							<span>number</span></div>
+						</div>
+					</div>
+					<div data-kind="body-group">
+						<div role="row">
+							<div role="gridcell">Mr Test</div>
+							<div role="gridcell">+31612345678</div>
+						</div>
+					</div>
+				</div>
+			`);
+
+			const table = new PlaywrightTable(page.locator("[role='treegrid']"), {
+				header: {
+					setMainHeaderRow: 0,
+					rowSelector: "[data-kind='header-group'] > div[role='row']",
+					columnSelector: "div[role='columnheader']",
+				},
+				row: {
+					rowSelector: "[data-kind='body-group'] > div[role='row']",
+					columnSelector: "div[role='gridcell']",
+				},
+			});
+
+			const rows = await table.getBodyRows({
+				bodyRowOptions: {
+					cellContentType: CellContentType.InnerText,
+				},
+				headerRowOptions: {
+					normalizeWhitespace: true,
+					stripIconGlyphs: true,
+				},
+			});
+
+			expect(rows).toEqual([["Mr Test", "+31612345678"]]);
 		});
 	});
 
@@ -188,6 +271,52 @@ test.describe("Table Tests", () => {
 				});
 			}
 		});
+
+		test("getJson sanitizes header keys when requested", async ({ page }) => {
+			await page.setContent(`
+				<div role="treegrid">
+					<div data-kind="header-group">
+						<div role="row">
+							<div role="columnheader">Account name<span>&#xEE68;</span></div>
+							<div role="columnheader">Phone
+							<span>number</span></div>
+						</div>
+					</div>
+					<div data-kind="body-group">
+						<div role="row">
+							<div role="gridcell">Mr Test</div>
+							<div role="gridcell">+31612345678</div>
+						</div>
+					</div>
+				</div>
+			`);
+
+			const table = new PlaywrightTable(page.locator("[role='treegrid']"), {
+				header: {
+					setMainHeaderRow: 0,
+					rowSelector: "[data-kind='header-group'] > div[role='row']",
+					columnSelector: "div[role='columnheader']",
+				},
+				row: {
+					rowSelector: "[data-kind='body-group'] > div[role='row']",
+					columnSelector: "div[role='gridcell']",
+				},
+			});
+
+			const json = await table.getJson({
+				headerRowOptions: {
+					normalizeWhitespace: true,
+					stripIconGlyphs: true,
+				},
+			});
+
+			expect(json).toEqual([
+				{
+					"Account name": "Mr Test",
+					"Phone number": "+31612345678",
+				},
+			]);
+		});
 	});
 
 	test("getBodyCellLocator returns locator", async ({ page }) => {
@@ -210,6 +339,47 @@ test.describe("Table Tests", () => {
 		const cellLocator = await table.getBodyCellLocatorByRowConditions({ Rownumber: "Row 2" }, "Delete?");
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
+	});
+
+	test("getBodyCellLocatorByRowConditions supports sanitized header names via TableOptions", async ({ page }) => {
+		await page.setContent(`
+			<div role="treegrid">
+				<div data-kind="header-group">
+					<div role="row">
+						<div role="columnheader">Account name<span>&#xEE68;</span></div>
+						<div role="columnheader">Phone
+						<span>number</span></div>
+					</div>
+				</div>
+				<div data-kind="body-group">
+					<div role="row">
+						<div role="gridcell">Mr Test</div>
+						<div role="gridcell">+31612345678</div>
+					</div>
+				</div>
+			</div>
+		`);
+
+		const table = new PlaywrightTable(page.locator("[role='treegrid']"), {
+			header: {
+				setMainHeaderRow: 0,
+				rowSelector: "[data-kind='header-group'] > div[role='row']",
+				columnSelector: "div[role='columnheader']",
+			},
+			row: {
+				rowSelector: "[data-kind='body-group'] > div[role='row']",
+				columnSelector: "div[role='gridcell']",
+			},
+		});
+
+		const locator = await table.getBodyCellLocatorByRowConditions({ "Account name": "Mr Test" }, "Phone number", {
+			headerRowOptions: {
+				normalizeWhitespace: true,
+				stripIconGlyphs: true,
+			},
+		});
+
+		await expect(locator).toHaveText("+31612345678");
 	});
 
 	test("getBodyCellLocatorByRowConditions should work with tuple syntax", async ({ page }) => {
@@ -343,6 +513,28 @@ test.describe("Table Tests", () => {
 				Specialty: "Anonymity",
 			},
 		]);
+	});
+
+	test("warns when header and body selectors are identical", async ({ page }) => {
+		await page.goto(Route.DivTable);
+
+		const warnings: string[] = [];
+		const originalWarn = console.warn;
+		console.warn = (...args: unknown[]) => {
+			warnings.push(args.map(value => String(value)).join(" "));
+		};
+
+		try {
+			new PlaywrightTable(page.locator(".divTable"), {
+				header: { rowSelector: ".divTableRow", columnSelector: ".divTableHead" },
+				row: { rowSelector: ".divTableRow", columnSelector: ".divTableCell" },
+			});
+		} finally {
+			console.warn = originalWarn;
+		}
+
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("header.rowSelector and row.rowSelector are identical");
 	});
 });
 

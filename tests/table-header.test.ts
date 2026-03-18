@@ -5,6 +5,47 @@ import { TableHeader } from "src/table-header";
 import { Route } from "./demo-html/routes";
 
 test.describe("Header Row Tests", () => {
+	test.describe("Header text sanitization", () => {
+		test("normalizeWhitespace collapses internal line breaks and spaces", async ({ page }) => {
+			await page.setContent(`
+				<table>
+					<thead>
+						<tr>
+							<th><span>Account name</span>
+							<span>Sort</span></th>
+							<th>  City   Name  </th>
+						</tr>
+					</thead>
+				</table>
+			`);
+
+			const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", {
+				normalizeWhitespace: true,
+			});
+
+			expect(headers).toEqual([["Account name Sort", "City Name"]]);
+		});
+
+		test("stripIconGlyphs removes private-use icon font characters", async ({ page }) => {
+			await page.setContent(`
+				<table>
+					<thead>
+						<tr>
+							<th>Account name<span>&#xE92E;</span><span>&#xEE68;</span></th>
+							<th>Phone</th>
+						</tr>
+					</thead>
+				</table>
+			`);
+
+			const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", {
+				stripIconGlyphs: true,
+			});
+
+			expect(headers).toEqual([["Account name", "Phone"]]);
+		});
+	});
+
 	test.describe("Options colspan", async () => {
 		const optionsColspanTestCases: {
 			options: { colspan?: { enabled?: boolean; suffix?: boolean } };
