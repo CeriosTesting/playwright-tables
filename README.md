@@ -140,6 +140,8 @@ console.log(headers);
   cellContentType?: CellContentType.InnerText | CellContentType.TextContent, // Default: InnerText
   emptyCellReplacement?: boolean,  // Replace empty cells with "{{Empty}}" (default: false)
   duplicateSuffix?: boolean,        // Add suffix to duplicate headers (default: false)
+	normalizeWhitespace?: boolean,    // Collapse internal whitespace/newlines (default: false)
+	stripIconGlyphs?: boolean,        // Remove icon-font private-use glyphs from headers (default: false)
   colspan?: {
     enabled?: boolean,              // Enable colspan parsing (default: false)
     suffix?: boolean                // Add suffix to colspan cells (default: false)
@@ -185,7 +187,7 @@ Retrieves all body rows with support for rowspan and colspan.
 
 **Parameters:**
 
-- `options?: { cellContentType?: CellContentType }` - Content extraction type
+- `options?: TableOptions` - Full table options (`bodyRowOptions`, `headerRowOptions`) and legacy `cellContentType` shortcut
 
 **Returns:** `Promise<BodyRow[]>` - Array of body rows
 
@@ -194,9 +196,20 @@ Retrieves all body rows with support for rowspan and colspan.
 **Example:**
 
 ```ts
+// Legacy shortcut
 const rows = await table.getBodyRows({
 	cellContentType: CellContentType.TextContent, // Include hidden elements
 });
+
+// Full table options (useful for custom grids with noisy headers)
+const rowsWithOptions = await table.getBodyRows({
+	bodyRowOptions: { cellContentType: CellContentType.InnerText },
+	headerRowOptions: {
+		normalizeWhitespace: true,
+		stripIconGlyphs: true,
+	},
+});
+
 console.log(rows);
 // Output: [["John", "30", "NYC"], ["Jane", "25", "LA"]]
 ```
@@ -205,6 +218,8 @@ console.log(rows);
 
 - `CellContentType.InnerText` - Rendered text (default, excludes hidden elements)
 - `CellContentType.TextContent` - Raw text content (includes hidden elements)
+
+Header sanitization options (`normalizeWhitespace`, `stripIconGlyphs`) can be used in all methods that accept `HeaderRowOptions` or `TableOptions`, such as `getHeaderRows`, `getMainHeaderRow`, `getJson`, `findRowIndex`, and `getBodyCellLocatorByRowConditions`.
 
 ---
 
@@ -669,6 +684,25 @@ const divTable = new PlaywrightTable(page.locator(".divTable"), {
 });
 ```
 
+### ARIA Treegrid Tables
+
+For `role="treegrid"` structures, make sure header and body row selectors are scoped to different containers.
+If both use the same selector (for example `div[role='row']`), header rows can be included in body rows.
+
+```ts
+const table = new PlaywrightTable(page.locator("[role='treegrid']"), {
+	header: {
+		setMainHeaderRow: 0,
+		rowSelector: "[data-kind='header-group'] > div[role='row']",
+		columnSelector: "div[role='columnheader']",
+	},
+	row: {
+		rowSelector: "[data-kind='body-group'] > div[role='row']",
+		columnSelector: "div[role='gridcell']",
+	},
+});
+```
+
 ### Header Row Options
 
 Control how headers are processed:
@@ -678,6 +712,8 @@ const headers = await table.getHeaderRows({
 	cellContentType: CellContentType.TextContent, // Include hidden text
 	emptyCellReplacement: true, // Replace "" with "{{Empty}}"
 	duplicateSuffix: true, // "Name", "Name__D1", "Name__D2"
+	normalizeWhitespace: true, // "Account\nName" -> "Account Name"
+	stripIconGlyphs: true, // Removes private-use icon glyph chars from header text
 	colspan: {
 		enabled: true, // Process colspan attributes
 		suffix: true, // "Col", "Col__C1", "Col__C2"

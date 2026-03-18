@@ -19,6 +19,8 @@ export type HeaderRowOptions = {
 	emptyCellReplacement?: boolean;
 	duplicateSuffix?: boolean;
 	colspan?: { enabled?: boolean; suffix?: boolean };
+	normalizeWhitespace?: boolean;
+	stripIconGlyphs?: boolean;
 };
 
 /**
@@ -34,6 +36,7 @@ export class TableHeader {
 	private static readonly COLSPAN_SUFFIX_PREFIX = "__C";
 	private static readonly DUPLICATE_SUFFIX_PREFIX = "__D";
 	private static readonly COLSPAN_PATTERN = /__C\d+/;
+	private static readonly ICON_GLYPH_PATTERN = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
 
 	/**
 	 * Extracts header rows from a table with optional processing for colspan, rowspan, and duplicates.
@@ -97,6 +100,8 @@ export class TableHeader {
 			cellContentType: options?.cellContentType ?? CellContentType.InnerText,
 			emptyCellReplacement: options?.emptyCellReplacement ?? false,
 			duplicateSuffix: options?.duplicateSuffix ?? false,
+			normalizeWhitespace: options?.normalizeWhitespace ?? false,
+			stripIconGlyphs: options?.stripIconGlyphs ?? false,
 			colspan: {
 				enabled: options?.colspan?.enabled ?? false,
 				suffix: options?.colspan?.suffix ?? false,
@@ -117,7 +122,11 @@ export class TableHeader {
 			return headerRow;
 		}
 
-		const cellDataArray = await Promise.all(cells.map(cell => this.fetchHeaderCellData(cell, options.cellContentType)));
+		const cellDataArray = await Promise.all(
+			cells.map(cell =>
+				this.fetchHeaderCellData(cell, options.cellContentType, options.normalizeWhitespace, options.stripIconGlyphs)
+			)
+		);
 
 		let columnIndex = 0;
 		for (let i = 0; i < cellDataArray.length; i++) {
@@ -140,7 +149,9 @@ export class TableHeader {
 	 */
 	private static async fetchHeaderCellData(
 		cell: Locator,
-		cellContentType: CellContentType
+		cellContentType: CellContentType,
+		normalizeWhitespace: boolean,
+		stripIconGlyphs: boolean
 	): Promise<{ text: string; rowspan: number; colspan: number }> {
 		const [text, spanAttributes] = await Promise.all([
 			TableUtils.getCellContent(cell, cellContentType),
@@ -148,10 +159,24 @@ export class TableHeader {
 		]);
 
 		return {
-			text,
+			text: this.sanitizeHeaderText(text, normalizeWhitespace, stripIconGlyphs),
 			rowspan: spanAttributes.rowspan,
 			colspan: spanAttributes.colspan,
 		};
+	}
+
+	private static sanitizeHeaderText(text: string, normalizeWhitespace: boolean, stripIconGlyphs: boolean): string {
+		let result = text;
+
+		if (stripIconGlyphs) {
+			result = result.replace(this.ICON_GLYPH_PATTERN, "");
+		}
+
+		if (normalizeWhitespace) {
+			result = result.replace(/\s+/g, " ");
+		}
+
+		return result.trim();
 	}
 
 	/**

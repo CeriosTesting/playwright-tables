@@ -26,6 +26,8 @@ export type TableOptions = {
 	headerRowOptions?: HeaderRowOptions;
 	/** Options for parsing body rows. */
 	bodyRowOptions?: { cellContentType?: CellContentType };
+	/** @deprecated Use `bodyRowOptions.cellContentType` instead. */
+	cellContentType?: CellContentType;
 };
 
 /**
@@ -79,6 +81,15 @@ export class PlaywrightTable {
 			};
 		}
 	) {
+		const headerRowSelector = this._options?.header?.rowSelector;
+		const bodyRowSelector = this._options?.row?.rowSelector;
+		if (headerRowSelector && bodyRowSelector && headerRowSelector === bodyRowSelector) {
+			console.warn(
+				`PlaywrightTable: header.rowSelector and row.rowSelector are identical ("${headerRowSelector}"). ` +
+					`This can cause header rows to be included in body rows. Consider scoping selectors to separate row groups.`
+			);
+		}
+
 		this._headerRowLocator = this._tableLocator.locator(this._options?.header?.rowSelector ?? "thead>tr");
 		this._headerColumnSelector = this._options?.header?.columnSelector ?? "th";
 		this._bodyRowLocator = this._tableLocator.locator(this._options?.row?.rowSelector ?? "tbody>tr");
@@ -134,8 +145,10 @@ export class PlaywrightTable {
 
 	/**
 	 * Retrieves all body rows of the table.
-	 * @param options - Optional configuration for body row parsing.
-	 * @param options.cellContentType - Content extraction type. See {@link CellContentType}. Defaults to InnerText.
+	 * @param options - Optional table or body-row configuration.
+	 * @param options.cellContentType - Legacy shortcut for body row content extraction. See {@link CellContentType}.
+	 * @param options.bodyRowOptions - Body row parsing options.
+	 * @param options.headerRowOptions - Header parsing options used when resolving row/colspan layouts.
 	 * @returns A promise that resolves to an array of body rows.
 	 * @throws Error if no body rows found after table loads.
 	 *
@@ -148,13 +161,22 @@ export class PlaywrightTable {
 	 * @example
 	 * // Get body rows with default InnerText
 	 * const rows = await table.getBodyRows();
+	 *
+	 * @example
+	 * // Use full table options (for example to sanitize noisy treegrid headers)
+	 * const rows = await table.getBodyRows({
+	 *   bodyRowOptions: { cellContentType: CellContentType.InnerText },
+	 *   headerRowOptions: { normalizeWhitespace: true, stripIconGlyphs: true }
+	 * });
 	 */
-	async getBodyRows(options?: { cellContentType?: CellContentType }): Promise<BodyRow[]> {
+	async getBodyRows(options?: TableOptions): Promise<BodyRow[]> {
+		const tableOptions = this.normalizeGetBodyRowsOptions(options);
+
 		const table = await this.getTable({
-			bodyRowOptions: options,
-			headerRowOptions: {
-				colspan: { enabled: true },
-			},
+			bodyRowOptions: tableOptions.bodyRowOptions,
+			headerRowOptions: this.resolveHeaderRowOptions(tableOptions.headerRowOptions, {
+				forceColspanEnabled: true,
+			}),
 		});
 		return table.bodyRows;
 	}
@@ -358,14 +380,14 @@ export class PlaywrightTable {
 	async getJson(options?: TableOptions): Promise<Record<string, string>[]> {
 		const table = await this.getTable({
 			bodyRowOptions: options?.bodyRowOptions,
-			headerRowOptions: {
-				colspan: {
-					enabled: options?.headerRowOptions?.colspan?.enabled ?? true,
-					suffix: options?.headerRowOptions?.colspan?.suffix ?? true,
-				},
-				duplicateSuffix: options?.headerRowOptions?.duplicateSuffix ?? true,
-				emptyCellReplacement: options?.headerRowOptions?.emptyCellReplacement ?? true,
-			},
+			headerRowOptions: this.resolveHeaderRowOptions(options?.headerRowOptions, {
+				defaultColspanEnabled: true,
+				defaultColspanSuffix: true,
+				defaultDuplicateSuffix: true,
+				defaultEmptyCellReplacement: true,
+				defaultNormalizeWhitespace: false,
+				defaultStripIconGlyphs: false,
+			}),
 		});
 
 		const headers = this.mainHeaderRow(table.headerRows);
@@ -591,7 +613,9 @@ export class PlaywrightTable {
 	 */
 	async findRowIndex(conditions: Record<string, string>, options?: TableOptions): Promise<number> {
 		const table = await this.getTable({
-			headerRowOptions: { colspan: { enabled: true }, ...options?.headerRowOptions },
+			headerRowOptions: this.resolveHeaderRowOptions(options?.headerRowOptions, {
+				forceColspanEnabled: true,
+			}),
 			bodyRowOptions: options?.bodyRowOptions,
 		});
 		const mainHeader = this.mainHeaderRow(table.headerRows);
@@ -646,6 +670,55 @@ export class PlaywrightTable {
 		}
 
 		return { headerRows, bodyRows };
+	}
+
+	private normalizeGetBodyRowsOptions(options?: TableOptions): TableOptions {
+		if (!options) {
+			return {};
+		}
+
+		if (options.bodyRowOptions || options.headerRowOptions) {
+			return options;
+		}
+
+		if (options.cellContentType !== undefined) {
+			return {
+				bodyRowOptions: {
+					cellContentType: options.cellContentType,
+				},
+			};
+		}
+
+		return options;
+	}
+
+	private resolveHeaderRowOptions(
+		headerOptions: HeaderRowOptions | undefined,
+		defaults?: {
+			defaultColspanEnabled?: boolean;
+			defaultColspanSuffix?: boolean;
+			defaultDuplicateSuffix?: boolean;
+			defaultEmptyCellReplacement?: boolean;
+			defaultNormalizeWhitespace?: boolean;
+			defaultStripIconGlyphs?: boolean;
+			forceColspanEnabled?: boolean;
+		}
+	): HeaderRowOptions {
+		const resolvedColspanEnabled = defaults?.forceColspanEnabled
+			? true
+			: (headerOptions?.colspan?.enabled ?? defaults?.defaultColspanEnabled);
+
+		return {
+			cellContentType: headerOptions?.cellContentType,
+			emptyCellReplacement: headerOptions?.emptyCellReplacement ?? defaults?.defaultEmptyCellReplacement,
+			duplicateSuffix: headerOptions?.duplicateSuffix ?? defaults?.defaultDuplicateSuffix,
+			normalizeWhitespace: headerOptions?.normalizeWhitespace ?? defaults?.defaultNormalizeWhitespace,
+			stripIconGlyphs: headerOptions?.stripIconGlyphs ?? defaults?.defaultStripIconGlyphs,
+			colspan: {
+				enabled: resolvedColspanEnabled,
+				suffix: headerOptions?.colspan?.suffix ?? defaults?.defaultColspanSuffix,
+			},
+		};
 	}
 
 	private mainHeaderRow(headers: HeaderRow[]): HeaderRow {
