@@ -157,6 +157,28 @@ test.describe("Table Tests", () => {
 			]);
 		});
 
+		test("getJson uses getJson-style empty header names by default", async ({ page }) => {
+			await page.goto(Route.DuplicateEmptyHeadersTable);
+
+			const table = new PlaywrightTable(page.locator("table"));
+			const json = await table.getJson();
+
+			expect(json).toEqual([
+				{
+					"{{Empty}}": "Empty 1_1",
+					"First Name": "Logan",
+					"Last Name": "Veth",
+					"{{Empty}}__D1": "Empty 1_2",
+				},
+				{
+					"{{Empty}}": "Empty 2_1",
+					"First Name": "Deacon",
+					"Last Name": "St. Veth",
+					"{{Empty}}__D1": "Empty 2_2",
+				},
+			]);
+		});
+
 		test("getJson with rowspan handles correctly and returns json with row per rowspan", async ({ page }) => {
 			await page.goto(Route.RowspanRowTable);
 
@@ -317,6 +339,40 @@ test.describe("Table Tests", () => {
 				},
 			]);
 		});
+
+		test("getJson normalizes line-ending header keys when requested", async ({ page }) => {
+			await page.setContent(`
+				<table>
+					<thead>
+						<tr>
+							<th>Account&#10;Name</th>
+							<th>Phone&#13;&#10;Number</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td>Mr Test</td>
+							<td>+31612345678</td>
+						</tr>
+					</tbody>
+				</table>
+			`);
+
+			const table = new PlaywrightTable(page.locator("table"));
+			const json = await table.getJson({
+				headerRowOptions: {
+					cellContentType: CellContentType.TextContent,
+					normalizeWhitespace: true,
+				},
+			});
+
+			expect(json).toEqual([
+				{
+					"Account Name": "Mr Test",
+					"Phone Number": "+31612345678",
+				},
+			]);
+		});
 	});
 
 	test("getBodyCellLocator returns locator", async ({ page }) => {
@@ -339,6 +395,15 @@ test.describe("Table Tests", () => {
 		const cellLocator = await table.getBodyCellLocatorByRowConditions({ Rownumber: "Row 2" }, "Delete?");
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
+	});
+
+	test("getBodyCellLocatorByRowConditions uses getJson-style empty header names by default", async ({ page }) => {
+		await page.goto(Route.DuplicateEmptyHeadersTable);
+
+		const table = new PlaywrightTable(page.locator("table"));
+		const cellLocator = await table.getBodyCellLocatorByRowConditions({ "{{Empty}}": "Empty 1_1" }, "{{Empty}}__D1");
+
+		await expect(cellLocator).toHaveText("Empty 1_2");
 	});
 
 	test("getBodyCellLocatorByRowConditions supports sanitized header names via TableOptions", async ({ page }) => {
@@ -376,6 +441,36 @@ test.describe("Table Tests", () => {
 			headerRowOptions: {
 				normalizeWhitespace: true,
 				stripIconGlyphs: true,
+			},
+		});
+
+		await expect(locator).toHaveText("+31612345678");
+	});
+
+	test("getBodyCellLocatorByRowConditions normalizes line-ending headers when requested", async ({ page }) => {
+		await page.setContent(`
+			<table>
+				<thead>
+					<tr>
+						<th>Account&#10;Name</th>
+						<th>Phone&#13;&#10;Number</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>Mr Test</td>
+						<td>+31612345678</td>
+					</tr>
+				</tbody>
+			</table>
+		`);
+
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const locator = await table.getBodyCellLocatorByRowConditions({ "Account Name": "Mr Test" }, "Phone Number", {
+			headerRowOptions: {
+				cellContentType: CellContentType.TextContent,
+				normalizeWhitespace: true,
 			},
 		});
 
@@ -466,6 +561,53 @@ test.describe("Table Tests", () => {
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 
+	test("getAllBodyCellLocatorsByHeaderName uses getJson-style empty header names by default", async ({ page }) => {
+		await page.goto(Route.DuplicateEmptyHeadersTable);
+
+		const table = new PlaywrightTable(page.locator("table"));
+		const locators = await table.getAllBodyCellLocatorsByHeaderName("{{Empty}}__D1");
+
+		expect(locators).toHaveLength(2);
+		await expect(locators[0]).toHaveText("Empty 1_2");
+		await expect(locators[1]).toHaveText("Empty 2_2");
+	});
+
+	test("getAllBodyCellLocatorsByHeaderName normalizes line-ending headers when requested", async ({ page }) => {
+		await page.setContent(`
+			<table>
+				<thead>
+					<tr>
+						<th>Account&#10;Name</th>
+						<th>Phone&#13;&#10;Number</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>Mr Test</td>
+						<td>+31612345678</td>
+					</tr>
+					<tr>
+						<td>Ms Demo</td>
+						<td>+441234567890</td>
+					</tr>
+				</tbody>
+			</table>
+		`);
+
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const locators = await table.getAllBodyCellLocatorsByHeaderName("Phone Number", {
+			headerRowOptions: {
+				cellContentType: CellContentType.TextContent,
+				normalizeWhitespace: true,
+			},
+		});
+
+		expect(locators).toHaveLength(2);
+		await expect(locators[0]).toHaveText("+31612345678");
+		await expect(locators[1]).toHaveText("+441234567890");
+	});
+
 	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {
 		await page.goto(Route.ButtonTable);
 
@@ -479,6 +621,15 @@ test.describe("Table Tests", () => {
 			await locator.locator("input[type='button']").click();
 		}
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
+	});
+
+	test("findRowIndex uses getJson-style empty header names by default", async ({ page }) => {
+		await page.goto(Route.DuplicateEmptyHeadersTable);
+
+		const table = new PlaywrightTable(page.locator("table"));
+		const rowIndex = await table.findRowIndex({ "{{Empty}}": "Empty 2_1", "First Name": "Deacon" });
+
+		expect(rowIndex).toBe(1);
 	});
 
 	test("div table", async ({ page }) => {
@@ -546,6 +697,48 @@ test.describe("getDistinctColumnValues", () => {
 		const firstNames = await table.getDistinctColumnValues("First name");
 
 		expect(firstNames).toEqual(["Logan", "Ronald"]);
+	});
+
+	test("should normalize line-ending headers when requested", async ({ page }) => {
+		await page.setContent(`
+			<table>
+				<thead>
+					<tr>
+						<th>Account&#10;Name</th>
+						<th>Phone&#13;&#10;Number</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>Mr Test</td>
+						<td>+31612345678</td>
+					</tr>
+					<tr>
+						<td>Ms Demo</td>
+						<td>+441234567890</td>
+					</tr>
+				</tbody>
+			</table>
+		`);
+
+		const table = new PlaywrightTable(page.locator("table"));
+		const values = await table.getDistinctColumnValues("Account Name", {
+			headerRowOptions: {
+				cellContentType: CellContentType.TextContent,
+				normalizeWhitespace: true,
+			},
+		});
+
+		expect(values).toEqual(["Mr Test", "Ms Demo"]);
+	});
+
+	test("should use getJson-style empty header names by default", async ({ page }) => {
+		await page.goto(Route.DuplicateEmptyHeadersTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const values = await table.getDistinctColumnValues("{{Empty}}");
+
+		expect(values).toEqual(["Empty 1_1", "Empty 2_1"]);
 	});
 
 	test("should exclude empty values", async ({ page }) => {

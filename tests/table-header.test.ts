@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CellContentType } from "src/cell-content-type";
 import { HeaderRow } from "src/row";
 import { TableHeader } from "src/table-header";
 
@@ -24,6 +25,55 @@ test.describe("Header Row Tests", () => {
 			});
 
 			expect(headers).toEqual([["Account name Sort", "City Name"]]);
+		});
+
+		test("normalizeWhitespace collapses line-ending and control whitespace variants", async ({ page }) => {
+			await page.setContent(`
+				<table>
+					<thead>
+						<tr>
+							<th>Account&#10;Name</th>
+							<th>Phone&#13;&#10;Number</th>
+							<th>User&#13;Type</th>
+							<th>Status&#x2028;Label</th>
+							<th id="code-header">CodeValue</th>
+						</tr>
+					</thead>
+				</table>
+			`);
+
+			await page.evaluate(() => {
+				const controlHeader = document.getElementById("code-header");
+				if (controlHeader) {
+					controlHeader.textContent = "Code\u0085Value";
+				}
+			});
+
+			const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", {
+				cellContentType: CellContentType.TextContent,
+				normalizeWhitespace: true,
+			});
+
+			expect(headers).toEqual([["Account Name", "Phone Number", "User Type", "Status Label", "Code Value"]]);
+		});
+
+		test("normalizeWhitespace false preserves explicit line breaks in header text", async ({ page }) => {
+			await page.setContent(`
+				<table>
+					<thead>
+						<tr>
+							<th>Account&#10;Name</th>
+						</tr>
+					</thead>
+				</table>
+			`);
+
+			const headers = await TableHeader.getRows(page.locator("table>thead>tr"), "th", {
+				cellContentType: CellContentType.TextContent,
+				normalizeWhitespace: false,
+			});
+
+			expect(headers).toEqual([["Account\nName"]]);
 		});
 
 		test("stripIconGlyphs removes private-use icon font characters", async ({ page }) => {

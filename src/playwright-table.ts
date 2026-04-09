@@ -246,7 +246,7 @@ export class PlaywrightTable {
 		targetHeader: string,
 		options?: TableOptions
 	): Promise<Locator> {
-		const table = await this.getTable(options);
+		const table = await this.getTable(this.resolveTableOptionsForHeaderKeyMethods(options));
 		const mainHeader = this.mainHeaderRow(table.headerRows);
 
 		const targetHeaderIndex = this.getHeaderIndex(targetHeader, mainHeader);
@@ -304,7 +304,7 @@ export class PlaywrightTable {
 	 * @see {@link getBodyCellLocatorByRowConditions} for finding specific cells by content
 	 */
 	async getAllBodyCellLocatorsByHeaderName(header: string, options?: TableOptions): Promise<Locator[]> {
-		const table = await this.getTable(options);
+		const table = await this.getTable(this.resolveTableOptionsForHeaderKeyMethods(options));
 		const headers = this.mainHeaderRow(table.headerRows);
 		const headerIndex = this.getHeaderIndex(header, headers);
 		const locators: Locator[] = [];
@@ -380,14 +380,7 @@ export class PlaywrightTable {
 	async getJson(options?: TableOptions): Promise<Record<string, string>[]> {
 		const table = await this.getTable({
 			bodyRowOptions: options?.bodyRowOptions,
-			headerRowOptions: this.resolveHeaderRowOptions(options?.headerRowOptions, {
-				defaultColspanEnabled: true,
-				defaultColspanSuffix: true,
-				defaultDuplicateSuffix: true,
-				defaultEmptyCellReplacement: true,
-				defaultNormalizeWhitespace: false,
-				defaultStripIconGlyphs: false,
-			}),
+			headerRowOptions: this.resolveHeaderRowOptionsForJsonKeys(options?.headerRowOptions),
 		});
 
 		const headers = this.mainHeaderRow(table.headerRows);
@@ -572,7 +565,7 @@ export class PlaywrightTable {
 	 * @see {@link getJson} for getting full table data
 	 */
 	async getDistinctColumnValues(headerName: string, options?: TableOptions): Promise<string[]> {
-		const table = await this.getTable(options);
+		const table = await this.getTable(this.resolveTableOptionsForHeaderKeyMethods(options));
 		const mainHeader = this.mainHeaderRow(table.headerRows);
 		const headerIndex = this.getHeaderIndex(headerName, mainHeader);
 
@@ -612,12 +605,7 @@ export class PlaywrightTable {
 	 * @see {@link waitForRowByConditions} for waiting until matching row appears
 	 */
 	async findRowIndex(conditions: Record<string, string>, options?: TableOptions): Promise<number> {
-		const table = await this.getTable({
-			headerRowOptions: this.resolveHeaderRowOptions(options?.headerRowOptions, {
-				forceColspanEnabled: true,
-			}),
-			bodyRowOptions: options?.bodyRowOptions,
-		});
+		const table = await this.getTable(this.resolveTableOptionsForHeaderKeyMethods(options));
 		const mainHeader = this.mainHeaderRow(table.headerRows);
 
 		// Validate all condition headers exist and get their indices
@@ -690,6 +678,25 @@ export class PlaywrightTable {
 		}
 
 		return options;
+	}
+
+	private resolveHeaderRowOptionsForJsonKeys(headerOptions?: HeaderRowOptions): HeaderRowOptions {
+		return this.resolveHeaderRowOptions(headerOptions, {
+			defaultColspanEnabled: true,
+			defaultColspanSuffix: true,
+			defaultDuplicateSuffix: true,
+			defaultEmptyCellReplacement: true,
+			defaultNormalizeWhitespace: false,
+			defaultStripIconGlyphs: false,
+		});
+	}
+
+	private resolveTableOptionsForHeaderKeyMethods(options?: TableOptions): TableOptions {
+		const tableOptions = this.normalizeGetBodyRowsOptions(options);
+		return {
+			bodyRowOptions: tableOptions.bodyRowOptions,
+			headerRowOptions: this.resolveHeaderRowOptionsForJsonKeys(tableOptions.headerRowOptions),
+		};
 	}
 
 	private resolveHeaderRowOptions(

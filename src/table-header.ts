@@ -37,6 +37,8 @@ export class TableHeader {
 	private static readonly DUPLICATE_SUFFIX_PREFIX = "__D";
 	private static readonly COLSPAN_PATTERN = /__C\d+/;
 	private static readonly ICON_GLYPH_PATTERN = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
+	private static readonly CONTROL_WHITESPACE_PATTERN = /[\p{Cc}\p{Zl}\p{Zp}]+/gu;
+	private static readonly WHITESPACE_PATTERN = /\s+/g;
 
 	/**
 	 * Extracts header rows from a table with optional processing for colspan, rowspan, and duplicates.
@@ -173,7 +175,7 @@ export class TableHeader {
 		}
 
 		if (normalizeWhitespace) {
-			result = result.replace(/\s+/g, " ");
+			result = result.replace(this.CONTROL_WHITESPACE_PATTERN, " ").replace(this.WHITESPACE_PATTERN, " ");
 		}
 
 		return result.trim();
