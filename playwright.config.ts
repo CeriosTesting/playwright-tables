@@ -27,6 +27,19 @@ export default defineConfig({
 			timeout: 10_000,
 			testIgnore: "bundle/**",
 		},
+		/* The pw-table selector engine runs inside the browser, so its tests also run on Firefox and WebKit. */
+		{
+			name: "firefox",
+			use: { ...devices["Desktop Firefox"] },
+			timeout: 15_000,
+			testMatch: ["table-locator.test.ts", "table-matchers.test.ts", "table-selector-engine.test.ts"],
+		},
+		{
+			name: "webkit",
+			use: { ...devices["Desktop Safari"] },
+			timeout: 15_000,
+			testMatch: ["table-locator.test.ts", "table-matchers.test.ts", "table-selector-engine.test.ts"],
+		},
 		/* Tests against the built bundles (run `npm run build` first). Separate projects get separate
 		   workers, so each bundle registers its own copy of the pw-table selector engine. */
 		{

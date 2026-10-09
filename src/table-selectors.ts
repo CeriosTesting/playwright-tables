@@ -37,7 +37,10 @@ const registrations = new WeakMap<Selectors, Promise<void>>();
 export function registerTableSelectors(target: Selectors = defaultSelectors): Promise<void> {
 	let registration = registrations.get(target);
 	if (registration === undefined) {
-		registration = target.register(TABLE_SELECTOR_ENGINE_NAME, tableSelectorEngine).catch((error: unknown) => {
+		// Run in an isolated world: Firefox evaluates custom engines with eval(), which a strict page CSP
+		// blocks in the main world. The isolated world shares the DOM, which is all the engine needs.
+		const options = { contentScript: true };
+		registration = target.register(TABLE_SELECTOR_ENGINE_NAME, tableSelectorEngine, options).catch((error: unknown) => {
 			if (error instanceof Error && /already registered/.test(error.message)) {
 				return;
 			}

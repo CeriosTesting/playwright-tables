@@ -256,7 +256,7 @@ test.describe("TableLocator cell conditions", () => {
 		await expect(users.rows.locator).toHaveCount(3);
 	});
 
-	test("predicate works on a page whose CSP forbids eval", async ({ page }) => {
+	test("works on a page whose CSP forbids eval", async ({ page }) => {
 		await page.route("**/strict-csp", route =>
 			route.fulfill({
 				body: usersTable,
@@ -266,7 +266,9 @@ test.describe("TableLocator cell conditions", () => {
 		await page.goto("/strict-csp");
 		const users = defineTable(page.locator("#users"), { headers: ["Name", "Age"] });
 
+		await expect(users.row({ Name: "Jane Roe" }).cell("Age")).toHaveText("17");
 		await expect(users.row({ Age: { predicate: text => Number(text) > 60 } }).cell("Name")).toHaveText("Joe Bloggs");
+		expect(await users.headerKeys()).toEqual(["Name", "Status", "Email", "Age", "Remarks"]);
 	});
 
 	test("not, anyOf and allOf combine conditions", async ({ page }) => {
