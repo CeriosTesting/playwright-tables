@@ -286,7 +286,7 @@ export class TableLocator<const H extends string = string> {
 		try {
 			await pollTable(
 				async () => {
-					available = await this.headerKeys({ timeout: Math.max(1, deadline - Date.now()) });
+					available = await this.headerKeys({ timeout: Math.max(100, deadline - Date.now()) });
 					missing = required.filter(header => !available.includes(header));
 					if (missing.length > 0) {
 						throw new Error(`Missing headers: [${missing.join(", ")}]`);

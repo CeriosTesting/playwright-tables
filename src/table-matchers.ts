@@ -3,6 +3,9 @@ import { expect as baseExpect, ExpectMatcherState, MatcherReturnType } from "@pl
 import { TableLocator } from "./table-locator";
 import { CellMatcher, RowWhere } from "./table-locator.types";
 
+/** Minimum time a single header read may take, so the last read before the deadline can still succeed. */
+const MIN_READ_TIMEOUT = 100;
+
 /** Options shared by the table matchers. */
 export type TableMatcherOptions = {
 	/** Time to retry the assertion for, in milliseconds. Defaults to the `expect` timeout. */
@@ -126,9 +129,9 @@ async function toHaveHeaders(
 	let matched = false;
 	for (;;) {
 		try {
-			keys = await table.headerKeys({ timeout: Math.max(1, deadline - Date.now()) });
+			keys = await table.headerKeys({ timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()) });
 		} catch {
-			keys = [];
+			// Keep the last keys that were read; the table may not be attached yet.
 		}
 		matched = matches(keys);
 		if (matched !== this.isNot || Date.now() >= deadline) break;
