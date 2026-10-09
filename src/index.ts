@@ -6,3 +6,4 @@ export { PollingOptions } from "./polling";
 export * from "./table-locator";
 export * from "./table-locator.types";
 export { registerTableSelectors, test } from "./table-selectors";
+export { expect, tableMatchers, TableMatcherOptions } from "./table-matchers";
