@@ -361,5 +361,21 @@ function serializeMatcher(header: string, matcher: CellMatcher): SerializedMatch
 	if (matcher.endsWith !== undefined) {
 		return { t: "c", op: "endsWith", v: matcher.endsWith, i: ignoreCase };
 	}
+	if (matcher.not !== undefined) {
+		return { t: "n", m: serializeMatcher(header, matcher.not) };
+	}
+	if (matcher.anyOf !== undefined) {
+		return { t: "a", m: serializeMatchers(header, "anyOf", matcher.anyOf) };
+	}
+	if (matcher.allOf !== undefined) {
+		return { t: "l", m: serializeMatchers(header, "allOf", matcher.allOf) };
+	}
 	throw new TypeError(`Condition for header "${header}" is not a supported cell matcher.`);
+}
+
+function serializeMatchers(header: string, kind: string, matchers: readonly CellMatcher[]): SerializedMatcher[] {
+	if (matchers.length === 0) {
+		throw new TypeError(`Condition for header "${header}": ${kind} needs at least one matcher.`);
+	}
+	return matchers.map(matcher => serializeMatcher(header, matcher));
 }

@@ -54,6 +54,19 @@ export function typeTests(root: Locator): void {
 	// @ts-expect-error async predicates are not supported
 	users.row({ Name: { predicate: async (text: string) => text === "x" } });
 
+	// Combinators nest any matcher
+	users.row({ Status: { not: "Active" } });
+	users.row({ Status: { anyOf: ["Active", /pend/i, { empty: true }] } });
+	users.row({ Name: { allOf: [{ startsWith: "J" }, { not: { predicate: text => text.endsWith("x") } }] } });
+	// @ts-expect-error anyOf needs at least one matcher
+	users.row({ Status: { anyOf: [] } });
+	// @ts-expect-error allOf needs at least one matcher
+	users.row({ Status: { allOf: [] } });
+	// @ts-expect-error nested matchers are type-checked
+	users.row({ Status: { not: { contains: 5 } } });
+	// @ts-expect-error not cannot be combined with another kind
+	users.row({ Status: { not: "x", empty: true } });
+
 	// Typed cells
 	const row = users.row({ Name: "John" });
 	row.cell("Email");

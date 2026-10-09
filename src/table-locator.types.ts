@@ -23,6 +23,10 @@ export type HeaderKey<H extends string> = H | `${H}__C${number}` | `${H}__D${num
  * table.row({ Remarks: { empty: true } });
  * // Runs in the browser, so it must not use variables from the test scope.
  * table.row({ Age: { predicate: text => Number(text) >= 18 } });
+ * // Combinators
+ * table.row({ Status: { not: "Deleted" } });
+ * table.row({ Email: { anyOf: [{ endsWith: "@example.com" }, /@test\./] } });
+ * table.row({ Name: { allOf: [{ startsWith: "J" }, { not: { contains: "Doe" } }] } });
  */
 export type CellCondition =
 	| ExclusiveCondition<{ equals: string; ignoreCase?: boolean }>
@@ -37,7 +41,10 @@ export type CellCondition =
 			 * It must be self-contained: it cannot use variables from the test scope.
 			 */
 			predicate: (text: string) => boolean;
-	  }>;
+	  }>
+	| ExclusiveCondition<{ not: CellMatcher }>
+	| ExclusiveCondition<{ anyOf: readonly [CellMatcher, ...CellMatcher[]] }>
+	| ExclusiveCondition<{ allOf: readonly [CellMatcher, ...CellMatcher[]] }>;
 
 type CellConditionKey =
 	| "equals"
@@ -47,6 +54,9 @@ type CellConditionKey =
 	| "oneOf"
 	| "empty"
 	| "predicate"
+	| "not"
+	| "anyOf"
+	| "allOf"
 	| "ignoreCase";
 
 /** Forbids the keys of the other condition kinds, so a condition object has exactly one kind. */
@@ -116,7 +126,10 @@ export type SerializedMatcher =
 	| { t: "c"; op: "equals" | "contains" | "startsWith" | "endsWith"; v: string; i: boolean }
 	| { t: "o"; v: string[] }
 	| { t: "e" }
-	| { t: "f"; src: string };
+	| { t: "f"; src: string }
+	| { t: "n"; m: SerializedMatcher }
+	| { t: "a"; m: SerializedMatcher[] }
+	| { t: "l"; m: SerializedMatcher[] };
 
 /**
  * Table configuration shared by every `pw-table` query.

@@ -237,6 +237,18 @@ export function tableSelectorEngine(root?: Element, request?: EngineKeysRequest)
 					return false;
 				}
 			}
+			case "n":
+				return !matches(text, matcher.m);
+			case "a":
+				for (let i = 0; i < matcher.m.length; i++) {
+					if (matches(text, matcher.m[i])) return true;
+				}
+				return false;
+			case "l":
+				for (let i = 0; i < matcher.m.length; i++) {
+					if (!matches(text, matcher.m[i])) return false;
+				}
+				return matcher.m.length > 0;
 			default:
 				return false;
 		}

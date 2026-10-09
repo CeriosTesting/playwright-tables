@@ -225,5 +225,8 @@ function describeMatcher(matcher: CellMatcher): string {
 	if (typeof matcher === "string") return JSON.stringify(matcher);
 	if (matcher instanceof RegExp) return String(matcher);
 	if (matcher.predicate !== undefined) return `{ predicate: ${matcher.predicate.toString()} }`;
+	if (matcher.not !== undefined) return `{ not: ${describeMatcher(matcher.not)} }`;
+	if (matcher.anyOf !== undefined) return `{ anyOf: [${matcher.anyOf.map(describeMatcher).join(", ")}] }`;
+	if (matcher.allOf !== undefined) return `{ allOf: [${matcher.allOf.map(describeMatcher).join(", ")}] }`;
 	return JSON.stringify(matcher);
 }

@@ -269,6 +269,30 @@ test.describe("TableLocator cell conditions", () => {
 		await expect(users.row({ Age: { predicate: text => Number(text) > 60 } }).cell("Name")).toHaveText("Joe Bloggs");
 	});
 
+	test("not, anyOf and allOf combine conditions", async ({ page }) => {
+		const users = await openUsers(page);
+
+		await expect(users.row({ Status: { not: "Active" } }).cell("Name")).toHaveText("Jane Roe");
+		await expect(users.row({ Remarks: { not: { empty: true } } }).cell("Name")).toHaveText("Jane Roe");
+		await expect(users.row({ Age: { anyOf: ["17", /^6\d$/] } }).locator).toHaveCount(2);
+		await expect(
+			users.row({ Name: { allOf: [{ startsWith: "Jo" }, { not: { contains: "doe", ignoreCase: true } }] } }).cell("Age")
+		).toHaveText("65");
+		await expect(
+			users.row({ Age: { anyOf: [{ predicate: text => Number(text) > 60 }, { oneOf: ["42"] }] } }).locator
+		).toHaveCount(2);
+	});
+
+	test("anyOf and allOf reject an empty list at runtime", async ({ page }) => {
+		const users = defineTable((await openUsers(page)).root);
+		const empty: never[] = [];
+		// Untyped JS callers can still pass empty lists
+		const anyOf = { anyOf: empty } as unknown as { anyOf: [string] };
+		const allOf = { allOf: empty } as unknown as { allOf: [string] };
+		expect(() => users.row({ Name: anyOf })).toThrow("anyOf needs at least one matcher");
+		expect(() => users.row({ Name: allOf })).toThrow("allOf needs at least one matcher");
+	});
+
 	test("a RegExp containing >> does not break the selector", async ({ page }) => {
 		const users = await openUsers(page);
 		await expect(users.row({ Name: /x>>y|^Jane/ }).cell("Age")).toHaveText("17");
