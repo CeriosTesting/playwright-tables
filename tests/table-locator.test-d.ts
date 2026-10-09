@@ -116,6 +116,13 @@ export async function matcherTypeTests(root: Locator): Promise<void> {
 	await expect(root).toHaveRow({ Name: "John" });
 	// @ts-expect-error wrong matcher value type
 	await expect(users).toHaveRow({ Name: 5 });
+	// Row matchers take typed rows
+	await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active" });
+	await expect(users.rowAt(1)).not.toHaveCells({ Status: { anyOf: ["Gone", /deleted/i] } });
+	// @ts-expect-error toHaveCells is a row matcher, not a table matcher
+	await expect(users).toHaveCells({ Status: "Active" });
+	// @ts-expect-error toHaveRow is a table matcher, not a row matcher
+	await expect(users.rowAt(0)).toHaveRow({ Status: "Active" });
 	// Locator matchers keep working
 	await expect(users.rows.locator).toHaveCount(2);
 }

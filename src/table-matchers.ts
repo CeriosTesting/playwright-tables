@@ -1,6 +1,6 @@
 import { expect as baseExpect, ExpectMatcherState, MatcherReturnType } from "@playwright/test";
 
-import { TableLocator } from "./table-locator";
+import { TableLocator, TableRow } from "./table-locator";
 import { CellMatcher, RowWhere } from "./table-locator.types";
 
 /** Minimum time a single header read may take, so the last read before the deadline can still succeed. */
@@ -158,11 +158,72 @@ async function toHaveHeaders(
 }
 
 /**
- * Custom `expect` matchers for {@link TableLocator}. Use them to extend your own `expect`.
+ * Asserts that a {@link TableRow} resolves to exactly one row whose cells match every condition.
+ * With `.not`, the row must exist and not match. Retries until the timeout.
+ *
+ * @example
+ * await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active", Email: /@example\.com$/ });
+ * await expect(users.rowAt(0)).not.toHaveCells({ Status: "Deleted" });
+ */
+async function toHaveCells(
+	this: ExpectMatcherState,
+	row: TableRow,
+	cells: RowWhere<string>,
+	options?: TableMatcherOptions
+): Promise<MatcherReturnType> {
+	const matcherName = "toHaveCells";
+	const timeout = options?.timeout ?? this.timeout;
+	const deadline = Date.now() + timeout;
+	const matching = row.locator.and(row.table.row(cells).locator);
+
+	let rowCount = 0;
+	let matchCount = 0;
+	let reached = false;
+	for (;;) {
+		try {
+			[rowCount, matchCount] = await Promise.all([row.locator.count(), matching.count()]);
+		} catch {
+			// Keep the last counts; the page may be navigating.
+		}
+		reached = rowCount === 1 && matchCount === (this.isNot ? 0 : 1);
+		if (reached || Date.now() >= deadline) break;
+		await new Promise(resolve => setTimeout(resolve, 100));
+	}
+
+	const pass = this.isNot ? !reached : reached;
+	const failed = pass === this.isNot;
+	const headers = Object.keys(cells);
+	const diagnostics = failed ? await headerDiagnostics(row.table, headers) : "";
+	const received = failed && rowCount === 1 && diagnostics === "" ? await readCells(row, headers) : undefined;
+
+	return {
+		name: matcherName,
+		pass,
+		expected: cells,
+		actual: received,
+		timeout,
+		message: () =>
+			this.utils.matcherHint(matcherName, "row", "cells", { isNot: this.isNot }) +
+			"\n\n" +
+			`Expected: ${this.isNot ? "a row not matching" : "a row matching"} ${describeWhere(cells)}\n` +
+			(rowCount === 1
+				? received !== undefined
+					? `Received: ${received}\n`
+					: ""
+				: `Received: the row locator matched ${rowCount} rows, expected exactly 1\n`) +
+			diagnostics +
+			`Row locator: ${row.locator.toString()}\n` +
+			`Timeout: ${timeout}ms`,
+	};
+}
+
+/**
+ * Custom `expect` matchers for {@link TableLocator} and {@link TableRow}. Use them to extend your own `expect`.
  *
  * - `toHaveRow(where, options?)`: at least one body row matches every condition.
  * - `toHaveRowCount(count, options?)`: exactly `count` body rows.
  * - `toHaveHeaders(headers, options?)`: the main header row contains these header keys (`exact` for an ordered match).
+ * - `toHaveCells(cells, options?)` on a {@link TableRow}: exactly one row, whose cells match every condition.
  *
  * @example
  * // Combine with your own matchers
@@ -181,7 +242,7 @@ async function toHaveHeaders(
  *
  * export const expect = mergeExpects(tableExpect, myExpect);
  */
-export const tableMatchers = { toHaveRow, toHaveRowCount, toHaveHeaders };
+export const tableMatchers = { toHaveRow, toHaveRowCount, toHaveHeaders, toHaveCells };
 
 /**
  * Playwright `expect` extended with {@link tableMatchers}.
@@ -195,9 +256,26 @@ export const tableMatchers = { toHaveRow, toHaveRowCount, toHaveHeaders };
  *   await expect(users).toHaveRow({ Name: "John", Status: /active/i });
  *   await expect(users).not.toHaveRow({ Name: "Ghost" });
  *   await expect(users).toHaveRowCount(3);
+ *   await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active" });
  * });
  */
 export const expect = baseExpect.extend(tableMatchers);
+
+async function readCells(row: TableRow, headers: readonly string[]): Promise<string> {
+	const parts = await Promise.all(
+		headers.map(async header => {
+			const text = await row
+				.cell(header)
+				.innerText({ timeout: 500 })
+				.then(
+					value => JSON.stringify(value.replace(/\s+/g, " ").trim()),
+					() => "<no cell>"
+				);
+			return `${JSON.stringify(header)}: ${text}`;
+		})
+	);
+	return `{ ${parts.join(", ")} }`;
+}
 
 async function headerDiagnostics(table: TableLocator, headers: readonly string[]): Promise<string> {
 	let available: string[];

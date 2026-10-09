@@ -30,11 +30,11 @@ export type RowFilterOptions = Parameters<Locator["filter"]>[0];
  */
 export class TableRow<H extends string = string> {
 	/**
-	 * @param _table - The table this row belongs to.
+	 * @param table - The table this row belongs to.
 	 * @param locator - The Playwright `Locator` for the row element(s).
 	 */
 	constructor(
-		private readonly _table: TableLocator<H>,
+		readonly table: TableLocator<H>,
 		readonly locator: Locator
 	) {}
 
@@ -49,7 +49,7 @@ export class TableRow<H extends string = string> {
 	 * await table.row({ Name: "John" }).cell("Email").click();
 	 */
 	cell(header: HeaderKey<H>): Locator {
-		return this._table.cell(this.locator, header);
+		return this.table.cell(this.locator, header);
 	}
 
 	/**
@@ -62,7 +62,7 @@ export class TableRow<H extends string = string> {
 	 * await expect(table.rows.filter({ hasText: "Jane" }).cell("Status")).toHaveText("Active");
 	 */
 	filter(options?: RowFilterOptions): TableRow<H> {
-		return new TableRow(this._table, this.locator.filter(options));
+		return new TableRow(this.table, this.locator.filter(options));
 	}
 }
 

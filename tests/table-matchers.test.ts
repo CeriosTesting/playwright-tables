@@ -99,6 +99,55 @@ test.describe("table matchers", () => {
 		await expect(table).toHaveHeaders(["Header 1", "Header 2", "Header 3"], { exact: true });
 	});
 
+	test("toHaveCells on a row", async ({ page }) => {
+		const users = await openUsers(page);
+
+		await expect(users.row({ Name: "Jane" })).toHaveCells({ Status: "Inactive", Email: /^jane@/ });
+		await expect(users.rowAt(2)).toHaveCells({ Name: "Joe", Status: { not: "Inactive" } });
+		await expect(users.rows.filter({ hasText: "john@" })).toHaveCells({ Name: "John" });
+		await expect(users.row({ Name: "Jane" })).not.toHaveCells({ Status: "Active" });
+	});
+
+	test("toHaveCells waits for a late row", async ({ page }) => {
+		await page.goto(Route.DynamicLoadTable);
+		const table = defineTable(page.locator("#DynamicTable"), { headers: ["Header 1", "Header 2", "Header 3"] });
+
+		await expect(table.row({ "Header 1": "Row 1 Col 1" })).toHaveCells({ "Header 3": "Row 1 Col 3" });
+	});
+
+	test("toHaveCells failure shows the received cells", async ({ page }) => {
+		const users = await openUsers(page);
+
+		const message = await errorMessage(() =>
+			expect(users.row({ Name: "Jane" })).toHaveCells({ Status: "Active", Name: "Jane" }, { timeout: 300 })
+		);
+		expect(message).toContain('Expected: a row matching { "Status": "Active", "Name": "Jane" }');
+		expect(message).toContain('Received: { "Status": "Inactive", "Name": "Jane" }');
+	});
+
+	test("toHaveCells requires exactly one row", async ({ page }) => {
+		const users = await openUsers(page);
+
+		const several = await errorMessage(() => expect(users.rows).toHaveCells({ Status: /active/i }, { timeout: 300 }));
+		expect(several).toContain("the row locator matched 3 rows, expected exactly 1");
+
+		const none = await errorMessage(() =>
+			expect(users.row({ Name: "Ghost" })).not.toHaveCells({ Status: "x" }, { timeout: 300 })
+		);
+		expect(none).toContain("the row locator matched 0 rows");
+	});
+
+	test("toHaveCells failure reports unknown headers", async ({ page }) => {
+		await page.setContent(usersTable);
+		const users = defineTable(page.locator("#users"));
+
+		const message = await errorMessage(() =>
+			expect(users.rowAt(0)).toHaveCells({ Stauts: "Active" }, { timeout: 300 })
+		);
+		expect(message).toContain('Header "Stauts" not found.');
+		expect(message).toContain("Available headers: [Name, Status, Email]");
+	});
+
 	test("tableMatchers can be spread into your own expect.extend", async ({ page }) => {
 		const users = await openUsers(page);
 		const myExpect = baseExpect.extend({

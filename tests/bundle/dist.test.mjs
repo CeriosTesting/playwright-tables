@@ -4,7 +4,7 @@ import { defineTable, expect, TableLocator, tableMatchers, test } from "../../di
 
 test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async ({ page }) => {
 	expect(typeof TableLocator).toBe("function");
-	expect(Object.keys(tableMatchers)).toEqual(["toHaveRow", "toHaveRowCount", "toHaveHeaders"]);
+	expect(Object.keys(tableMatchers)).toEqual(["toHaveRow", "toHaveRowCount", "toHaveHeaders", "toHaveCells"]);
 
 	await page.goto("/combined-span-table");
 	const table = defineTable(page.locator("table"), { headers: ["Region", "Q1", "Q2", "Q3", "Q4"] });
@@ -13,5 +13,6 @@ test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async 
 	await expect(table.row({ Q4: { predicate: text => Number(text) > 700 } }).cell("Region")).toHaveText("East");
 	await expect(table).toHaveRow({ Region: /^nor/i });
 	await expect(table).toHaveHeaders(["Region", "Q4"]);
+	await expect(table.row({ Region: "East" })).toHaveCells({ Q1: "500", Q2: { not: { empty: true } } });
 	expect(await table.headerKeys()).toEqual(["Region", "Q1", "Q2", "Q3", "Q4"]);
 });
