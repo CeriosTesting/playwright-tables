@@ -25,19 +25,32 @@ export type HeaderKey<H extends string> = H | `${H}__C${number}` | `${H}__D${num
  * table.row({ Age: { predicate: text => Number(text) >= 18 } });
  */
 export type CellCondition =
-	| { equals: string; ignoreCase?: boolean }
-	| { contains: string; ignoreCase?: boolean }
-	| { startsWith: string; ignoreCase?: boolean }
-	| { endsWith: string; ignoreCase?: boolean }
-	| { oneOf: readonly string[] }
-	| { empty: true }
-	| {
+	| ExclusiveCondition<{ equals: string; ignoreCase?: boolean }>
+	| ExclusiveCondition<{ contains: string; ignoreCase?: boolean }>
+	| ExclusiveCondition<{ startsWith: string; ignoreCase?: boolean }>
+	| ExclusiveCondition<{ endsWith: string; ignoreCase?: boolean }>
+	| ExclusiveCondition<{ oneOf: readonly string[] }>
+	| ExclusiveCondition<{ empty: true }>
+	| ExclusiveCondition<{
 			/**
 			 * Serialized with `toString()` and executed in the page, like a `page.evaluate` function.
 			 * It must be self-contained: it cannot use variables from the test scope.
 			 */
 			predicate: (text: string) => boolean;
-	  };
+	  }>;
+
+type CellConditionKey =
+	| "equals"
+	| "contains"
+	| "startsWith"
+	| "endsWith"
+	| "oneOf"
+	| "empty"
+	| "predicate"
+	| "ignoreCase";
+
+/** Forbids the keys of the other condition kinds, so a condition object has exactly one kind. */
+type ExclusiveCondition<T> = T & { [K in Exclude<CellConditionKey, keyof T>]?: never };
 
 /**
  * How a cell is matched: an exact string, a RegExp, or a {@link CellCondition}.
@@ -54,7 +67,7 @@ export type RowWhere<H extends string> = { [K in HeaderKey<H>]?: CellMatcher };
  * {@link HeaderKey} of `H`. Intersect it with the inferred conditions type `W`.
  */
 export type ValidRowWhere<H extends string, W> = ([keyof W] extends [never]
-	? { "row() requires at least one condition": never }
+	? "row() requires at least one condition"
 	: unknown) &
 	([Exclude<keyof W, HeaderKey<H>>] extends [never] ? unknown : { [K in Exclude<keyof W, HeaderKey<H>>]: never });
 
