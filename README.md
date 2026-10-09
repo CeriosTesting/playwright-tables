@@ -19,6 +19,7 @@ Testing HTML tables can be challenging due to their complex structures with cols
 - ✅ Support for both **InnerText** and **TextContent** extraction
 - ✅ Works with standard `<table>` elements and custom div-based tables
 - ✅ Comprehensive **waiting utilities** for dynamic tables
+- ✅ **Type-safe, auto-waiting locators** with `TableLocator` (see [Pure locators](#pure-locators-auto-waiting))
 
 ---
 
@@ -76,6 +77,175 @@ By default, the following CSS selectors are used:
 - **Body cells:** `td`
 
 You can customize these selectors in the constructor (see [Advanced Options](#advanced-options)).
+
+---
+
+## Pure locators (auto-waiting)
+
+`TableLocator` is a type-safe table API that only returns Playwright `Locator`s. You define a table once, then get rows and cells by header name. Locators are built synchronously and resolved in the browser by a custom selector engine (`pw-table`) on every retry, so you get:
+
+- **Auto-waiting and retrying `expect`s**: late headers and rows are no problem, and you don't need any polling helpers.
+- **Reorder-safe locators**: header names are resolved to columns on every evaluation, so a locator stays correct when columns move.
+- **Compile-time checked headers**: unknown headers, empty conditions and wrong matcher types are type errors, and header names autocomplete.
+
+### Setup
+
+Import `test` and `expect` from this package instead of `@playwright/test`. The `test` registers the selector engine with a worker-scoped auto fixture.
+
+```ts
+import { test, expect, defineTable } from "@cerios/playwright-table";
+
+test("john is active", async ({ page }) => {
+	await page.goto("/users");
+	const users = defineTable(page.locator("#users"), { headers: ["Name", "Status", "Email"] });
+
+	await expect(users.row({ Name: "John" }).cell("Status")).toHaveText("Active");
+	await expect(users.row({ Name: "John", Status: /active/i }).cell("Email")).toHaveText("john@example.com");
+});
+```
+
+If you have your own fixtures, call `registerTableSelectors()` instead. It must run **before the page is created**, and it is safe to call more than once:
+
+```ts
+import { test as base } from "@playwright/test";
+import { registerTableSelectors } from "@cerios/playwright-table";
+
+export const test = base.extend<{}, { tableSelectors: void }>({
+	tableSelectors: [
+		async ({ playwright }, use) => {
+			await registerTableSelectors(playwright.selectors);
+			await use();
+		},
+		{ scope: "worker", auto: true },
+	],
+});
+```
+
+### API
+
+```ts
+const users = defineTable(page.locator("#users"), { headers: ["Name", "Status", "Email"] });
+// or: new TableLocator(page.locator("#users"), { headers: ["Name", "Status", "Email"] })
+
+users.row({ Name: "John" }); // TableRow: body rows where every condition matches
+users.rowAt(0); // TableRow: the n-th body row (0-based)
+users.rows; // TableRow: all body rows
+users.cell(anyRowLocator, "Email"); // Locator: the cell under a header for any row locator
+users.column("Status"); // Locator: every body cell under a header
+users.header("Name"); // Locator: the header cell
+
+const row = users.row({ Name: "John" });
+row.locator; // Locator for the row element(s)
+row.cell("Email"); // Locator for the cell
+row.filter({ hasText: "x" }); // TableRow narrowed with Locator.filter()
+```
+
+Without `headers`, any string is accepted as a header. The other options are the same as for `PlaywrightTable`: `header.rowSelector`, `header.columnSelector`, `header.setMainHeaderRow`, `row.rowSelector` and `row.columnSelector`. `cellContentType` sets how text is read for both header and body cells (`InnerText` by default).
+
+`row()` follows Playwright's strict mode: acting on it throws when several rows match. Use `rows.filter(...)`, `rowAt(n)`, `locator.first()` or `table.cell(anyRowLocator, header)` to compose.
+
+```ts
+await expect(users.rows.filter({ hasText: "Jane" }).cell("Status")).toHaveText("Active");
+await expect(users.cell(users.rows.locator.last(), "Name")).toHaveText("Joe");
+await expect(users.column("Status")).toHaveText(["Active", "Inactive", "Active"]);
+```
+
+### Header keys
+
+Header keys are the same keys that `getJson()` produces:
+
+- Colspan continuations get `__C<n>`. For example, a `Name` header spanning two columns gives the keys `Name` and `Name__C1`.
+- Duplicate names get `__D<n>`: the second `Name` becomes `Name__D1`, the third `Name__D2`.
+- Empty headers become `{{Empty}}`.
+- Headers carried down by `rowspan` keep their text.
+- The main header row is the last header row, unless `header.setMainHeaderRow` is set.
+
+Header arguments accept ``H | `${H}__C${number}` | `${H}__D${number}` ``, so `users.row({ Name__C1: "Doe" })` type-checks.
+
+If a header is unknown, the locator matches nothing and keeps waiting until the assertion times out. The error mentions the `pw-table` selector. For a clear failure up front, use `validateHeaders()` or the matchers below.
+
+### Cell conditions
+
+Cell text is whitespace-collapsed and trimmed before it is compared. A condition is one of:
+
+| Condition                                  | Matches when the cell text...               |
+| ------------------------------------------ | ------------------------------------------- |
+| `"John"`                                   | equals the string                           |
+| `/^jo/i`                                   | matches the RegExp                          |
+| `{ equals: "john", ignoreCase: true }`     | equals the value (optionally ignoring case) |
+| `{ contains: "oh", ignoreCase: true }`     | contains the value                          |
+| `{ startsWith: "Jo" }`                     | starts with the value                       |
+| `{ endsWith: "@example.com" }`             | ends with the value                         |
+| `{ oneOf: ["Active", "Pending"] }`         | equals one of the values                    |
+| `{ empty: true }`                          | is empty                                    |
+| `{ predicate: text => Number(text) > 18 }` | makes the predicate return `true`           |
+
+`predicate` runs **in the browser**, like a `page.evaluate` function. It is serialized with `toString()`, so it cannot use variables from your test. A predicate that throws counts as "no match". It works on Chromium even when the page's CSP forbids `eval`. If another browser blocks it on a strict CSP page, set `bypassCSP: true` in your Playwright config.
+
+### Header validation
+
+```ts
+const users = defineTable(page.locator("#users"), { headers: ["Name", "Status", "Email"] });
+
+await users.validateHeaders(); // waits up to 5s, then throws:
+// Missing headers: [Status]
+// Available headers: [Name, State, Email]
+
+await users.validateHeaders(["Name"], { timeout: 10_000 });
+const keys = await users.headerKeys(); // ["Name", "State", "Email"]
+```
+
+### Matchers
+
+The exported `expect` includes three table matchers. They retry until the `expect` timeout and support `.not`:
+
+```ts
+await expect(users).toHaveRow({ Name: "John", Status: /active/i });
+await expect(users).not.toHaveRow({ Name: "Ghost" });
+await expect(users).toHaveRowCount(3);
+await expect(users).toHaveHeaders(["Name", "Email"]);
+await expect(users).toHaveHeaders(["Name", "Status", "Email"], { exact: true });
+```
+
+When `toHaveRow` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers.
+
+Playwright's `expect.extend` cannot carry the table's header types into matcher arguments, so matcher conditions are checked at runtime. For compile-time checks, assert on `table.row({...}).locator` instead.
+
+#### Bring your own matchers
+
+The matchers are exported as `tableMatchers`, so you can combine them with your own:
+
+```ts
+import { expect as base } from "@playwright/test";
+import { TableLocator, tableMatchers } from "@cerios/playwright-table";
+
+// Spread them into your own extend
+export const expect = base.extend({
+	...tableMatchers,
+	async toBeSortedBy(table: TableLocator, header: string) {
+		/* ... */
+	},
+});
+```
+
+```ts
+import { mergeExpects } from "@playwright/test";
+import { expect as tableExpect } from "@cerios/playwright-table";
+
+// Or merge with another extended expect
+export const expect = mergeExpects(tableExpect, myExpect);
+```
+
+### `TableLocator` or `PlaywrightTable`?
+
+| Use                   | When                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **`TableLocator`**    | Assertions and interactions on specific rows and cells. You get auto-waiting, retries, reorder-safe locators and typed headers. |
+| **`PlaywrightTable`** | Snapshots of the whole table: `getJson()`, `getDistinctColumnValues()`, bulk comparisons and data extraction.                   |
+
+Both can be used on the same table.
+
+> **Note:** `PlaywrightTable` carries a `rowspan` header down only one header row. `TableLocator` uses a full grid, so a header spanning three or more header rows is carried all the way down. This only matters for headers that span three or more header rows.
 
 ---
 
@@ -862,6 +1032,16 @@ import {
 	TableOptions,
 	PollingOptions,
 	RowKind,
+	// Pure locators
+	TableLocator,
+	TableRow,
+	defineTable,
+	HeaderKey,
+	RowWhere,
+	CellMatcher,
+	CellCondition,
+	TableLocatorOptions,
+	TableMatcherOptions,
 } from "@cerios/playwright-table";
 ```
 
@@ -891,6 +1071,8 @@ Works with all Playwright-supported browsers:
 ## Contributing
 
 Contributions are welcome! Please check out the [GitHub repository](https://github.com/CeriosTesting/playwright-tables).
+
+Run `npm run build` before `npm test`: the `dist-cjs` and `dist-esm` test projects import the built bundles to verify that the selector engine survives bundling.
 
 ---
 
