@@ -168,19 +168,26 @@ If a header is unknown, the locator matches nothing and keeps waiting until the 
 
 Cell text is whitespace-collapsed and trimmed before it is compared. A condition is one of:
 
-| Condition                                  | Matches when the cell text...               |
-| ------------------------------------------ | ------------------------------------------- |
-| `"John"`                                   | equals the string                           |
-| `/^jo/i`                                   | matches the RegExp                          |
-| `{ equals: "john", ignoreCase: true }`     | equals the value (optionally ignoring case) |
-| `{ contains: "oh", ignoreCase: true }`     | contains the value                          |
-| `{ startsWith: "Jo" }`                     | starts with the value                       |
-| `{ endsWith: "@example.com" }`             | ends with the value                         |
-| `{ oneOf: ["Active", "Pending"] }`         | equals one of the values                    |
-| `{ empty: true }`                          | is empty                                    |
-| `{ predicate: text => Number(text) > 18 }` | makes the predicate return `true`           |
+| Condition                                                        | Matches when the cell text...               |
+| ---------------------------------------------------------------- | ------------------------------------------- |
+| `"John"`                                                         | equals the string                           |
+| `/^jo/i`                                                         | matches the RegExp                          |
+| `{ equals: "john", ignoreCase: true }`                           | equals the value (optionally ignoring case) |
+| `{ contains: "oh", ignoreCase: true }`                           | contains the value                          |
+| `{ startsWith: "Jo" }`                                           | starts with the value                       |
+| `{ endsWith: "@example.com" }`                                   | ends with the value                         |
+| `{ oneOf: ["Active", "Pending"] }`                               | equals one of the values                    |
+| `{ empty: true }`                                                | is empty                                    |
+| `{ predicate: text => Number(text) > 18 }`                       | makes the predicate return `true`           |
+| `{ not: "Deleted" }`                                             | does not match the nested matcher           |
+| `{ anyOf: ["Active", /^pend/i] }`                                | matches at least one nested matcher         |
+| `{ allOf: [{ startsWith: "J" }, { not: { contains: "Doe" } }] }` | matches every nested matcher                |
 
-`predicate` runs **in the browser**, like a `page.evaluate` function. It is serialized with `toString()`, so it cannot use variables from your test. A predicate that throws counts as "no match". It works on Chromium even when the page's CSP forbids `eval`. If another browser blocks it on a strict CSP page, set `bypassCSP: true` in your Playwright config.
+`predicate` runs **in the browser**, like a `page.evaluate` function. It is serialized with `toString()`, so it cannot use variables from your test. A predicate that throws counts as "no match".
+
+`not`, `anyOf` and `allOf` take any matcher, including other combinators. `anyOf` and `allOf` need at least one matcher.
+
+The selector engine runs in an isolated world, so locators and predicates also work on pages whose CSP forbids `eval`. This is tested on Chromium, Firefox and WebKit.
 
 ### Header validation
 
@@ -197,7 +204,7 @@ const keys = await users.headerKeys(); // ["Name", "State", "Email"]
 
 ### Matchers
 
-The exported `expect` includes three table matchers. They retry until the `expect` timeout and support `.not`:
+The exported `expect` includes table matchers and a row matcher. They retry until the `expect` timeout and support `.not`:
 
 ```ts
 await expect(users).toHaveRow({ Name: "John", Status: /active/i });
@@ -205,9 +212,13 @@ await expect(users).not.toHaveRow({ Name: "Ghost" });
 await expect(users).toHaveRowCount(3);
 await expect(users).toHaveHeaders(["Name", "Email"]);
 await expect(users).toHaveHeaders(["Name", "Status", "Email"], { exact: true });
+
+// Row matcher: the row locator must resolve to exactly one row, whose cells match every condition
+await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active", Email: /@example\.com$/ });
+await expect(users.rowAt(0)).not.toHaveCells({ Status: "Deleted" }); // the row exists, but doesn't match
 ```
 
-When `toHaveRow` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers.
+When `toHaveRow` or `toHaveCells` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers. When `toHaveCells` fails on a known header, the message shows the cells the row actually has.
 
 Playwright's `expect.extend` cannot carry the table's header types into matcher arguments, so matcher conditions are checked at runtime. For compile-time checks, assert on `table.row({...}).locator` instead.
 
