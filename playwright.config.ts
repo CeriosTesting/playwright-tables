@@ -25,6 +25,21 @@ export default defineConfig({
 			name: "chromium",
 			use: { ...devices["Desktop Chrome"] },
 			timeout: 10_000,
+			testIgnore: "bundle/**",
+		},
+		/* Tests against the built bundles (run `npm run build` first). Separate projects get separate
+		   workers, so each bundle registers its own copy of the pw-table selector engine. */
+		{
+			name: "dist-cjs",
+			use: { ...devices["Desktop Chrome"] },
+			timeout: 10_000,
+			testMatch: "bundle/*.test.cjs",
+		},
+		{
+			name: "dist-esm",
+			use: { ...devices["Desktop Chrome"] },
+			timeout: 10_000,
+			testMatch: "bundle/*.test.mjs",
 		},
 	],
 
