@@ -3,12 +3,6 @@ import type { Locator } from "@playwright/test";
 import { MIN_READ_TIMEOUT } from "./polling";
 import type { LocatorRef, PaginateOptions, ScrollOptions, StableOptions } from "./table-locator.types";
 
-/** Default number of pages {@link TableNavigator} visits at most. */
-const DEFAULT_MAX_PAGES = 100;
-
-/** Default number of scroll steps per page. */
-const DEFAULT_MAX_STEPS = 1_000;
-
 /** Default time the table must stay the same after a scroll, in milliseconds. */
 const DEFAULT_SCROLL_SETTLE = 50;
 
@@ -52,7 +46,10 @@ export class TableNavigator {
 		private readonly host: NavigationHost,
 		private readonly paginate: PaginateOptions | undefined,
 		private readonly scroll: ScrollOptions | undefined
-	) {}
+	) {
+		checkLimit("paginate.maxPages", paginate?.maxPages);
+		checkLimit("scroll.maxSteps", scroll?.maxSteps);
+	}
 
 	/** Whether the table has pages or scrolls, so the rows in view may not be all rows. */
 	get active(): boolean {
@@ -61,25 +58,34 @@ export class TableNavigator {
 
 	/**
 	 * Goes to the first page (if `paginate.first` is set) and the top, then yields every position in turn:
-	 * each scroll step down, then the next page, until the last page or `deadline`. The table has settled
-	 * at every position. Stops early when the caller breaks out of the loop.
+	 * each scroll step down, then the next page, until the last page, `paginate.maxPages` or `deadline`. On
+	 * each page, it scrolls down until the bottom or `scroll.maxSteps`. The table has settled at every
+	 * position. Stops early when the caller breaks out of the loop.
 	 *
 	 * @throws Error if the table doesn't change after going to the next page, or the deadline passes.
 	 */
 	async *positions(deadline: number): AsyncGenerator<NavigationPosition> {
 		await this.goToFirstPage(deadline);
-		const maxPages = this.paginate?.maxPages ?? DEFAULT_MAX_PAGES;
-		const maxSteps = this.scroll?.maxSteps ?? DEFAULT_MAX_STEPS;
-		for (let page = 0; page < maxPages; page++) {
+		const maxPages = this.paginate?.maxPages ?? Infinity;
+		const maxSteps = this.scroll?.maxSteps ?? Infinity;
+		for (let page = 0; ; page++) {
 			if (this.scroll !== undefined) await this.scrollToTop(deadline);
 			yield { page, step: 0 };
 			for (let step = 1; this.scroll !== undefined && step <= maxSteps; step++) {
 				if (!(await this.scrollDown(deadline))) break;
 				yield { page, step };
 			}
-			if (this.paginate === undefined || (await this.isLastPage())) return;
+			if (this.paginate === undefined || page + 1 >= maxPages || (await this.isLastPage())) return;
 			await this.nextPage(deadline);
 		}
+	}
+
+	/** The limits that ended the navigation at `last`, for a message, such as `; paginate.maxPages is 3`. */
+	limitsReached(last: NavigationPosition): string {
+		const notes: string[] = [];
+		if (this.paginate?.maxPages === last.page + 1) notes.push(`paginate.maxPages is ${this.paginate.maxPages}`);
+		if (this.scroll?.maxSteps === last.step) notes.push(`scroll.maxSteps is ${this.scroll.maxSteps}`);
+		return notes.map(note => `; ${note}`).join("");
 	}
 
 	private async goToFirstPage(deadline: number): Promise<void> {
@@ -177,6 +183,13 @@ export class TableNavigator {
 					`Table locator: ${this.host.root.toString()}`
 			);
 		}
+	}
+}
+
+/** @throws Error if a limit is set, but is not a positive integer. */
+function checkLimit(name: string, limit: number | undefined): void {
+	if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) {
+		throw new Error(`${name} must be a positive integer, got: ${limit}`);
 	}
 }
 

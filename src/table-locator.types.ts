@@ -256,7 +256,10 @@ export type PaginateOptions = {
 	 * `disabled` attribute or `aria-disabled="true"`).
 	 */
 	isLastPage?: (next: Locator) => Promise<boolean>;
-	/** The most pages to visit. Defaults to 100. */
+	/**
+	 * The most pages to visit, a positive integer: `3` reads the first 3 pages, also when the table has
+	 * more. Defaults to every page. A table that never reaches its last page is stopped by the `timeout`.
+	 */
 	maxPages?: number;
 };
 
@@ -282,10 +285,14 @@ export type ScrollOptions = {
 	rowKey?: string;
 	/**
 	 * How long the table must stay the same after a scroll before it is read, in
-	 * milliseconds. Defaults to 50; `0` reads the rows two animation frames after the scroll.
+	 * milliseconds. Defaults to 50; `0` reads the rows two animation frames after the scroll. The `loading`
+	 * indicator, if set, is always waited for.
 	 */
 	settle?: number;
-	/** The most scroll steps per page. Defaults to 1000. */
+	/**
+	 * The most scroll steps per page, a positive integer. Defaults to scrolling to the bottom. A grid that
+	 * keeps growing is stopped by the `timeout`.
+	 */
 	maxSteps?: number;
 };
 
@@ -383,6 +390,9 @@ export type TableJsonOptions<C extends string = string, P = {}> = {
 	 * Read every row: on every page with the `paginate` option, and from top to bottom with the `scroll`
 	 * option of the table. `minRows` and `stable` apply to the first view. Defaults to `false`: the rows the
 	 * table shows now.
+	 *
+	 * It reads up to `paginate.maxPages` and `scroll.maxSteps`, if set. Reaching the `timeout` before that
+	 * is an error that says how many rows were read, so part of the rows is never returned as all of them.
 	 */
 	allRows?: boolean;
 	/**

@@ -70,7 +70,8 @@ export type TableSortOptions = TableMatcherOptions & {
 	order?: "asc" | "desc";
 	/**
 	 * How cell texts are compared. Defaults to `"text"`.
-	 * - `"text"`: case-insensitive, with digit runs compared as numbers (`"item 9"` before `"item 10"`).
+	 * - `"text"`: case- and accent-insensitive, with digit runs compared as numbers (`"item 9"` before
+	 *   `"item 10"`).
 	 * - `"number"`: the one number in the text, read with the `decimal` separator (`"€ 1,200"` is 1200).
 	 *   See {@link DecimalSeparator} for the rules.
 	 * - `"date"`: parsed with `Date.parse`.
@@ -100,8 +101,8 @@ export type TableRowsOptions = TableMatcherOptions & {
  * Asserts that the table has at least one body row matching every condition (or none, with `.not`).
  * Retries until the timeout. On failure, unknown headers are reported with the available headers.
  *
- * Conditions are checked against header names at runtime; for compile-time checks use
- * `expect(table.row({...}).locator).toBeVisible()`.
+ * Conditions are checked against header names at runtime. With the `expect` of this package, they are
+ * also checked at compile time against the `headers` of the table.
  */
 async function toHaveRow(
 	this: ExpectMatcherState,

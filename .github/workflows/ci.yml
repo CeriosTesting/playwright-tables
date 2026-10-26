@@ -51,6 +51,9 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Check package exports
+        run: npm run check-exports
+
   test:
     name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -84,14 +87,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Node 20 on purpose: older Playwright versions hang loading ESM test files (tests/bundle/*.mjs) on Node 22+
+      # The build tool (tsdown) needs Node 22.18 or later, so build first
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      # Then test on Node 20 on purpose: older Playwright versions hang loading ESM test files (tests/bundle/*.mjs) on Node 22+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       # The lowest version allowed by peerDependencies, so the declared range is what we test
       - name: Install the minimum supported Playwright
@@ -104,9 +115,6 @@ jobs:
 
       - name: Type check
         run: npm run compile
-
-      - name: Build package
-        run: npm run build
 
       - name: Run tests
         run: npm run test

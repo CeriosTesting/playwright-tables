@@ -13,6 +13,8 @@ import { TableUtils } from "./table-utils";
  * @property colspan - Configuration for column spanning in the header row.
  * @property colspan.enabled - If true, enables column spanning.
  * @property colspan.suffix - If true, appends a suffix to spanned columns.
+ * @property normalizeWhitespace - If true, collapses line breaks, tabs and runs of whitespace to one space.
+ * @property stripIconGlyphs - If true, removes icon-font glyphs (Unicode private use characters).
  */
 export type HeaderRowOptions = {
 	cellContentType?: CellContentType;
@@ -47,7 +49,7 @@ export class TableHeader {
 	 * @param columnsSelector - CSS selector for locating header columns (e.g., "th").
 	 * @param headerRowOptions - Optional configuration for header processing.
 	 * @returns Promise resolving to an array of processed header rows.
-	 * @throws Error if columnsSelector is empty or if no header rows are found.
+	 * @throws Error if columnsSelector is empty, or if a header row cannot be read.
 	 *
 	 * @example
 	 * const headers = await TableHeader.getRows(

@@ -260,6 +260,10 @@ test.describe("Angular Material", () => {
 
 		await expect(orders).toHaveRows([]);
 		await expect(orders.footer.cell("Amount")).toHaveText("$0");
+
+		// As in the Angular Material docs: <tr class="mat-row" *matNoDataRow>
+		await page.locator(".mat-mdc-no-data-row").evaluate(row => row.classList.add("mat-row", "mat-mdc-row"));
+		await expect(orders).toHaveRows([]);
 	});
 });
 
@@ -350,6 +354,96 @@ test.describe("row interactions", () => {
 		await expect(people.footer.cell("Name")).toHaveText("Count");
 		await expect(people.footer.locator).toHaveCount(1);
 		await expect(people).toHaveRowCount(2);
+	});
+});
+
+test.describe("navigation limits", () => {
+	/** The Angular Material orders: 12 rows, 5 per page, so 3 pages. */
+	async function openOrders(page: Page, maxPages: number): Promise<TableLocator<"Id" | "Product" | "Amount">> {
+		await page.goto(GridRoute.AngularMaterial);
+		const paginator = page.locator("mat-paginator");
+		return defineTable(page.locator("#orders"), {
+			...presets.angularMaterial(),
+			paginate: {
+				next: paginator.getByRole("button", { name: "Next page", exact: true }),
+				first: paginator.getByRole("button", { name: "First page", exact: true }),
+				maxPages,
+			},
+			headers: ["Id", "Product", "Amount"],
+		});
+	}
+
+	/** The TanStack Virtual people: 150 rows in a container that shows a few at a time. */
+	async function openPeople(
+		page: Page,
+		scroll: { maxSteps?: number; settle?: number }
+	): Promise<TableLocator<"Id" | "First name" | "Visits">> {
+		await page.goto(GridRoute.TanstackVirtual);
+		return defineTable(page.locator("table"), {
+			scroll: { container: page.locator(".scroll-container"), rowKey: "data-index", ...scroll },
+			headers: ["Id", "First name", "Visits"],
+		});
+	}
+
+	test("maxPages reads only the first pages", async ({ page }) => {
+		const orders = await openOrders(page, 2);
+
+		const rows = await orders.toJson({ allRows: true, columns: ["Id"] });
+		expect(rows.map(row => row.Id)).toEqual(ids(10));
+		expect(await orders.totalRowCount()).toBe(10);
+		await expect(orders).toHaveTotalRowCount(10);
+
+		const row = await orders.findRow({ Id: "7" });
+		await expect(row.cell("Amount")).toHaveText("$70");
+		expect(await errorMessage(() => orders.findRow({ Id: "12" }))).toContain(
+			'TableLocator.findRow() found no row matching { "Id": "12" } on 2 pages (0 scroll steps on the last page; ' +
+				"paginate.maxPages is 2)."
+		);
+	});
+
+	test("a maxPages of the number of pages or more reads every row", async ({ page }) => {
+		for (const maxPages of [3, 10]) {
+			const orders = await openOrders(page, maxPages);
+
+			const rows = await orders.toJson({ allRows: true, columns: ["Id"] });
+			expect(rows.map(row => row.Id)).toEqual(ids(12));
+		}
+	});
+
+	test("maxSteps reads only the first scroll steps", async ({ page }) => {
+		const people = await openPeople(page, { maxSteps: 2 });
+
+		const rows = await people.toJson({ allRows: true, columns: ["Id"] });
+		expect(rows.length).toBeGreaterThan(0);
+		expect(rows.length).toBeLessThan(150);
+		expect(rows.map(row => row.Id)).toEqual(ids(rows.length));
+		expect(await errorMessage(() => people.findRow({ "First name": "Person 150" }))).toContain(
+			"on 1 page (2 scroll steps on the last page; scroll.maxSteps is 2)."
+		);
+	});
+
+	test("limits must be positive integers", ({ page }) => {
+		const next = page.getByRole("button", { name: "Next" });
+
+		expect(() => defineTable(page.locator("table"), { paginate: { next, maxPages: 0 } })).toThrow(
+			"paginate.maxPages must be a positive integer, got: 0"
+		);
+		expect(() => defineTable(page.locator("table"), { scroll: { maxSteps: 1.5 } })).toThrow(
+			"scroll.maxSteps must be a positive integer, got: 1.5"
+		);
+	});
+
+	test("running out of time is an error that says how far it got", async ({ page }) => {
+		// Each scroll waits a second for the table to settle, far longer than the timeout
+		const people = await openPeople(page, { settle: 1_000 });
+
+		const message = await errorMessage(() => people.toJson({ allRows: true, timeout: 500 }));
+		expect(message).toMatch(
+			/TableLocator\.toJson\(\{ allRows: true \}\) timed out after 500ms before reading every row; \d+ rows were read, on 1 page\. Pass a larger timeout\./
+		);
+		expect(await errorMessage(() => people.findRow({ "First name": "Person 150" }, { timeout: 500 }))).toContain(
+			"and timed out before the end of the table. Pass a larger timeout to search further."
+		);
 	});
 });
 

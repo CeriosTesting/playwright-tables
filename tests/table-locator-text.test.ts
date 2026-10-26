@@ -168,7 +168,8 @@ test.describe("TableLocator text is read as the user sees it", () => {
 				"Temp (°C)": "21°",
 			},
 		]);
-		await expect(table.row({ Amount: "€ 5" }).cell("Verzekeringsnummer")).toHaveText("1234");
+		// Compare as the table reads text: older Playwright versions keep the soft hyphen in toHaveText()
+		await expect(table.row({ Amount: "€ 5" })).toHaveCells({ Verzekeringsnummer: "1234" });
 	});
 
 	test("accents are composed (NFC), in the page and in your conditions", async ({ page }) => {

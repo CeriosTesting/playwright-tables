@@ -14,6 +14,8 @@
 - `findRow(where)` searches every page and scroll position, and returns a row locator once the table shows the row.
 - `toJson({ allRows: true })` reads every row on every page and scroll position. Rows seen more than once are read once, matched by their row key or text, and kept in order.
 - `totalRowCount()` and the `toHaveTotalRowCount` matcher count every row. They use `aria-rowcount` when the grid declares it, and otherwise read every row.
+- `paginate.maxPages` and `scroll.maxSteps` limit how many pages and scroll steps are read, such as only the first 3 pages. Without them, every page is read.
+- Reaching the timeout before the end of the table is an error that says how many rows were read, so part of the rows is never returned as all of them.
 
 **Grid presets**
 
@@ -32,7 +34,7 @@
 
 **Typed matcher arguments**
 
-- The exported `expect` now types matcher arguments by the table's headers, so a misspelled header in a table or row matcher is a compile-time error. This also applies after `.not` and with `expect.soft`.
+- The exported `expect` types matcher arguments by the table's headers, so a misspelled header in a table or row matcher is a compile-time error. This also applies after `.not` and with `expect.soft`.
 
 **Debugging**
 
@@ -41,5 +43,5 @@
 
 **Other changes**
 
-- The README Playwright badge now says `>=1.45`, matching the peer dependency.
-- The README has a new comparison section.
+- The peer dependency is now `@playwright/test` `^1.45.0` (it was `^1.40.0`).
+- The README now leads with `TableLocator`. The `PlaywrightTable` docs moved to `docs/playwright-table.md`. `PlaywrightTable` is in maintenance mode: it still gets fixes, and new features land in `TableLocator`.

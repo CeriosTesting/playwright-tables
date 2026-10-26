@@ -106,7 +106,7 @@ export class PlaywrightTable {
 	 * Retrieves all header rows of the table.
 	 * @param options - Optional parameters for header row parsing configuration.
 	 * @returns A promise that resolves to an array of header rows.
-	 * @throws Error if no header rows found after table loads.
+	 * @throws Error if the table has no header rows or no body rows.
 	 *
 	 * @example
 	 * // Get headers with colspan enabled
@@ -130,7 +130,7 @@ export class PlaywrightTable {
 	 * By default, uses the last header row if multiple exist. Can be customized via constructor.
 	 * @param options - Optional parameters for header row parsing configuration.
 	 * @returns A promise that resolves to the main header row.
-	 * @throws Error if no header rows available.
+	 * @throws Error if the table has no header rows or no body rows.
 	 * @throws Error if setMainHeaderRow index is out of bounds (negative or >= header row count).
 	 *
 	 * @example
@@ -156,7 +156,7 @@ export class PlaywrightTable {
 	 * @param options.bodyRowOptions - Body row parsing options.
 	 * @param options.headerRowOptions - Header parsing options used when resolving row/colspan layouts.
 	 * @returns A promise that resolves to an array of body rows.
-	 * @throws Error if no body rows found after table loads.
+	 * @throws Error if the table has no header rows or no body rows.
 	 *
 	 * @example
 	 * // Get body rows with TextContent (includes hidden elements)
@@ -294,7 +294,7 @@ export class PlaywrightTable {
 	 * @param header - The header name identifying the column.
 	 * @param options - Optional table loading options. See {@link TableOptions}.
 	 * @returns A promise that resolves to an array of Playwright Locators for all cells in the column.
-	 * @throws Error if the header is not found in the table.
+	 * @throws Error if the header is not found, or if the table has no header rows or no body rows.
 	 *
 	 * @example
 	 * // Get all cells in the "Status" column
@@ -329,7 +329,7 @@ export class PlaywrightTable {
 	 * @param headerIndex - The header/column index (0-based).
 	 * @param options - Optional table loading options. See {@link TableOptions}.
 	 * @returns A promise that resolves to an array of Playwright Locators for all cells in the column.
-	 * @throws Error if the header index is out of bounds (negative or >= column count).
+	 * @throws Error if the header index is out of bounds (negative or >= the number of columns, counting colspans).
 	 *
 	 * @example
 	 * // Get all cells in the third column (index 2)
@@ -347,7 +347,12 @@ export class PlaywrightTable {
 	 * @see {@link getBodyCellLocator} for getting a specific cell by row and column index
 	 */
 	async getAllBodyCellLocatorsByHeaderIndex(headerIndex: number, options?: TableOptions): Promise<Locator[]> {
-		const table = await this.getTable(options);
+		// Count the columns that colspans cover, as the grid positions of the body cells do
+		const tableOptions = this.normalizeGetBodyRowsOptions(options);
+		const table = await this.getTable({
+			bodyRowOptions: tableOptions.bodyRowOptions,
+			headerRowOptions: this.resolveHeaderRowOptions(tableOptions.headerRowOptions, { forceColspanEnabled: true }),
+		});
 		const columnCount = this.mainHeaderRow(table.headerRows).length;
 		if (headerIndex < 0 || headerIndex >= columnCount) {
 			throw new Error(
@@ -403,7 +408,7 @@ export class PlaywrightTable {
 
 	/**
 	 * Waits for the table body to be empty (no body rows).
-	 * @param options - Polling options (timeout, interval, retries).
+	 * @param options - Polling options (`timeout`, default 30000 ms; `interval`, default 100 ms).
 	 * @returns A promise that resolves when table body is empty.
 	 * @throws Error if table is not empty within timeout period.
 	 *
@@ -414,9 +419,10 @@ export class PlaywrightTable {
 	 * @see {@link waitForNonEmpty} for waiting until table has data
 	 *
 	 * @remarks
-	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility:
+	 * **Alternative:** Consider using Playwright's `expect.poll` for more flexibility. Count the rows with
+	 * `getRowCount()`: the methods that read the table throw while the body is empty.
 	 * ```ts
-	 * await expect.poll(async () => (await table.getBodyRows()).length).toBe(0);
+	 * await expect.poll(async () => (await table.getRowCount()).body).toBe(0);
 	 * ```
 	 */
 	async waitForEmpty(options?: PollingOptions): Promise<void> {
@@ -434,7 +440,7 @@ export class PlaywrightTable {
 	/**
 	 * Waits for the table body to be non-empty (at least one body row with content).
 	 * A row is considered valid if it has at least one cell containing text.
-	 * @param options - Polling options (timeout, interval, retries).
+	 * @param options - Polling options (`timeout`, default 30000 ms; `interval`, default 100 ms).
 	 * @returns A promise that resolves when table has at least one body row with content.
 	 * @throws Error if table remains empty or has no rows with content within timeout period.
 	 *
@@ -479,7 +485,7 @@ export class PlaywrightTable {
 	/**
 	 * Waits for the table body to have exactly N rows.
 	 * @param count - The exact number of body rows expected.
-	 * @param options - Polling options (timeout, interval, retries).
+	 * @param options - Polling options (`timeout`, default 30000 ms; `interval`, default 100 ms).
 	 * @returns A promise that resolves when the table has exactly the specified number of rows.
 	 * @throws Error if row count doesn't match within timeout period.
 	 *
@@ -541,7 +547,7 @@ export class PlaywrightTable {
 	 * @param headerName - The header name of the column to extract distinct values from.
 	 * @param options - Optional table loading options. See {@link TableOptions}.
 	 * @returns A promise that resolves to a sorted array of distinct values.
-	 * @throws Error if the specified header is not found in the table.
+	 * @throws Error if the header is not found, or if the table has no header rows or no body rows.
 	 *
 	 * @example
 	 * // Get all unique status values
@@ -582,7 +588,7 @@ export class PlaywrightTable {
 	 * @param conditions - Record of header names and expected cell values to match.
 	 * @param options - Optional table loading options. See {@link TableOptions}.
 	 * @returns A promise that resolves to the 0-based index of the first matching row, or -1 if not found.
-	 * @throws Error if specified headers don't exist in the table.
+	 * @throws Error if specified headers don't exist, or if the table has no header rows or no body rows.
 	 *
 	 * @example
 	 * // Find index of row where Status is "Active"
@@ -600,7 +606,6 @@ export class PlaywrightTable {
 	 * }
 	 *
 	 * @see {@link getBodyCellLocatorByRowConditions} for getting cell locators from matching rows
-	 * @see {@link waitForRowByConditions} for waiting until matching row appears
 	 */
 	async findRowIndex(conditions: Record<string, string>, options?: TableOptions): Promise<number> {
 		const table = await this.getTable(this.resolveTableOptionsForHeaderKeyMethods(options));

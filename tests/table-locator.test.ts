@@ -96,6 +96,11 @@ async function errorMessage(action: () => Promise<unknown>): Promise<string> {
 	throw new Error("Expected the action to fail");
 }
 
+/** Locators read like the code that built them from Playwright 1.53, which added `locator.describe()`. */
+function hasLocatorDescriptions(page: Page): boolean {
+	return typeof (page.locator("body") as { describe?: unknown }).describe === "function";
+}
+
 test.describe("TableLocator", () => {
 	test("finds a cell by row condition and header", async ({ page }) => {
 		await page.goto(Route.SimpleTable);
@@ -247,13 +252,16 @@ test.describe("TableLocator", () => {
 		const table = defineTable(page.locator("table"));
 
 		const message = await errorMessage(() => expect(table.row({ Nope: "x" }).locator).toBeVisible({ timeout: 500 }));
-		expect(message).toContain(`Locator: locator('table').row({ "Nope": "x" })`);
+		if (hasLocatorDescriptions(page)) {
+			expect(message).toContain(`Locator: locator('table').row({ "Nope": "x" })`);
+		}
 		// The call log shows the selector itself; default options are left out of it
 		expect(message).toContain(`"cfg":{}`);
 		expect(message).not.toContain("tbody:first-of-type");
 	});
 
 	test("locators read like the code that built them", async ({ page }) => {
+		test.skip(!hasLocatorDescriptions(page), "Locator descriptions need Playwright 1.53");
 		const users = await openUsers(page);
 		const root = "locator('#users')";
 

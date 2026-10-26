@@ -2,4 +2,41 @@
 "@cerios/playwright-table": minor
 ---
 
-Add `TableLocator`: a type-safe table API that only returns Playwright locators, backed by a `pw-table-v1` custom selector engine. Rows and cells are resolved by header name in the browser on every retry, so locators auto-wait for late headers and rows and survive reordered columns. Also adds `defineTable()`, typed header keys and row conditions (string, RegExp, `equals`/`contains`/`startsWith`/`endsWith`, `oneOf`, `empty`, `predicate`, and the `not`/`anyOf`/`allOf` combinators), `headerKeys()`/`validateHeaders()`, the `toHaveRow`/`toHaveRowCount`/`toHaveHeaders` table matchers and the `toHaveCells` row matcher (exported as `tableMatchers` and a pre-extended `expect`), `registerTableSelectors()` and a ready-made `test` fixture. Also adds column indexes for `cell()`, `column()`, `header()` and `toBeSortedBy` (which also work on tables without header rows), `first()`/`last()`/`nth()` on rows, the `toJson()` snapshot (with a `minRows` option to wait for loaded rows, and `raw: true` for the unnormalized cell texts), the `toHaveRows` table matcher and the `toBeSortedBy` table matcher (text, number and date sorting, a custom `compare`, and an optional `aria-sort` check). `TableLocator` reads `th` and `td` cells in both header and body rows (so row headers don't shift columns), ignores rows and cells of nested tables, and has an `aria` option for ARIA grids. It places cells by `aria-colindex`, joins rows split over pinned containers by `aria-rowindex`, and supports `aria-colspan`/`aria-rowspan`. Like Playwright locators, it finds rows and cells inside open shadow roots, so a web component that renders its table in a shadow root can be the table root. Negated `toHaveRow`, `toHaveCells` and `toHaveRows` assertions wait for the headers and fail on an unknown header, so a typo never passes. In a table without a `<thead>`, leading rows of `<th>` cells in the first `<tbody>` are header rows. A `predicate` that throws fails the row (also inside `not`, `anyOf` and `allOf`), and the matchers report its error. A `predicate` gets the raw cell text as its second argument. Text is read as the user sees it: header text is always one line, body cells keep their line breaks as one `\n` between trimmed lines, and invisible characters, icon glyphs (private use characters) and hidden elements are left out, with accents composed (NFC). The new `ignore` option lists CSS selectors of elements inside cells whose text is left out; it defaults to `DEFAULT_IGNORE` (exported): screen reader only text (`.sr-only`, `.visually-hidden`), Material Icons and Material Symbols ligatures, and `[aria-hidden=true]`. Header names you pass are normalized the same way, so `"First\nname"` finds the header `First name`. Locators read like the code that built them in error messages and traces (Playwright 1.53 and later), such as `locator('#users').row({ "Name": "John" }).cell("Status")`.
+Add `TableLocator`: a type-safe table API that only returns Playwright locators, backed by a `pw-table-v1` custom selector engine. Rows and cells are resolved by header name in the browser on every retry, so locators auto-wait for late headers and rows and survive reordered columns.
+
+**Locators**
+
+- `defineTable()` and `new TableLocator()`, with typed header keys from the `headers` option.
+- `row(where)`, `rowAt(n)`, `rows`, `cell()`, `column()` and `header()`, plus `first()`, `last()`, `nth()` and `filter()` on rows.
+- `cell()`, `column()`, `header()` and `toBeSortedBy` also take a column index, which also works on tables without header rows.
+- `headerKeys()` and `validateHeaders()`.
+- `toJson()` reads a snapshot, with `minRows` to wait for loaded rows and `raw: true` for the cell texts as the browser reads them.
+- `registerTableSelectors()` and a ready-made `test` fixture register the selector engine. The engine runs in an isolated world, so it also works on pages whose CSP forbids `eval`.
+- Locators read like the code that built them in error messages and traces (Playwright 1.53 and later), such as `locator('#users').row({ "Name": "John" }).cell("Status")`.
+
+**Cell conditions**
+
+- A string, a RegExp, `equals`, `contains`, `startsWith`, `endsWith`, `oneOf`, `empty` and `predicate`, and the `not`, `anyOf` and `allOf` combinators.
+- A `predicate` gets the raw cell text as its second argument. A `predicate` that throws fails the row (also inside `not`, `anyOf` and `allOf`), and the matchers report its error.
+
+**Matchers**
+
+- Table matchers: `toHaveRow`, `toHaveRowCount`, `toHaveHeaders`, `toHaveRows` and `toBeSortedBy` (text, number and date sorting, a custom `compare`, and an optional `aria-sort` check).
+- Row matcher: `toHaveCells`.
+- They are exported as `tableMatchers` and as a pre-extended `expect`.
+- Negated `toHaveRow`, `toHaveCells` and `toHaveRows` assertions wait for the headers and fail on an unknown header, so a typo never passes.
+
+**Table structure**
+
+- `th` and `td` cells are read in both header and body rows, so row headers don't shift columns.
+- Rows and cells of nested tables are ignored.
+- In a table without a `<thead>`, leading rows of `<th>` cells in the first `<tbody>` are header rows.
+- The `aria` option uses ARIA roles for ARIA grids. Cells are placed by `aria-colindex`, rows split over pinned containers are joined by `aria-rowindex`, and `aria-colspan`/`aria-rowspan` are supported.
+- Like Playwright locators, rows and cells are found inside open shadow roots, so a web component that renders its table in a shadow root can be the table root.
+
+**Text is read as the user sees it**
+
+- Header text is always one line. Body cells keep their line breaks as one `\n` between trimmed lines.
+- Invisible characters, icon glyphs (private use characters) and hidden elements are left out, and accents are composed (NFC).
+- The `ignore` option lists CSS selectors of elements inside cells whose text is left out. It defaults to `DEFAULT_IGNORE` (exported): screen reader only text (`.sr-only`, `.visually-hidden`), Material Icons and Material Symbols ligatures, and `[aria-hidden=true]`.
+- Header names you pass are normalized the same way, so `"First\nname"` finds the header `First name`.

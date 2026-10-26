@@ -1,12 +1,20 @@
 {
 	"name": "@cerios/playwright-table",
 	"version": "2.0.2",
-	"description": "A high-performance Playwright library for testing HTML tables with comprehensive support for complex table structures including colspan, rowspan, multiple headers, and dynamic content. Features robust error handling, parallel data fetching, and intuitive APIs for table validation and data extraction.",
+	"description": "Type-safe, auto-waiting Playwright locators and retrying expect matchers for HTML tables and data grids: find rows and cells by header name, assert whole tables, and handle colspan, rowspan, pagination, virtual scrolling and grids such as AG Grid, MUI X Data Grid and Angular Material.",
 	"keywords": [
+		"ag-grid",
+		"assertions",
+		"data-grid",
+		"e2e",
+		"expect",
 		"html",
+		"locator",
+		"pagination",
 		"playwright",
 		"table",
-		"testing"
+		"testing",
+		"virtual-scroll"
 	],
 	"homepage": "https://github.com/CeriosTesting/playwright-tables#readme",
 	"bugs": {

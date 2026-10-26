@@ -19,6 +19,7 @@ import {
 	EngineTextsRequest,
 	EngineTotalRequest,
 	EngineValuesRequest,
+	EngineWindow,
 	EngineWindowRequest,
 	HeaderKey,
 	LocatorRef,
@@ -231,6 +232,7 @@ export class TableRow<H extends string = string> {
 	/**
 	 * Collapses this row of a tree grid, like {@link expand} does, but with `ArrowLeft` as the fallback.
 	 *
+	 * @param options - Optional settings, the same as for {@link expand}.
 	 * @throws Error if the row has no `aria-expanded` (on the row or an element in it), or doesn't collapse.
 	 */
 	async collapse(options?: { toggle?: (row: Locator) => Locator; timeout?: number }): Promise<void> {
@@ -241,6 +243,8 @@ export class TableRow<H extends string = string> {
 	 * Whether this row is expanded: the `aria-expanded` of the row, or else of the first element in it that
 	 * has one. `null` if there is none, for a row that cannot expand.
 	 *
+	 * @param options - Optional settings.
+	 * @param options.timeout - (Optional) The time to wait for the row, in milliseconds.
 	 * @returns A promise that resolves to `true`, `false` or `null`.
 	 */
 	async isExpanded(options?: { timeout?: number }): Promise<boolean | null> {
@@ -250,6 +254,8 @@ export class TableRow<H extends string = string> {
 	/**
 	 * The `aria-level` of this row in a tree grid (1 for the top level), or `null` if it has none.
 	 *
+	 * @param options - Optional settings.
+	 * @param options.timeout - (Optional) The time to wait for the row, in milliseconds.
 	 * @example
 	 * expect(await files.row({ Name: "index.ts" }).level()).toBe(2);
 	 */
@@ -781,7 +787,8 @@ export class TableLocator<const H extends string = string> {
 	 * @param where - At least one condition, as for {@link row}.
 	 * @param options - Optional timeout for the whole search, in milliseconds. Defaults to 30000.
 	 * @returns A promise that resolves to the {@link TableRow} for `row(where)`.
-	 * @throws Error if no row matches on any page, with the number of pages and scroll steps searched.
+	 * @throws Error if no row matches on any page (or within `paginate.maxPages` and `scroll.maxSteps`), with
+	 * the number of pages and scroll steps searched, and whether the search stopped early at the timeout.
 	 *
 	 * @example
 	 * const orders = defineTable(page.getByRole("grid"), {
@@ -810,18 +817,35 @@ export class TableLocator<const H extends string = string> {
 		);
 		if (now.value) return row;
 		let last: NavigationPosition = { page: 0, step: 0 };
+		// Why the search ended before the end of the table, if it did
+		let stopped = "";
+		let lastError = now.error;
+		const timedOut = ", and timed out before the end of the table. Pass a larger timeout to search further";
 		if (this._navigator.active) {
-			for await (const position of this._navigator.positions(deadline)) {
-				last = position;
-				if (await matches(Math.max(MIN_READ_TIMEOUT, deadline - Date.now()))) return row;
-				if (Date.now() >= deadline) break;
+			try {
+				for await (const position of this._navigator.positions(deadline)) {
+					last = position;
+					if (await matches(Math.max(MIN_READ_TIMEOUT, deadline - Date.now()))) return row;
+					if (Date.now() >= deadline) {
+						stopped = timedOut;
+						break;
+					}
+				}
+			} catch (error) {
+				// A wait inside the navigation that ran out of time: report the timeout, with that error
+				if (Date.now() < deadline) throw error;
+				stopped = timedOut;
+				lastError = error;
 			}
 		}
 		throw new Error(
 			`TableLocator.findRow() found no row matching ${describeWhere(where)}` +
-				(this._navigator.active ? ` on ${last.page + 1} pages (${last.step} scroll steps on the last page)` : "") +
-				`.\n` +
-				describeLastError(now.error) +
+				(this._navigator.active
+					? ` on ${last.page + 1} page${last.page === 0 ? "" : "s"} (${last.step} scroll steps on the last page` +
+						`${this._navigator.limitsReached(last)})`
+					: "") +
+				`${stopped}.\n` +
+				describeLastError(lastError) +
 				`Table locator: ${this.root.toString()}\n` +
 				`Timeout: ${timeout}ms`
 		);
@@ -837,6 +861,7 @@ export class TableLocator<const H extends string = string> {
 	 *
 	 * @param options - Optional timeout, in milliseconds. Defaults to 30000.
 	 * @returns A promise that resolves to the number of body rows.
+	 * @throws Error if it reads every row and the timeout passes before the end of the table.
 	 *
 	 * @example
 	 * expect(await grid.totalRowCount()).toBe(200);
@@ -848,16 +873,18 @@ export class TableLocator<const H extends string = string> {
 		const total = await this.root.evaluate(readTableTotal, request, { timeout });
 		if (total.ariaRowCount !== null) return Math.max(0, total.ariaRowCount - total.otherRows);
 		if (!this._navigator.active) return total.bodyRows;
-		return (await this.readAllTexts(false, undefined, deadline)).rows.length;
+		return (await this.readAllTexts(false, undefined, { caller: "totalRowCount()", timeout, deadline })).rows.length;
 	}
 
 	/**
 	 * The body rows in view as an aligned text table, with the row index in front, for logs and debugging.
-	 * Long cells are cut off.
+	 * Cells longer than 30 characters are cut off, and line breaks show as `↵`.
 	 *
 	 * @param options - Optional settings.
-	 * @param options.columns - (Optional) Only these columns. Defaults to every column.
+	 * @param options.columns - (Optional) Only these columns. Unknown columns are skipped; if none is known,
+	 * every column is shown. Defaults to every column.
 	 * @param options.maxRows - (Optional) The most rows to show. Defaults to 50.
+	 * @param options.timeout - (Optional) The time to wait for the table, in milliseconds.
 	 * @returns A promise that resolves to the table as text.
 	 *
 	 * @example
@@ -943,7 +970,12 @@ export class TableLocator<const H extends string = string> {
 			);
 		}
 		if (options.allRows !== true) return texts;
-		return this.readAllTexts(raw, columns, Date.now() + (options.timeout ?? 30_000));
+		const allRowsTimeout = options.timeout ?? 30_000;
+		return this.readAllTexts(raw, columns, {
+			caller: "toJson({ allRows: true })",
+			timeout: allRowsTimeout,
+			deadline: Date.now() + allRowsTimeout,
+		});
 	}
 
 	/**
@@ -994,12 +1026,16 @@ export class TableLocator<const H extends string = string> {
 	 * Reads every row on every page and scroll position. Rows are told apart by their key per page, and
 	 * ordered by their index when every row has one. Header keys are merged across positions, so a grid
 	 * that renders only some columns at a time still gets every column it showed.
+	 *
+	 * @throws Error if the deadline passes before every row is read (up to `paginate.maxPages` and
+	 * `scroll.maxSteps`), so part of the rows is never returned as all of them.
 	 */
 	private async readAllTexts(
 		raw: boolean,
 		columns: readonly string[] | undefined,
-		deadline: number
+		read: { caller: string; timeout: number; deadline: number }
 	): Promise<EngineTexts> {
+		const { caller, timeout, deadline } = read;
 		const request: EngineWindowRequest = { op: "window", cfg: this._config };
 		if (raw) request.raw = true;
 		if (columns !== undefined) request.columns = [...columns];
@@ -1017,23 +1053,39 @@ export class TableLocator<const H extends string = string> {
 			rows.push(...entries.map(entry => entry.cells));
 			page = new Map();
 		};
-		for await (const position of this._navigator.positions(deadline)) {
-			if (position.page !== pageNumber) {
-				flush();
-				pageNumber = position.page;
-			}
-			const read = await this.root.evaluate(readTableWindow, request, {
-				timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()),
-			});
-			const names = columns ?? read.keys;
-			for (const key of read.keys) if (!keys.includes(key)) keys.push(key);
-			for (const row of read.rows) {
-				const cells = page.get(row.key)?.cells ?? {};
-				names.forEach((name, index) => {
-					cells[name] = row.texts[index] ?? "";
+		const progress = (): string =>
+			`${rows.length + page.size} rows were read, on ${pageNumber + 1} page${pageNumber === 0 ? "" : "s"}`;
+		let timedOut = false;
+		let lastError: unknown;
+		try {
+			for await (const position of this._navigator.positions(deadline)) {
+				// The navigation moved on, so there are rows left to read
+				if (Date.now() >= deadline) {
+					timedOut = true;
+					break;
+				}
+				if (position.page !== pageNumber) {
+					flush();
+					pageNumber = position.page;
+				}
+				const window = await this.root.evaluate(readTableWindow, request, {
+					timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()),
 				});
-				page.set(row.key, { index: row.index, cells });
+				mergeWindow(window, columns, keys, page);
 			}
+		} catch (error) {
+			// A wait inside the navigation that ran out of time: report the timeout, with that error
+			if (Date.now() < deadline) throw error;
+			timedOut = true;
+			lastError = error;
+		}
+		if (timedOut) {
+			throw new Error(
+				`TableLocator.${caller} timed out after ${timeout}ms before reading every row; ${progress()}. ` +
+					`Pass a larger timeout.\n` +
+					describeLastError(lastError) +
+					`Table locator: ${this.root.toString()}`
+			);
 		}
 		flush();
 		const names = columns ?? keys;
@@ -1220,8 +1272,30 @@ function resolveColumn(column: string | number): string | number {
  * since Playwright 1.53; on older versions the locator is returned as it is.
  */
 function described(locator: Locator, description: string): Locator {
-	const describe = (locator as Partial<Pick<Locator, "describe">>).describe;
+	// Through `unknown`, so this also compiles against the types of Playwright versions without `describe()`
+	const describe = (locator as unknown as { describe?: (description: string) => Locator }).describe;
 	return typeof describe === "function" ? describe.call(locator, description) : locator;
+}
+
+/**
+ * Adds the rows of one screen of a table to the rows of its page, by row key, so a row seen at several
+ * scroll positions is one row. New header keys are added to `keys`.
+ */
+function mergeWindow(
+	window: EngineWindow,
+	columns: readonly string[] | undefined,
+	keys: string[],
+	page: Map<string, { index: number | null; cells: Record<string, string> }>
+): void {
+	const names = columns ?? window.keys;
+	for (const key of window.keys) if (!keys.includes(key)) keys.push(key);
+	for (const row of window.rows) {
+		const cells = page.get(row.key)?.cells ?? {};
+		names.forEach((name, index) => {
+			cells[name] = row.texts[index] ?? "";
+		});
+		page.set(row.key, { index: row.index, cells });
+	}
 }
 
 /** Describes `Locator.filter()` options, such as `{ hasText: "Jane" }`. Locators show their own description. */

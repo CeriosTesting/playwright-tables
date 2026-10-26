@@ -653,6 +653,18 @@ test.describe("Table Tests", () => {
 		expect(await TableBody.getRows(page.locator("table>tbody>tr"), "td")).toHaveLength(0);
 	});
 
+	test("getAllBodyCellLocatorsByHeaderIndex counts the columns that header colspans cover", async ({ page }) => {
+		await page.goto(Route.ColspanHeaderTable);
+
+		const table = new PlaywrightTable(page.locator("table"));
+		// 3 header cells span 6 columns; index 5 is the last "Color Combination" column
+		const locators = await table.getAllBodyCellLocatorsByHeaderIndex(5);
+		await expect(at(locators, 0)).toHaveText("Red");
+		await expect(at(locators, 1)).toHaveText("Blue");
+
+		await expect(table.getAllBodyCellLocatorsByHeaderIndex(6)).rejects.toThrow(/Table has 6 columns/);
+	});
+
 	test("findRowIndex uses getJson-style empty header names by default", async ({ page }) => {
 		await page.goto(Route.DuplicateEmptyHeadersTable);
 
