@@ -132,7 +132,7 @@ test.describe("waitForExactRowCount", () => {
 		const table = new PlaywrightTable(page.locator("table"));
 
 		// Simulate rapid changes
-		page.evaluate(() => {
+		await page.evaluate(() => {
 			const tbody = document.querySelector("tbody");
 			if (tbody) {
 				let count = 2;

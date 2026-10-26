@@ -3,8 +3,9 @@ import { Locator } from "@playwright/test";
 import { CellContentType } from "./cell-content-type";
 import { pollTable, PollingOptions } from "./polling";
 import { BodyRow, Cell, HeaderRow } from "./row";
-import { TableBody } from "./table-body";
+import { CellSource, TableBody } from "./table-body";
 import { HeaderRowOptions, TableHeader } from "./table-header";
+import { TableUtils } from "./table-utils";
 
 /**
  * Options for loading table data, headers, and rows.
@@ -28,6 +29,17 @@ export type TableOptions = {
 	bodyRowOptions?: { cellContentType?: CellContentType };
 	/** @deprecated Use `bodyRowOptions.cellContentType` instead. */
 	cellContentType?: CellContentType;
+};
+
+/** Fallbacks for header row options the caller did not set. */
+type HeaderRowOptionDefaults = {
+	defaultColspanEnabled?: boolean;
+	defaultColspanSuffix?: boolean;
+	defaultDuplicateSuffix?: boolean;
+	defaultEmptyCellReplacement?: boolean;
+	defaultNormalizeWhitespace?: boolean;
+	defaultStripIconGlyphs?: boolean;
+	forceColspanEnabled?: boolean;
 };
 
 /**
@@ -81,19 +93,13 @@ export class PlaywrightTable {
 			};
 		}
 	) {
-		const headerRowSelector = this._options?.header?.rowSelector;
-		const bodyRowSelector = this._options?.row?.rowSelector;
-		if (headerRowSelector && bodyRowSelector && headerRowSelector === bodyRowSelector) {
-			console.warn(
-				`PlaywrightTable: header.rowSelector and row.rowSelector are identical ("${headerRowSelector}"). ` +
-					`This can cause header rows to be included in body rows. Consider scoping selectors to separate row groups.`
-			);
-		}
+		const { header = {}, row = {} } = this._options ?? {};
+		TableUtils.warnOnIdenticalRowSelectors("PlaywrightTable", header.rowSelector, row.rowSelector);
 
-		this._headerRowLocator = this._tableLocator.locator(this._options?.header?.rowSelector ?? "thead>tr");
-		this._headerColumnSelector = this._options?.header?.columnSelector ?? "th";
-		this._bodyRowLocator = this._tableLocator.locator(this._options?.row?.rowSelector ?? "tbody>tr");
-		this._bodyRowColumnSelector = this._options?.row?.columnSelector ?? "td";
+		this._headerRowLocator = this._tableLocator.locator(header.rowSelector ?? "thead>tr");
+		this._headerColumnSelector = header.columnSelector ?? "th";
+		this._bodyRowLocator = this._tableLocator.locator(row.rowSelector ?? "tbody>tr");
+		this._bodyRowColumnSelector = row.columnSelector ?? "td";
 	}
 
 	/**
@@ -183,8 +189,11 @@ export class PlaywrightTable {
 
 	/**
 	 * Retrieves a specific cell locator in the body of the table by row and column index.
+	 * Both are positions in the DOM: `headerPosition` is the index among the cells of the row, so with
+	 * colspan or rowspan it can differ from the column. The methods that find cells by header name
+	 * account for spans.
 	 * @param rowNumber - The row number (0-based index).
-	 * @param headerPosition - The column/header position (0-based index).
+	 * @param headerPosition - The cell position within the row (0-based index).
 	 * @returns A Playwright Locator for the specified cell.
 	 *
 	 * @example
@@ -254,8 +263,7 @@ export class PlaywrightTable {
 		// Normalize conditions to object format
 		const conditionsObj = Array.isArray(conditions) ? { [conditions[0]]: conditions[1] } : conditions;
 
-		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
-			const row = table.bodyRows[rowIndex];
+		for (const [rowIndex, row] of table.bodyRows.entries()) {
 			let matches = true;
 
 			for (const [header, value] of Object.entries(conditionsObj)) {
@@ -268,7 +276,7 @@ export class PlaywrightTable {
 			}
 
 			if (matches) {
-				return this.getBodyCellLocator(rowIndex, targetHeaderIndex);
+				return this.gridCellLocator(table.sources, rowIndex, targetHeaderIndex);
 			}
 		}
 
@@ -309,7 +317,7 @@ export class PlaywrightTable {
 		const headerIndex = this.getHeaderIndex(header, headers);
 		const locators: Locator[] = [];
 		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
-			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
+			const cellLocator = this.gridCellLocator(table.sources, rowIndex, headerIndex);
 			locators.push(cellLocator);
 		}
 		return locators;
@@ -349,7 +357,7 @@ export class PlaywrightTable {
 		}
 		const locators: Locator[] = [];
 		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
-			const cellLocator = this.getBodyCellLocator(rowIndex, headerIndex);
+			const cellLocator = this.gridCellLocator(table.sources, rowIndex, headerIndex);
 			locators.push(cellLocator);
 		}
 		return locators;
@@ -387,7 +395,7 @@ export class PlaywrightTable {
 		return table.bodyRows.map(row => {
 			const rowObj: Record<string, Cell> = {};
 			headers.forEach((header, index) => {
-				rowObj[header] = row[index] || "";
+				rowObj[header] = row[index] ?? "";
 			});
 			return rowObj;
 		});
@@ -444,31 +452,24 @@ export class PlaywrightTable {
 	 */
 	async waitForNonEmpty(options?: PollingOptions): Promise<void> {
 		await pollTable(async () => {
-			const rows = await this._bodyRowLocator.all();
-			if (rows.length === 0) {
+			const rowCount = await this._bodyRowLocator.count();
+			if (rowCount === 0) {
 				throw new Error(
 					`Expected table to be non-empty, but found 0 body rows.\n` +
 						`Body row locator: ${this._bodyRowLocator.toString()}`
 				);
 			}
 
-			// Check if at least one row has content in at least one cell
-			let hasRowWithContent = false;
-			for (const row of rows) {
-				const cells = await row.locator(this._bodyRowColumnSelector).all();
-				for (const cell of cells) {
-					const content = await cell.innerText();
-					if (content.trim().length > 0) {
-						hasRowWithContent = true;
-						break;
-					}
-				}
-				if (hasRowWithContent) break;
-			}
+			// Check if at least one row has content in at least one cell, in one round trip
+			const hasRowWithContent = await this._bodyRowLocator
+				.locator(this._bodyRowColumnSelector)
+				.evaluateAll(cells =>
+					cells.some(cell => ("innerText" in cell ? cell.innerText : cell.textContent).trim() !== "")
+				);
 
 			if (!hasRowWithContent) {
 				throw new Error(
-					`Expected table to have at least one row with content, but all ${rows.length} rows are empty.\n` +
+					`Expected table to have at least one row with content, but all ${rowCount} rows are empty.\n` +
 						`Body row locator: ${this._bodyRowLocator.toString()}`
 				);
 			}
@@ -530,11 +531,8 @@ export class PlaywrightTable {
 	 * expect(body).toBe(10);
 	 */
 	async getRowCount(): Promise<{ header: number; body: number }> {
-		const [headerRows, bodyRows] = await Promise.all([this._headerRowLocator.all(), this._bodyRowLocator.all()]);
-		return {
-			header: headerRows.length,
-			body: bodyRows.length,
-		};
+		const [header, body] = await Promise.all([this._headerRowLocator.count(), this._bodyRowLocator.count()]);
+		return { header, body };
 	}
 
 	/**
@@ -609,18 +607,16 @@ export class PlaywrightTable {
 		const mainHeader = this.mainHeaderRow(table.headerRows);
 
 		// Validate all condition headers exist and get their indices
-		const headerIndices = new Map<string, number>();
-		for (const header of Object.keys(conditions)) {
-			headerIndices.set(header, this.getHeaderIndex(header, mainHeader));
-		}
+		const expected = Object.entries(conditions).map(([header, value]) => ({
+			headerIndex: this.getHeaderIndex(header, mainHeader),
+			value,
+		}));
 
 		// Find first matching row
-		for (let rowIndex = 0; rowIndex < table.bodyRows.length; rowIndex++) {
-			const row = table.bodyRows[rowIndex];
+		for (const [rowIndex, row] of table.bodyRows.entries()) {
 			let rowMatches = true;
 
-			for (const [header, expectedValue] of Object.entries(conditions)) {
-				const headerIndex = headerIndices.get(header)!;
+			for (const { headerIndex, value: expectedValue } of expected) {
 				const cellValue = String(row[headerIndex] ?? "");
 				if (cellValue !== expectedValue) {
 					rowMatches = false;
@@ -636,10 +632,12 @@ export class PlaywrightTable {
 		return -1;
 	}
 
-	private async getTable(options?: TableOptions): Promise<{ headerRows: HeaderRow[]; bodyRows: BodyRow[] }> {
-		const [headerRows, bodyRows] = await Promise.all([
+	private async getTable(
+		options?: TableOptions
+	): Promise<{ headerRows: HeaderRow[]; bodyRows: BodyRow[]; sources: (CellSource | undefined)[][] }> {
+		const [headerRows, { rows: bodyRows, sources }] = await Promise.all([
 			TableHeader.getRows(this._headerRowLocator, this._headerColumnSelector, options?.headerRowOptions),
-			TableBody.getRows(this._bodyRowLocator, this._bodyRowColumnSelector, options?.bodyRowOptions),
+			TableBody.getRowsWithSources(this._bodyRowLocator, this._bodyRowColumnSelector, options?.bodyRowOptions),
 		]);
 
 		if (headerRows.length === 0) {
@@ -657,7 +655,18 @@ export class PlaywrightTable {
 			);
 		}
 
-		return { headerRows, bodyRows };
+		return { headerRows, bodyRows, sources };
+	}
+
+	/**
+	 * The locator of the DOM cell at a grid position, so colspan and rowspan don't shift it. A cell that
+	 * spans rows is located in the row it starts in.
+	 */
+	private gridCellLocator(sources: (CellSource | undefined)[][], rowIndex: number, columnIndex: number): Locator {
+		const source = sources[rowIndex]?.[columnIndex];
+		return source === undefined
+			? this.getBodyCellLocator(rowIndex, columnIndex)
+			: this.getBodyCellLocator(source.row, source.cell);
 	}
 
 	private normalizeGetBodyRowsOptions(options?: TableOptions): TableOptions {
@@ -669,11 +678,11 @@ export class PlaywrightTable {
 			return options;
 		}
 
-		if (options.cellContentType !== undefined) {
+		// oxlint-disable-next-line typescript/no-deprecated -- still supported for backwards compatibility
+		const { cellContentType } = options;
+		if (cellContentType !== undefined) {
 			return {
-				bodyRowOptions: {
-					cellContentType: options.cellContentType,
-				},
+				bodyRowOptions: { cellContentType },
 			};
 		}
 
@@ -700,31 +709,26 @@ export class PlaywrightTable {
 	}
 
 	private resolveHeaderRowOptions(
-		headerOptions: HeaderRowOptions | undefined,
-		defaults?: {
-			defaultColspanEnabled?: boolean;
-			defaultColspanSuffix?: boolean;
-			defaultDuplicateSuffix?: boolean;
-			defaultEmptyCellReplacement?: boolean;
-			defaultNormalizeWhitespace?: boolean;
-			defaultStripIconGlyphs?: boolean;
-			forceColspanEnabled?: boolean;
-		}
+		headerOptions: HeaderRowOptions = {},
+		defaults: HeaderRowOptionDefaults = {}
 	): HeaderRowOptions {
-		const resolvedColspanEnabled = defaults?.forceColspanEnabled
-			? true
-			: (headerOptions?.colspan?.enabled ?? defaults?.defaultColspanEnabled);
-
 		return {
-			cellContentType: headerOptions?.cellContentType,
-			emptyCellReplacement: headerOptions?.emptyCellReplacement ?? defaults?.defaultEmptyCellReplacement,
-			duplicateSuffix: headerOptions?.duplicateSuffix ?? defaults?.defaultDuplicateSuffix,
-			normalizeWhitespace: headerOptions?.normalizeWhitespace ?? defaults?.defaultNormalizeWhitespace,
-			stripIconGlyphs: headerOptions?.stripIconGlyphs ?? defaults?.defaultStripIconGlyphs,
-			colspan: {
-				enabled: resolvedColspanEnabled,
-				suffix: headerOptions?.colspan?.suffix ?? defaults?.defaultColspanSuffix,
-			},
+			cellContentType: headerOptions.cellContentType,
+			emptyCellReplacement: headerOptions.emptyCellReplacement ?? defaults.defaultEmptyCellReplacement,
+			duplicateSuffix: headerOptions.duplicateSuffix ?? defaults.defaultDuplicateSuffix,
+			normalizeWhitespace: headerOptions.normalizeWhitespace ?? defaults.defaultNormalizeWhitespace,
+			stripIconGlyphs: headerOptions.stripIconGlyphs ?? defaults.defaultStripIconGlyphs,
+			colspan: this.resolveColspanOptions(headerOptions.colspan, defaults),
+		};
+	}
+
+	private resolveColspanOptions(
+		colspan: HeaderRowOptions["colspan"] = {},
+		defaults: HeaderRowOptionDefaults
+	): NonNullable<HeaderRowOptions["colspan"]> {
+		return {
+			enabled: defaults.forceColspanEnabled === true ? true : (colspan.enabled ?? defaults.defaultColspanEnabled),
+			suffix: colspan.suffix ?? defaults.defaultColspanSuffix,
 		};
 	}
 
@@ -737,14 +741,15 @@ export class PlaywrightTable {
 		}
 
 		const headerIndex = this._options?.header?.setMainHeaderRow ?? headers.length - 1;
-		if (headerIndex < 0 || headerIndex >= headers.length) {
+		const mainHeader = headers[headerIndex];
+		if (mainHeader === undefined) {
 			throw new Error(
 				`Header row index ${headerIndex} out of bounds. Table has ${headers.length} header rows.\n` +
 					`Header row locator: ${this._headerRowLocator.toString()}`
 			);
 		}
 
-		return headers[headerIndex];
+		return mainHeader;
 	}
 
 	/**

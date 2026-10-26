@@ -25,7 +25,7 @@ export class TableUtils {
 			}
 
 			const content = cellContentType === CellContentType.InnerText ? await cell.innerText() : await cell.textContent();
-			return content?.trim() || "";
+			return content?.trim() ?? "";
 		} catch (error) {
 			const locatorDescription = this.getLocatorDescription(cell);
 			throw new Error(
@@ -50,18 +50,7 @@ export class TableUtils {
 				cell.getAttribute("rowspan"),
 				cell.getAttribute("colspan"),
 			]);
-
-			const rowspan = parseInt(rowspanAttr || "1", 10);
-			const colspan = parseInt(colspanAttr || "1", 10);
-
-			if (isNaN(rowspan) || rowspan < 1) {
-				throw new Error(`Invalid rowspan attribute: "${rowspanAttr}". Expected positive integer.`);
-			}
-			if (isNaN(colspan) || colspan < 1) {
-				throw new Error(`Invalid colspan attribute: "${colspanAttr}". Expected positive integer.`);
-			}
-
-			return { rowspan, colspan };
+			return this.parseSpans(rowspanAttr, colspanAttr);
 		} catch (error) {
 			const locatorDescription = this.getLocatorDescription(cell);
 			throw new Error(
@@ -70,6 +59,77 @@ export class TableUtils {
 					`Error: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
+	}
+
+	/**
+	 * Warns when the header and body row selectors are identical, because header rows would then also
+	 * be read as body rows.
+	 * @param owner - The class name used in the warning.
+	 * @param headerRowSelector - The configured header row selector, if any.
+	 * @param bodyRowSelector - The configured body row selector, if any.
+	 */
+	static warnOnIdenticalRowSelectors(
+		owner: string,
+		headerRowSelector: string | undefined,
+		bodyRowSelector: string | undefined
+	): void {
+		if (headerRowSelector !== undefined && headerRowSelector !== "" && headerRowSelector === bodyRowSelector) {
+			console.warn(
+				`${owner}: header.rowSelector and row.rowSelector are identical ("${headerRowSelector}"). ` +
+					`This can cause header rows to be included in body rows. Consider scoping selectors to separate row groups.`
+			);
+		}
+	}
+
+	/**
+	 * Reads the content and span attributes of every cell in `row` in a single round trip.
+	 * @param row - The Playwright locator for one row.
+	 * @param columnsSelector - Selector for the cells within the row, with the same meaning as in `row.locator()`.
+	 * @param cellContentType - The type of content to extract (InnerText or TextContent).
+	 * @returns One entry per cell, in DOM order, with the trimmed content.
+	 * @throws Error if a span attribute is invalid (non-numeric or less than 1).
+	 */
+	static async readRowCells(
+		row: Locator,
+		columnsSelector: string,
+		cellContentType: CellContentType
+	): Promise<{ content: string; rowspan: number; colspan: number }[]> {
+		const cells = await row.locator(columnsSelector).evaluateAll(
+			(elements, innerText) =>
+				elements.map(el => ({
+					text: innerText && "innerText" in el ? el.innerText : el.textContent,
+					rowspan: el.getAttribute("rowspan"),
+					colspan: el.getAttribute("colspan"),
+				})),
+			cellContentType === CellContentType.InnerText
+		);
+		return cells.map(cell => ({
+			content: cell.text.trim(),
+			...this.parseSpans(cell.rowspan, cell.colspan),
+		}));
+	}
+
+	/** Parses and validates the `rowspan` and `colspan` attributes of a cell. */
+	private static parseSpans(
+		rowspanAttr: string | null,
+		colspanAttr: string | null
+	): { rowspan: number; colspan: number } {
+		const rowspan = this.parseSpan(rowspanAttr);
+		const colspan = this.parseSpan(colspanAttr);
+
+		if (isNaN(rowspan) || rowspan < 1) {
+			throw new Error(`Invalid rowspan attribute: "${rowspanAttr}". Expected positive integer.`);
+		}
+		if (isNaN(colspan) || colspan < 1) {
+			throw new Error(`Invalid colspan attribute: "${colspanAttr}". Expected positive integer.`);
+		}
+
+		return { rowspan, colspan };
+	}
+
+	/** Parses a `rowspan`/`colspan` attribute value. A missing or empty attribute means 1. */
+	private static parseSpan(attr: string | null): number {
+		return attr === null || attr === "" ? 1 : parseInt(attr, 10);
 	}
 
 	/**

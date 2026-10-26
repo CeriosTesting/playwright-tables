@@ -12,6 +12,7 @@ const defaultConfig: EngineConfig = {
 	bodyCell: "td",
 	mainHeaderRow: null,
 	contentType: "innerText",
+	stripIconGlyphs: false,
 };
 
 function keysRequest(cfg: EngineConfig): EngineKeysRequest {
@@ -51,7 +52,7 @@ test.describe("pw-table selector engine", () => {
 			await page.goto(route);
 			const json = await new PlaywrightTable(page.locator("table")).getJson();
 			const keys = await page.locator("table").evaluate(readTableHeaderKeys, keysRequest(defaultConfig));
-			expect(keys).toEqual(Object.keys(json[0]));
+			expect(keys).toEqual(Object.keys(json[0] ?? {}));
 		});
 	}
 
@@ -72,7 +73,7 @@ test.describe("pw-table selector engine", () => {
 				bodyCell: selectors.row.columnSelector,
 			})
 		);
-		expect(keys).toEqual(Object.keys(json[0]));
+		expect(keys).toEqual(Object.keys(json[0] ?? {}));
 	});
 
 	test("keys mode returns an empty list when the table has no header rows", async ({ page }) => {

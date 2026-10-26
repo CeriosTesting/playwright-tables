@@ -2,7 +2,11 @@
 	"compilerOptions": {
 		"target": "es2019",
 		"module": "commonjs",
-		"baseUrl": "./",
+		"paths": {
+			"src": ["./src/index.ts"],
+			"src/*": ["./src/*"]
+		},
+		"types": ["node"],
 		"resolveJsonModule": true,
 		"noEmit": true,
 		"esModuleInterop": true,
@@ -12,6 +16,7 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"skipLibCheck": true,
-		"outDir": "dist"
+		"outDir": "dist",
+		"noUncheckedIndexedAccess": true
 	}
 }

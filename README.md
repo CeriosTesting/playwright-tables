@@ -82,7 +82,7 @@ You can customize these selectors in the constructor (see [Advanced Options](#ad
 
 ## Pure locators (auto-waiting)
 
-`TableLocator` is a type-safe table API that only returns Playwright `Locator`s. You define a table once, then get rows and cells by header name. Locators are built synchronously and resolved in the browser by a custom selector engine (`pw-table`) on every retry, so you get:
+`TableLocator` is a type-safe table API that only returns Playwright `Locator`s. You define a table once, then get rows and cells by header name. Locators are built synchronously and resolved in the browser by a custom selector engine (`pw-table-v1`) on every retry, so you get:
 
 - **Auto-waiting and retrying `expect`s**: late headers and rows are no problem, and you don't need any polling helpers.
 - **Reorder-safe locators**: header names are resolved to columns on every evaluation, so a locator stays correct when columns move.
@@ -107,8 +107,8 @@ test("john is active", async ({ page }) => {
 If you have your own fixtures, call `registerTableSelectors()` instead. It must run **before the page is created**, and it is safe to call more than once:
 
 ```ts
-import { test as base } from "@playwright/test";
 import { registerTableSelectors } from "@cerios/playwright-table";
+import { test as base } from "@playwright/test";
 
 export const test = base.extend<{}, { tableSelectors: void }>({
 	tableSelectors: [
@@ -133,22 +133,114 @@ users.rows; // TableRow: all body rows
 users.cell(anyRowLocator, "Email"); // Locator: the cell under a header for any row locator
 users.column("Status"); // Locator: every body cell under a header
 users.header("Name"); // Locator: the header cell
+await users.toJson(); // Snapshot: every body row as an object keyed by header
 
 const row = users.row({ Name: "John" });
 row.locator; // Locator for the row element(s)
 row.cell("Email"); // Locator for the cell
 row.filter({ hasText: "x" }); // TableRow narrowed with Locator.filter()
+row.first(); // TableRow: the first of these rows (also last() and nth(i))
 ```
 
-Without `headers`, any string is accepted as a header. The other options are the same as for `PlaywrightTable`: `header.rowSelector`, `header.columnSelector`, `header.setMainHeaderRow`, `row.rowSelector` and `row.columnSelector`. `cellContentType` sets how text is read for both header and body cells (`InnerText` by default).
+Without `headers`, any string is accepted as a header. The other options are the same as for `PlaywrightTable`: `header.rowSelector`, `header.columnSelector`, `header.setMainHeaderRow`, `row.rowSelector` and `row.columnSelector`. Only the defaults differ: `TableLocator` takes both `th` and `td` in header and body rows (see [Row headers and nested tables](#row-headers-and-nested-tables)), and in a table without a `<thead>`, the leading rows of `<th>` cells (without `<td>`) in the first `<tbody>` are header rows, not body rows. To turn that off, set `header.rowSelector` to `"thead>tr"` and `row.rowSelector` to `"tbody>tr"`. `cellContentType` sets how text is read for both header and body cells (`InnerText` by default). `header.stripIconGlyphs` removes icon font glyphs from header text (see [Header keys](#header-keys)). `aria: true` switches the defaults to ARIA roles (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)).
 
-`row()` follows Playwright's strict mode: acting on it throws when several rows match. Use `rows.filter(...)`, `rowAt(n)`, `locator.first()` or `table.cell(anyRowLocator, header)` to compose.
+`row()` follows Playwright's strict mode: acting on it throws when several rows match. Use `first()`, `last()`, `nth(i)`, `rows.filter(...)`, `rowAt(n)` or `table.cell(anyRowLocator, header)` to compose. All of them keep typed cell access.
 
 ```ts
+await users.row({ Status: "Active" }).first().cell("Edit").click();
 await expect(users.rows.filter({ hasText: "Jane" }).cell("Status")).toHaveText("Active");
-await expect(users.cell(users.rows.locator.last(), "Name")).toHaveText("Joe");
+await expect(users.rows.last().cell("Name")).toHaveText("Joe");
 await expect(users.column("Status")).toHaveText(["Active", "Inactive", "Active"]);
 ```
+
+### Column indexes and tables without headers
+
+`cell()`, `column()` and `header()` also take a 0-based column index. Indexes follow the visual grid, so a cell spanning columns or rows covers every index it spans, just like header keys do.
+
+```ts
+await expect(users.row({ Name: "John" }).cell(2)).toHaveText("john@example.com");
+await expect(users.column(1)).toHaveText(["Active", "Inactive", "Active"]);
+```
+
+Column indexes don't need a header row, so they also work on tables without one. Header names, `row()` conditions, `toJson()` and `toHaveRows` need a header row:
+
+```ts
+const plain = defineTable(page.locator("#plain")); // <table> with only a <tbody>
+await expect(plain.rowAt(1).cell(0)).toHaveText("Jane");
+await expect(plain.rows.filter({ hasText: "Jane" }).cell(2)).toHaveText("jane@example.com");
+await expect(plain).toHaveRowCount(2);
+```
+
+### Row headers and nested tables
+
+Accessible tables often start each body row with a row header (`<th scope="row">`), and put an empty `<td>` in the corner of the header row. `TableLocator` takes `th` and `td` cells in both header and body rows, so these columns don't shift:
+
+```html
+<thead>
+	<tr>
+		<td></td>
+		<th>Q1</th>
+		<th>Q2</th>
+	</tr>
+</thead>
+<tbody>
+	<tr>
+		<th scope="row">North</th>
+		<td>100</td>
+		<td>200</td>
+	</tr>
+</tbody>
+```
+
+```ts
+const sales = defineTable(page.locator("#sales"));
+await expect(sales.row({ "{{Empty}}": "North" }).cell("Q2")).toHaveText("200");
+```
+
+Rows and cells inside a cell, such as a nested table, are content of that cell, not part of the table. `rows`, `rowAt()`, `toHaveRowCount` and the column indexes skip them. To work with the nested table, define it as a table of its own.
+
+### ARIA grids (AG Grid, MUI Data Grid)
+
+Data grids are often built from `div`s with ARIA roles instead of `<table>` elements. Set `aria: true` to use roles for the default selectors (your own selectors still win):
+
+```ts
+const grid = defineTable(page.getByRole("grid"), { aria: true, headers: ["Id", "Name", "Status"] });
+await expect(grid.row({ Name: "Jane" }).cell("Status")).toHaveText("Inactive");
+```
+
+| Part         | Default with `aria: true`                               |
+| ------------ | ------------------------------------------------------- |
+| Header rows  | `[role=row]` with a `[role=columnheader]` inside        |
+| Header cells | `[role=columnheader]`                                   |
+| Body rows    | the other `[role=row]`s                                 |
+| Body cells   | `[role=gridcell]`, `[role=cell]` and `[role=rowheader]` |
+
+These ARIA attributes are used whenever they are present, with or without `aria: true`:
+
+- **`aria-colindex`** places a cell in its column, so columns stay aligned when the grid only renders the columns in view (column virtualization). A column that is not rendered has no cells, so its locators wait until you scroll it into view.
+- **`aria-rowindex`** joins row elements with the same index into one row. Grids with pinned columns render each row as several elements (one per pinned area), and `row()`, `cell()` and `toJson()` see them as one row. A joined row's `locator` is its first element, so `row.locator.filter({ hasText })` only sees the text of that part; use `row()` conditions instead. When every row has an `aria-rowindex`, rows are ordered by it, because grids don't always keep the DOM in visual order.
+- **`aria-colspan`** and **`aria-rowspan`** work like `colspan` and `rowspan`.
+
+Grids also virtualize rows: only the rows in view (plus a buffer) exist in the DOM. `toHaveRowCount`, `toHaveRows` and `toJson()` only see rendered rows, so scroll a row into view (or filter the grid) before asserting on it, and find rows by their content rather than by `rowAt()`.
+
+A row without header cells that shares its `aria-rowindex` with a header row (such as the header row of an empty pinned container) belongs to the header, not to the body.
+
+### Shadow DOM
+
+Like Playwright locators, `TableLocator` looks inside open shadow roots. Web component tables work with the custom element as the root, also when the table sits in a shadow root inside another shadow root:
+
+```ts
+// <users-table id="users"> renders its <table> in an open shadow root
+const users = defineTable(page.locator("#users"), { headers: ["Name", "Status"] });
+await expect(users.row({ Name: "Jane" }).cell("Status")).toHaveText("Active");
+```
+
+- Rows and cells are found in the root's own shadow root and in every open shadow root inside it. A host's shadow content comes before its light DOM children.
+- Like Playwright CSS, a selector matches within one shadow tree: `thead>tr` does not match a `tr` whose `thead` is in another tree.
+- A table in the shadow root of a cell is content of that cell, just like a nested table.
+- Closed shadow roots can't be reached.
+- Cell text is read with `innerText` (or `textContent`), so text inside the shadow root of an element _in_ a cell depends on the browser, as with `PlaywrightTable`.
+- With `aria: true`, the `:has()` in the default row selectors does not look into a row's own shadow root. Set `header.rowSelector` and `row.rowSelector` for grids whose rows render their cells in a shadow root.
 
 ### Header keys
 
@@ -159,10 +251,11 @@ Header keys are the same keys that `getJson()` produces:
 - Empty headers become `{{Empty}}`.
 - Headers carried down by `rowspan` keep their text.
 - The main header row is the last header row, unless `header.setMainHeaderRow` is set.
+- With `header: { stripIconGlyphs: true }`, icon font glyphs (Unicode private use characters, like the sort arrows of Material Icons or Font Awesome) are removed from header text first. A header that is only a glyph becomes `{{Empty}}`.
 
 Header arguments accept ``H | `${H}__C${number}` | `${H}__D${number}` ``, so `users.row({ Name__C1: "Doe" })` type-checks.
 
-If a header is unknown, the locator matches nothing and keeps waiting until the assertion times out. The error mentions the `pw-table` selector. For a clear failure up front, use `validateHeaders()` or the matchers below.
+If a header is unknown, the locator matches nothing and keeps waiting until the assertion times out. The error mentions the `pw-table-v1` selector. For a clear failure up front, use `validateHeaders()` or the matchers below.
 
 ### Cell conditions
 
@@ -183,11 +276,11 @@ Cell text is whitespace-collapsed and trimmed before it is compared. A condition
 | `{ anyOf: ["Active", /^pend/i] }`                                | matches at least one nested matcher         |
 | `{ allOf: [{ startsWith: "J" }, { not: { contains: "Doe" } }] }` | matches every nested matcher                |
 
-`predicate` runs **in the browser**, like a `page.evaluate` function. It is serialized with `toString()`, so it cannot use variables from your test. A predicate that throws counts as "no match".
+`predicate` runs **in the browser**, like a `page.evaluate` function. It is serialized with `toString()`, so it cannot use variables from your test. A predicate that throws (for example on a variable from your test), returns a promise or cannot be compiled fails the row, also inside `not`, `anyOf` or `allOf`, so a broken predicate never turns into a match. When `toHaveRow`, `toHaveCells` or `toHaveRows` fail, they report the predicate's error. Bound and built-in functions (`fn.bind(...)`, `Boolean`) have no source to send, so `row()` rejects them right away.
 
 `not`, `anyOf` and `allOf` take any matcher, including other combinators. `anyOf` and `allOf` need at least one matcher.
 
-The selector engine runs in an isolated world, so locators and predicates also work on pages whose CSP forbids `eval`. This is tested on Chromium, Firefox and WebKit.
+The selector engine runs in an isolated world, so locators, matchers and predicates also work on pages whose CSP forbids `eval`. This is tested on Chromium, Firefox and WebKit.
 
 ### Header validation
 
@@ -202,6 +295,32 @@ await users.validateHeaders(["Name"], { timeout: 10_000 });
 const keys = await users.headerKeys(); // ["Name", "State", "Email"]
 ```
 
+### Reading the whole table
+
+`toJson()` reads every body row as an object keyed by header key, like `PlaywrightTable.getJson()`. A cell spanning rows or columns is repeated in every position it covers, and cell text is whitespace-collapsed and trimmed, as in row conditions.
+
+```ts
+const data = await users.toJson();
+// [{ Name: "John", Status: "Active", Email: "john@example.com" }, ...]
+```
+
+By default `toJson()` is a snapshot: it doesn't wait for rows to load, and it throws if the table has no header row. Set `minRows` to wait first for a header row and at least that many body rows with content:
+
+```ts
+const data = await users.toJson({ minRows: 1 }); // waits up to 5s
+const page1 = await users.toJson({ minRows: 25, timeout: 10_000 });
+// On timeout: TableLocator.toJson() expected at least 25 body rows with content, found 3 (3 body rows in total).
+```
+
+A row has content when at least one of its cells has text, so empty skeleton rows don't count. A placeholder row with text, such as "Loading…", does count. For those tables, or tables that are still filling, assert on the content you expect first, then read:
+
+```ts
+await expect(users).toHaveRow({ Status: { oneOf: ["Active", "Inactive"] } });
+const data = await users.toJson();
+```
+
+To check the whole table, prefer `toHaveRows` (below), which retries until the rows match.
+
 ### Matchers
 
 The exported `expect` includes table matchers and a row matcher. They retry until the `expect` timeout and support `.not`:
@@ -213,12 +332,44 @@ await expect(users).toHaveRowCount(3);
 await expect(users).toHaveHeaders(["Name", "Email"]);
 await expect(users).toHaveHeaders(["Name", "Status", "Email"], { exact: true });
 
+// Exactly these rows, in order. Each row only checks the headers it mentions; {} matches any row.
+await expect(users).toHaveRows([
+	{ Name: "John", Status: "Active" },
+	{ Name: "Jane", Status: /inactive/i },
+	{ Name: "Joe" },
+]);
+await expect(users).toHaveRows([]); // the body is empty
+
 // Row matcher: the row locator must resolve to exactly one row, whose cells match every condition
 await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active", Email: /@example\.com$/ });
 await expect(users.rowAt(0)).not.toHaveCells({ Status: "Deleted" }); // the row exists, but doesn't match
 ```
 
-When `toHaveRow` or `toHaveCells` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers. When `toHaveCells` fails on a known header, the message shows the cells the row actually has.
+#### Sorting
+
+`toBeSortedBy` checks that the body rows are sorted by a column. It retries, so it waits for a sort that takes a server round trip. It checks the data itself, not the sort icon:
+
+```ts
+await users.header("Name").click();
+await expect(users).toBeSortedBy("Name"); // ascending, as text
+await expect(users).toBeSortedBy("Name", { order: "desc", ariaSort: true });
+await expect(users).toBeSortedBy("Salary", { type: "number" }); // "€ 1,200" is 1200
+await expect(users).toBeSortedBy("Joined", { type: "date" });
+await expect(users).toBeSortedBy("Priority", { compare: (a, b) => priorities.indexOf(a) - priorities.indexOf(b) });
+await expect(users).toBeSortedBy(2); // by column index, also in a table without header rows
+```
+
+| Option     | Default  | Description                                                                                                                                                                                  |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `order`    | `"asc"`  | `"asc"` or `"desc"`. Equal neighbours are fine in both.                                                                                                                                      |
+| `type`     | `"text"` | `"text"` compares case-insensitively, with digit runs as numbers (`"item 9"` before `"item 10"`). `"number"` takes the digits, `.` and `-` from the text. `"date"` parses with `Date.parse`. |
+| `compare`  |          | A custom comparison like `Array.sort` takes. It runs in Node, so it can use variables from your test. Overrides `type`.                                                                      |
+| `ariaSort` | `false`  | Also require `aria-sort="ascending"` or `"descending"` on the header cell.                                                                                                                   |
+| `timeout`  |          | Defaults to the `expect` timeout.                                                                                                                                                            |
+
+`type: "number"` only knows `.` as decimal separator. For numbers like `1.234,56`, pass a `compare`. An empty body, an unknown column or a value that is not a number or date fails the assertion, also with `.not`, so a table that hasn't loaded yet doesn't count as sorted. The failure message lists the column values and the first pair that is out of order.
+
+When `toHaveRow`, `toHaveRows` or `toHaveCells` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers. A condition on an unknown header can never be checked, so it fails with `.not` too: `.not` first waits for the headers, then asserts that no row matches. A typo in a negated assertion never passes silently. When `toHaveCells` fails on a known header, the message shows the cells the row actually has. When `toHaveRows` fails, the message shows the number of rows received and, for each row that doesn't match, the cells it actually has.
 
 Playwright's `expect.extend` cannot carry the table's header types into matcher arguments, so matcher conditions are checked at runtime. For compile-time checks, assert on `table.row({...}).locator` instead.
 
@@ -227,21 +378,21 @@ Playwright's `expect.extend` cannot carry the table's header types into matcher 
 The matchers are exported as `tableMatchers`, so you can combine them with your own:
 
 ```ts
-import { expect as base } from "@playwright/test";
 import { TableLocator, tableMatchers } from "@cerios/playwright-table";
+import { expect as base } from "@playwright/test";
 
 // Spread them into your own extend
 export const expect = base.extend({
 	...tableMatchers,
-	async toBeSortedBy(table: TableLocator, header: string) {
+	async toHaveEmailFor(table: TableLocator, name: string) {
 		/* ... */
 	},
 });
 ```
 
 ```ts
-import { mergeExpects } from "@playwright/test";
 import { expect as tableExpect } from "@cerios/playwright-table";
+import { mergeExpects } from "@playwright/test";
 
 // Or merge with another extended expect
 export const expect = mergeExpects(tableExpect, myExpect);
@@ -249,14 +400,30 @@ export const expect = mergeExpects(tableExpect, myExpect);
 
 ### `TableLocator` or `PlaywrightTable`?
 
-| Use                   | When                                                                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **`TableLocator`**    | Assertions and interactions on specific rows and cells. You get auto-waiting, retries, reorder-safe locators and typed headers. |
-| **`PlaywrightTable`** | Snapshots of the whole table: `getJson()`, `getDistinctColumnValues()`, bulk comparisons and data extraction.                   |
+| Use                   | When                                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **`TableLocator`**    | Assertions and interactions on rows, cells and the whole table. You get auto-waiting, retries, reorder-safe locators and typed headers. |
+| **`PlaywrightTable`** | Header parsing you configure yourself (`HeaderRowOptions`), all header rows (`getHeaderRows()`), and the polling `waitFor*` helpers.    |
 
 Both can be used on the same table.
 
 > **Note:** `PlaywrightTable` carries a `rowspan` header down only one header row. `TableLocator` uses a full grid, so a header spanning three or more header rows is carried all the way down. This only matters for headers that span three or more header rows.
+>
+> `TableLocator` also reads `th` cells in body rows and `td` cells in header rows, skips nested tables, and uses `aria-colindex`/`aria-rowindex`. On tables with any of these, `toJson()` and `getJson()` differ.
+
+### Common pitfalls
+
+| Pitfall                                                                           | Fix                                                                                                                                                                          |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hard-coded row or column numbers break when columns move or rows reorder.         | Find rows by content with `row({...})` and cells by header name. Use `rowAt()` only when the position is what you test.                                                      |
+| Reading the table, then asserting on the snapshot, is flaky.                      | Assert with retrying matchers (`toHaveRow`, `toHaveRows`, `toHaveCells`, `toBeSortedBy`, `expect(cell).toHaveText()`). Use `toJson()` only after one of them has passed.     |
+| Skeleton or "Loading…" rows make a table look loaded.                             | Assert on content you expect (`toHaveRow`), or use `toJson({ minRows })`. `toBeSortedBy` fails on an empty body.                                                             |
+| A sort test only checks the arrow icon or `aria-sort`.                            | `toBeSortedBy` checks the data; add `ariaSort: true` to check the header too.                                                                                                |
+| Numbers or dates sort as text (`"10"` before `"9"`, `"€ 950"` after `"€ 1,200"`). | Pass `type: "number"` or `type: "date"` to `toBeSortedBy`, or a `compare` for other formats.                                                                                 |
+| A row header (`<th scope="row">`) or a nested table shifts the columns.           | `TableLocator` handles both by default (see [Row headers and nested tables](#row-headers-and-nested-tables)).                                                                |
+| Data grids only render the rows and columns in view.                              | Use `aria: true`, scroll the row or column into view before asserting, and don't count rendered rows to get the total (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)). |
+| Icon fonts put invisible characters in header text.                               | Set `header: { stripIconGlyphs: true }`.                                                                                                                                     |
+| `row()` throws a strict mode violation.                                           | Several rows match. Add a condition, or pick one with `first()`, `last()` or `nth()`.                                                                                        |
 
 ---
 
@@ -408,10 +575,12 @@ Header sanitization options (`normalizeWhitespace`, `stripIconGlyphs`) can be us
 
 Gets a Playwright Locator for a specific cell by row and column indices (0-based).
 
+Both indices are positions in the DOM: `headerPosition` counts the cells of the row, so in a row with `colspan` or `rowspan` it can differ from the column under a header. The methods that find cells by header name (`getBodyCellLocatorByRowConditions`, `getAllBodyCellLocatorsByHeaderName`, `getAllBodyCellLocatorsByHeaderIndex`) account for spans: a cell that spans rows is located in the row it starts in.
+
 **Parameters:**
 
 - `rowNumber: number` - Row index (0-based)
-- `headerPosition: number` - Column index (0-based)
+- `headerPosition: number` - Cell index within the row (0-based)
 
 **Returns:** `Locator` - Playwright locator for the cell
 

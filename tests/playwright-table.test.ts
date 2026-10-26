@@ -5,6 +5,13 @@ import { TableBody } from "src/table-body";
 
 import { Route } from "./demo-html/routes";
 
+/** The item at `index`, failing the test if there is none. */
+function at<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) throw new Error(`No item at index ${index}, got ${items.length} items`);
+	return item;
+}
+
 test.describe("Table Tests", () => {
 	test("getMainHeaderRow returns headers used for table", async ({ page }) => {
 		await page.goto(Route.SimpleTable);
@@ -65,7 +72,7 @@ test.describe("Table Tests", () => {
 		expect(mainHeader).toEqual(["Account name", "Phone number"]);
 	});
 
-	test.describe("getBodyRows", async () => {
+	test.describe("getBodyRows", () => {
 		test("getBodyRows returns body rows", async ({ page }) => {
 			await page.goto(Route.SimpleTable);
 
@@ -136,7 +143,7 @@ test.describe("Table Tests", () => {
 		});
 	});
 
-	test.describe("getJson", async () => {
+	test.describe("getJson", () => {
 		test("getJson returns json", async ({ page }) => {
 			await page.goto(Route.SimpleTable);
 
@@ -244,7 +251,7 @@ test.describe("Table Tests", () => {
 			await expect(table.getJson()).rejects.toThrowError("No body rows found");
 		});
 
-		test.describe("options.bodyRowOptions.cellContentType", async () => {
+		test.describe("options.bodyRowOptions.cellContentType", () => {
 			for (const testCase of [
 				{
 					description: "CellContentType.TextContent return the raw text content of the cell",
@@ -384,6 +391,29 @@ test.describe("Table Tests", () => {
 		const cellLocator = table.getBodyCellLocator(0, 1);
 		await cellLocator.locator("input[type='button']").click();
 		expect(await table.getBodyRows()).toHaveLength(2);
+	});
+
+	test("cell locators by header follow rowspan to the cell it starts in", async ({ page }) => {
+		await page.goto(Route.RowspanRowTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const holiday = await table.getBodyCellLocatorByRowConditions({ Month: "February" }, "Savings for holiday!");
+		await expect(holiday).toHaveText("50");
+
+		const column = await table.getAllBodyCellLocatorsByHeaderName("Savings for holiday!");
+		await expect(at(column, 0)).toHaveText("50");
+		await expect(at(column, 1)).toHaveText("50");
+	});
+
+	test("cell locators by header account for colspan", async ({ page }) => {
+		await page.goto(Route.ColspanRowTable);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		const price = await table.getBodyCellLocatorByRowConditions({ Item: "Total" }, "Price");
+		await expect(price).toHaveText("8000");
+
+		const byIndex = await table.getAllBodyCellLocatorsByHeaderIndex(2);
+		await expect(at(byIndex, 2)).toHaveText("8000");
 	});
 
 	test("getBodyCellLocatorByRowConditions returns locator", async ({ page }) => {
@@ -568,8 +598,8 @@ test.describe("Table Tests", () => {
 		const locators = await table.getAllBodyCellLocatorsByHeaderName("{{Empty}}__D1");
 
 		expect(locators).toHaveLength(2);
-		await expect(locators[0]).toHaveText("Empty 1_2");
-		await expect(locators[1]).toHaveText("Empty 2_2");
+		await expect(at(locators, 0)).toHaveText("Empty 1_2");
+		await expect(at(locators, 1)).toHaveText("Empty 2_2");
 	});
 
 	test("getAllBodyCellLocatorsByHeaderName normalizes line-ending headers when requested", async ({ page }) => {
@@ -604,8 +634,8 @@ test.describe("Table Tests", () => {
 		});
 
 		expect(locators).toHaveLength(2);
-		await expect(locators[0]).toHaveText("+31612345678");
-		await expect(locators[1]).toHaveText("+441234567890");
+		await expect(at(locators, 0)).toHaveText("+31612345678");
+		await expect(at(locators, 1)).toHaveText("+441234567890");
 	});
 
 	test("getAllBodyCellLocatorsByHeaderIndex returns locators", async ({ page }) => {

@@ -1,11 +1,20 @@
-import { test as base, selectors as defaultSelectors, Selectors } from "@playwright/test";
+import {
+	test as base,
+	selectors as defaultSelectors,
+	PlaywrightTestArgs,
+	PlaywrightTestOptions,
+	PlaywrightWorkerArgs,
+	PlaywrightWorkerOptions,
+	Selectors,
+	TestType,
+} from "@playwright/test";
 
 import { TABLE_SELECTOR_ENGINE_NAME, tableSelectorEngine } from "./table-selector-engine";
 
 const registrations = new WeakMap<Selectors, Promise<void>>();
 
 /**
- * Registers the `pw-table` selector engine used by {@link TableLocator}.
+ * Registers the `pw-table-v1` selector engine used by {@link TableLocator}.
  *
  * Safe to call more than once: later calls reuse the first registration, and an
  * "already registered" error (for example from another copy of this package) is ignored.
@@ -53,7 +62,7 @@ export function registerTableSelectors(target: Selectors = defaultSelectors): Pr
 }
 
 /**
- * Playwright `test` with the `pw-table` selector engine registered for every worker, so
+ * Playwright `test` with the `pw-table-v1` selector engine registered for every worker, so
  * {@link TableLocator} works without any setup. Use it instead of `test` from `@playwright/test`.
  *
  * The engine is registered by a worker-scoped auto fixture, so it is always registered before
@@ -67,7 +76,10 @@ export function registerTableSelectors(target: Selectors = defaultSelectors): Pr
  *   await expect(users.row({ Name: "John" }).cell("Status")).toHaveText("Active");
  * });
  */
-export const test = base.extend<{}, { _pwTableSelectors: void }>({
+export const test: TestType<
+	PlaywrightTestArgs & PlaywrightTestOptions,
+	PlaywrightWorkerArgs & PlaywrightWorkerOptions & { _pwTableSelectors: void }
+> = base.extend<{}, { _pwTableSelectors: void }>({
 	_pwTableSelectors: [
 		async ({ playwright }, use) => {
 			await registerTableSelectors(playwright.selectors);

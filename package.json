@@ -35,33 +35,37 @@
 	"scripts": {
 		"test": "playwright test",
 		"prepare": "husky",
-		"build": "tsup",
+		"build": "tsdown",
 		"serve": "serve tests/demo-html -p 3000",
 		"check-exports": "attw --pack .",
 		"changeset": "npx changeset",
 		"changeset:version": "changeset version && npm i",
 		"changeset:publish": "changeset publish",
-		"compile": "tsc --noEmit",
+		"compile": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json",
 		"update-all-packages": "npx npm-check-updates -u && npm i",
-		"lint": "oxlint",
-		"lint:fix": "oxlint --fix",
+		"lint": "oxlint --type-aware --type-check",
+		"lint:fix": "oxlint --type-aware --type-check --fix",
 		"format": "oxfmt",
 		"format:check": "oxfmt --check"
 	},
 	"devDependencies": {
-		"@arethetypeswrong/cli": "^0.18.1",
-		"@changesets/cli": "^2.29.4",
-		"@playwright/test": "^1.52.0",
+		"@arethetypeswrong/cli": "^0.18.5",
+		"@changesets/cli": "^3.0.3",
+		"@playwright/test": "^1.64.1",
+		"@types/node": "^24.19.2",
 		"husky": "^9.1.7",
-		"lint-staged": "^16.1.0",
-		"oxfmt": "^0.26.0",
-		"oxlint": "^1.41.0",
-		"serve": "^14.2.4",
-		"ts-node": "^10.9.2",
-		"tsup": "^8.5.0",
-		"typescript": "^5.8.3"
+		"lint-staged": "^17.6.0",
+		"oxfmt": "^0.74.0",
+		"oxlint": "^1.89.0",
+		"oxlint-tsgolint": "^7.0.2005",
+		"serve": "^14.2.6",
+		"tsdown": "^0.23.2",
+		"typescript": "^7.0.2"
 	},
 	"peerDependencies": {
-		"@playwright/test": "^1.40.0"
+		"@playwright/test": "^1.45.0"
+	},
+	"overrides": {
+		"compression": "^1.8.2"
 	}
 }

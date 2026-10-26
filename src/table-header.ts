@@ -67,28 +67,39 @@ export class TableHeader {
 
 		const locatorDescription = headerRowLocator.toString();
 		const options = this.getDefaultOptions(headerRowOptions);
-		const rows = await headerRowLocator.all();
+		const rowsCount = await headerRowLocator.count();
+		const rowError = (rowIndex: number, error: unknown): Error =>
+			new Error(
+				`Failed to process header row at index ${rowIndex}.\n` +
+					`Header row locator: ${locatorDescription}\n` +
+					`Columns selector: "${columnsSelector}"\n` +
+					`Error: ${error instanceof Error ? error.message : String(error)}`
+			);
+
+		// Read every row in parallel, one round trip each; the spans are resolved afterwards, in order.
+		const cellData = await Promise.all(
+			Array.from({ length: rowsCount }, async (_, rowIndex) => {
+				try {
+					const cells = await TableUtils.readRowCells(
+						headerRowLocator.nth(rowIndex),
+						columnsSelector,
+						options.cellContentType
+					);
+					return cells.map(cell => ({
+						text: this.sanitizeHeaderText(cell.content, options.normalizeWhitespace, options.stripIconGlyphs),
+						rowspan: cell.rowspan,
+						colspan: cell.colspan,
+					}));
+				} catch (error) {
+					throw rowError(rowIndex, error);
+				}
+			})
+		);
 
 		const headerRows: HeaderRow[] = [];
-
-		if (rows.length === 0) {
-			return headerRows;
-		}
-
 		const rowSpans: Map<number, string> = new Map();
-
-		for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-			try {
-				const headerRow = await this.processRow(rows[rowIndex], columnsSelector, rowSpans, options);
-				headerRows.push(headerRow);
-			} catch (error) {
-				throw new Error(
-					`Failed to process header row at index ${rowIndex}.\n` +
-						`Header row locator: ${locatorDescription}\n` +
-						`Columns selector: "${columnsSelector}"\n` +
-						`Error: ${error instanceof Error ? error.message : String(error)}`
-				);
-			}
+		for (const cells of cellData) {
+			headerRows.push(this.processRow(cells, rowSpans, options));
 		}
 
 		this.applyColspanOptions(headerRows, options);
@@ -97,43 +108,36 @@ export class TableHeader {
 		return headerRows;
 	}
 
-	private static getDefaultOptions(options?: HeaderRowOptions): Required<HeaderRowOptions> {
+	private static getDefaultOptions(options: HeaderRowOptions = {}): Required<HeaderRowOptions> {
+		const colspan = options.colspan ?? {};
 		return {
-			cellContentType: options?.cellContentType ?? CellContentType.InnerText,
-			emptyCellReplacement: options?.emptyCellReplacement ?? false,
-			duplicateSuffix: options?.duplicateSuffix ?? false,
-			normalizeWhitespace: options?.normalizeWhitespace ?? false,
-			stripIconGlyphs: options?.stripIconGlyphs ?? false,
+			cellContentType: options.cellContentType ?? CellContentType.InnerText,
+			emptyCellReplacement: options.emptyCellReplacement ?? false,
+			duplicateSuffix: options.duplicateSuffix ?? false,
+			normalizeWhitespace: options.normalizeWhitespace ?? false,
+			stripIconGlyphs: options.stripIconGlyphs ?? false,
 			colspan: {
-				enabled: options?.colspan?.enabled ?? false,
-				suffix: options?.colspan?.suffix ?? false,
+				enabled: colspan.enabled ?? false,
+				suffix: colspan.suffix ?? false,
 			},
 		};
 	}
 
-	private static async processRow(
-		row: Locator,
-		columnsSelector: string,
+	private static processRow(
+		cellDataArray: { text: string; rowspan: number; colspan: number }[],
 		rowSpans: Map<number, string>,
 		options: Required<HeaderRowOptions>
-	): Promise<HeaderRow> {
+	): HeaderRow {
 		const headerRow: HeaderRow = [];
-		const cells = await row.locator(columnsSelector).all();
 
-		if (cells.length === 0) {
+		if (cellDataArray.length === 0) {
 			return headerRow;
 		}
 
-		const cellDataArray = await Promise.all(
-			cells.map(cell =>
-				this.fetchHeaderCellData(cell, options.cellContentType, options.normalizeWhitespace, options.stripIconGlyphs)
-			)
-		);
-
 		let columnIndex = 0;
-		for (let i = 0; i < cellDataArray.length; i++) {
+		for (const cellData of cellDataArray) {
 			columnIndex = this.processHeaderCellData(
-				cellDataArray[i],
+				cellData,
 				headerRow,
 				rowSpans,
 				columnIndex,
@@ -143,28 +147,6 @@ export class TableHeader {
 
 		this.addRemainingRowSpans(headerRow, rowSpans, columnIndex);
 		return headerRow;
-	}
-
-	/**
-	 * Fetches header cell content and span attributes in parallel.
-	 * This method performs DOM operations that can be parallelized across multiple cells.
-	 */
-	private static async fetchHeaderCellData(
-		cell: Locator,
-		cellContentType: CellContentType,
-		normalizeWhitespace: boolean,
-		stripIconGlyphs: boolean
-	): Promise<{ text: string; rowspan: number; colspan: number }> {
-		const [text, spanAttributes] = await Promise.all([
-			TableUtils.getCellContent(cell, cellContentType),
-			TableUtils.parseSpanAttributes(cell),
-		]);
-
-		return {
-			text: this.sanitizeHeaderText(text, normalizeWhitespace, stripIconGlyphs),
-			rowspan: spanAttributes.rowspan,
-			colspan: spanAttributes.colspan,
-		};
 	}
 
 	private static sanitizeHeaderText(text: string, normalizeWhitespace: boolean, stripIconGlyphs: boolean): string {
@@ -251,16 +233,16 @@ export class TableHeader {
 	}
 
 	private static removeColspanCells(headerRows: HeaderRow[]): void {
-		for (let i = 0; i < headerRows.length; i++) {
-			headerRows[i] = headerRows[i].filter(cell => !this.COLSPAN_PATTERN.test(cell));
+		for (const [i, headerRow] of headerRows.entries()) {
+			headerRows[i] = headerRow.filter(cell => !this.COLSPAN_PATTERN.test(cell));
 		}
 	}
 
 	private static removeColspanSuffix(headerRows: HeaderRow[]): void {
 		for (const headerRow of headerRows) {
-			for (let i = 0; i < headerRow.length; i++) {
-				if (this.COLSPAN_PATTERN.test(headerRow[i])) {
-					headerRow[i] = headerRow[i].replace(this.COLSPAN_PATTERN, "");
+			for (const [i, header] of headerRow.entries()) {
+				if (this.COLSPAN_PATTERN.test(header)) {
+					headerRow[i] = header.replace(this.COLSPAN_PATTERN, "");
 				}
 			}
 		}
@@ -271,8 +253,7 @@ export class TableHeader {
 
 		for (const headerRow of headerRows) {
 			const headerCountMap: Map<string, number> = new Map();
-			for (let i = 0; i < headerRow.length; i++) {
-				const header = headerRow[i];
+			for (const [i, header] of headerRow.entries()) {
 				const currentCount = headerCountMap.get(header);
 				if (currentCount !== undefined) {
 					headerRow[i] = `${header}${this.DUPLICATE_SUFFIX_PREFIX}${currentCount}`;

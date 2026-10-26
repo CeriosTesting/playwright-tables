@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>ARIA grid with pinned and virtualized columns</title>
+		<style>
+			[role="grid"] {
+				display: grid;
+				grid-template-columns: auto 1fr;
+				width: 50%;
+				border: 1px solid black;
+			}
+
+			[role="row"] {
+				display: flex;
+				height: 30px;
+			}
+
+			[role="columnheader"],
+			[role="gridcell"] {
+				width: 100px;
+				padding: 5px;
+				border: 1px solid #aaaaaa;
+			}
+
+			[role="columnheader"] {
+				font-weight: bold;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>ARIA grid with pinned and virtualized columns</h2>
+		<p>
+			Like AG Grid: the pinned "Id" column lives in its own containers, so every row is split over several elements that
+			share an <code>aria-rowindex</code>. The pinned-right container has no columns, so its rows are empty. Rows are
+			not in visual order in the DOM, and only some columns are rendered.
+		</p>
+		<button id="ScrollRight" onclick="scrollRight()">Scroll right</button>
+
+		<div id="Grid" role="grid" aria-rowcount="4" aria-colcount="4">
+			<div class="pinned-left">
+				<div role="rowgroup" class="header">
+					<div role="row" aria-rowindex="1">
+						<div role="columnheader" aria-colindex="1">Id</div>
+					</div>
+				</div>
+				<div role="rowgroup" class="body">
+					<div role="row" aria-rowindex="3">
+						<div role="gridcell" aria-colindex="1">2</div>
+					</div>
+					<div role="row" aria-rowindex="2">
+						<div role="gridcell" aria-colindex="1">1</div>
+					</div>
+					<div role="row" aria-rowindex="4">
+						<div role="gridcell" aria-colindex="1">3</div>
+					</div>
+				</div>
+			</div>
+			<div class="center">
+				<div role="rowgroup" class="header">
+					<div role="row" aria-rowindex="1" id="CenterHeader"></div>
+				</div>
+				<div role="rowgroup" class="body" id="CenterBody"></div>
+			</div>
+			<!-- An empty pinned-right container: its rows have no cells, but share the aria-rowindex of real rows -->
+			<div class="pinned-right">
+				<div role="rowgroup" class="header">
+					<div role="row" aria-rowindex="1"></div>
+				</div>
+				<div role="rowgroup" class="body">
+					<div role="row" aria-rowindex="2"></div>
+					<div role="row" aria-rowindex="3"></div>
+					<div role="row" aria-rowindex="4"></div>
+				</div>
+			</div>
+		</div>
+
+		<script>
+			const columns = [
+				{ colindex: 2, header: "Name", values: ["John", "Jane", "Joe"] },
+				{ colindex: 3, header: "Status", values: ["Active", "Inactive", "Active"] },
+				{ colindex: 4, header: "Email", values: ["john@example.com", "jane@example.com", "joe@example.com"] },
+			];
+			// Rows in DOM order, by aria-rowindex
+			const rowOrder = [4, 2, 3];
+
+			// Renders only the columns in the "viewport", like column virtualization
+			function render(visible) {
+				const header = document.getElementById("CenterHeader");
+				header.innerHTML = "";
+				const body = document.getElementById("CenterBody");
+				body.innerHTML = "";
+				const shown = columns.filter(column => visible.includes(column.colindex));
+				for (const column of shown) {
+					const cell = document.createElement("div");
+					cell.setAttribute("role", "columnheader");
+					cell.setAttribute("aria-colindex", String(column.colindex));
+					cell.textContent = column.header;
+					header.appendChild(cell);
+				}
+				for (const rowindex of rowOrder) {
+					const row = document.createElement("div");
+					row.setAttribute("role", "row");
+					row.setAttribute("aria-rowindex", String(rowindex));
+					for (const column of shown) {
+						const cell = document.createElement("div");
+						cell.setAttribute("role", "gridcell");
+						cell.setAttribute("aria-colindex", String(column.colindex));
+						cell.textContent = column.values[rowindex - 2];
+						row.appendChild(cell);
+					}
+					body.appendChild(row);
+				}
+			}
+
+			function scrollRight() {
+				setTimeout(() => render([3, 4]), 200);
+			}
+
+			render([2, 3]);
+		</script>
+	</body>
+</html>
