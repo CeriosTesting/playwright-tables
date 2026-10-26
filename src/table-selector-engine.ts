@@ -10,12 +10,16 @@ import type {
 	EngineMatchResult,
 	EngineMatrixRequest,
 	EngineMatrixResult,
+	EngineTotal,
+	EngineTotalRequest,
 	EngineQuery,
 	EngineTextRequest,
 	EngineTexts,
 	EngineTextsRequest,
 	EngineValues,
 	EngineValuesRequest,
+	EngineWindow,
+	EngineWindowRequest,
 	SelectorEngine,
 	SerializedMatcher,
 	SerializedWhere,
@@ -66,6 +70,8 @@ export function tableSelectorEngine(root: Element, request: EngineFindRequest): 
 export function tableSelectorEngine(root: Element, request: EngineTextRequest): string;
 export function tableSelectorEngine(root: Element, request: EngineFingerprintRequest): EngineFingerprint;
 export function tableSelectorEngine(root: Element, request: EngineMatrixRequest): EngineMatrixResult;
+export function tableSelectorEngine(root: Element, request: EngineWindowRequest): EngineWindow;
+export function tableSelectorEngine(root: Element, request: EngineTotalRequest): EngineTotal;
 export function tableSelectorEngine(
 	root?: Element,
 	request?:
@@ -77,6 +83,8 @@ export function tableSelectorEngine(
 		| EngineTextRequest
 		| EngineFingerprintRequest
 		| EngineMatrixRequest
+		| EngineWindowRequest
+		| EngineTotalRequest
 ):
 	| SelectorEngine
 	| string[]
@@ -86,7 +94,9 @@ export function tableSelectorEngine(
 	| EngineValues
 	| EngineFindResult
 	| EngineFingerprint
-	| EngineMatrixResult {
+	| EngineMatrixResult
+	| EngineWindow
+	| EngineTotal {
 	type GridCell = { el: Element; rowOffset: number; colOffset: number };
 	/** One row of the visual grid. Positions without a cell are holes. */
 	type GridLine = (GridCell | undefined)[];
@@ -102,6 +112,8 @@ export function tableSelectorEngine(
 		headerCell: string;
 		bodyRow: string;
 		bodyCell: string;
+		/** Footer row selector, or `""` for none. */
+		footerRow: string;
 		mainHeaderRow: number | null;
 		textContent: boolean;
 		/** Selector of the elements inside a cell whose text is left out, or `""` for none. */
@@ -121,6 +133,8 @@ export function tableSelectorEngine(
 		headerCells: (Element | undefined)[];
 		/** The body rows, read on first use: header-only reads don't need them. */
 		body: () => TableBody;
+		/** The footer rows, read on first use. */
+		footer: () => TableBody;
 		/** Normalized body cell texts, by cell. */
 		texts: Map<Element, string>;
 		/** Raw body cell texts, by cell. */
@@ -172,6 +186,7 @@ export function tableSelectorEngine(
 		headerCell: "th, td",
 		bodyRow: "tbody>tr:not(" + TBODY_HEADER_ROW + ")",
 		bodyCell: "td, th",
+		footerRow: "tfoot>tr",
 	};
 	// Default selectors for ARIA grids (`role="grid"`, `"treegrid"` or `"table"` built from other elements).
 	const ARIA_SELECTORS = {
@@ -179,6 +194,7 @@ export function tableSelectorEngine(
 		headerCell: "[role=columnheader]",
 		bodyRow: "[role=row]:not(:has([role=columnheader]))",
 		bodyCell: "[role=gridcell], [role=cell], [role=rowheader]",
+		footerRow: "",
 	};
 
 	// Models are cached for the duration of one synchronous selector evaluation. The DOM cannot change
@@ -216,6 +232,7 @@ export function tableSelectorEngine(
 			headerCell: cfg.headerCell ?? defaults.headerCell,
 			bodyRow: cfg.bodyRow ?? defaults.bodyRow,
 			bodyCell: cfg.bodyCell ?? defaults.bodyCell,
+			footerRow: cfg.footerRow ?? defaults.footerRow,
 			mainHeaderRow: cfg.mainHeaderRow ?? null,
 			textContent: cfg.textContent === 1,
 			ignore: (cfg.ignore ?? DEFAULT_IGNORE).join(", "),
@@ -652,6 +669,7 @@ export function tableSelectorEngine(
 			if (key !== null) headerIndexes.add(key);
 		}
 		let body: TableBody | null = null;
+		let footer: TableBody | null = null;
 		return {
 			hasHeader: headerRows.length > 0,
 			keys: headerKeys(mainLine, cfg),
@@ -659,7 +677,10 @@ export function tableSelectorEngine(
 				return cell === undefined ? undefined : cell.el;
 			}),
 			body: function (): TableBody {
-				return (body ??= buildBody(scope, cfg, headerIndexes, deep));
+				return (body ??= buildBody(scope, cfg, cfg.bodyRow, headerIndexes, deep));
+			},
+			footer: function (): TableBody {
+				return (footer ??= buildBody(scope, cfg, cfg.footerRow, headerIndexes, deep));
 			},
 			texts: new Map(),
 			raws: new Map(),
@@ -667,9 +688,17 @@ export function tableSelectorEngine(
 		};
 	}
 
-	function buildBody(scope: Node & ParentNode, cfg: Config, headerIndexes: Set<string>, deep: boolean): TableBody {
+	/** The body rows of the table, or with the footer row selector, its footer rows. */
+	function buildBody(
+		scope: Node & ParentNode,
+		cfg: Config,
+		rowSelector: string,
+		headerIndexes: Set<string>,
+		deep: boolean
+	): TableBody {
+		if (rowSelector === "") return { rows: [], rowOf: new Map(), grid: [] };
 		const anyCell = cfg.headerCell + "," + cfg.bodyCell;
-		const groups = groupRows(ownRows(scope, cfg.bodyRow, anyCell, deep)).filter(function (group) {
+		const groups = groupRows(ownRows(scope, rowSelector, anyCell, deep)).filter(function (group) {
 			const key = group[0].getAttribute("aria-rowindex");
 			return key === null || !headerIndexes.has(key);
 		});
@@ -989,7 +1018,7 @@ export function tableSelectorEngine(
 		while (ancestor !== null) {
 			if ((byIndex && fallback === null) || hasHeaderRow(ancestor, headerRow)) {
 				const model = getModel(ancestor, query.cfg);
-				if (model !== null && model.body().rowOf.has(row)) {
+				if (model !== null && (model.body().rowOf.has(row) || model.footer().rowOf.has(row))) {
 					const cell = cellAt(model, row, query.header);
 					if (model.hasHeader && (cell.length > 0 || !splittable)) return cell;
 					if (!model.hasHeader && fallback === null) fallback = cell;
@@ -1001,7 +1030,7 @@ export function tableSelectorEngine(
 	}
 
 	function cellAt(model: TableModel, row: Element, header: string | number): Element[] {
-		const body = model.body();
+		const body = model.body().rowOf.has(row) ? model.body() : model.footer();
 		const rowIndex = body.rowOf.get(row);
 		const column = columnOf(model, header);
 		const cell = rowIndex === undefined || column === -1 ? undefined : body.grid[rowIndex]?.[column];
@@ -1019,11 +1048,17 @@ export function tableSelectorEngine(
 		const column = columnOf(model, query.header);
 		if (column === -1) return [];
 		const cells: Element[] = [];
-		for (const line of model.body().grid) {
+		const lines = query.f === 1 ? model.body().grid.concat(model.footer().grid) : model.body().grid;
+		for (const line of lines) {
 			const cell = line[column];
 			if (cell !== undefined) cells.push(cell.el);
 		}
 		return unique(cells);
+	}
+
+	function queryFooter(root: Node, query: Extract<EngineQuery, { op: "footer" }>): Element[] {
+		const model = getModel(root, query.cfg);
+		return model === null ? [] : model.footer().rows;
 	}
 
 	function queryHeader(root: Node, query: Extract<EngineQuery, { op: "header" }>): Element[] {
@@ -1068,6 +1103,58 @@ export function tableSelectorEngine(
 			hash = Math.imul(hash, 0x01000193);
 		}
 		return { rows: texts.rows.length, hash: (hash >>> 0).toString(16) + ":" + data.length };
+	}
+
+	/** Attributes that identify a row in virtualized grids, in the order they are tried. */
+	const ROW_KEY_ATTRIBUTES = ["aria-rowindex", "row-index", "data-rowindex", "data-index", "data-id"];
+
+	/**
+	 * The body rows in view, with a key per row: the `rowKey` attribute, or the first of the default key
+	 * attributes, or else the normalized cell texts.
+	 */
+	function readWindow(model: TableModel, request: EngineWindowRequest): EngineWindow {
+		const texts = readTexts(model, request.raw === true, request.columns);
+		let all: string[][] | null = null;
+		const names = request.rowKey === undefined ? ROW_KEY_ATTRIBUTES : [request.rowKey];
+		const rows = model.body().rows.map(function (row, r) {
+			let attribute: string | null = null;
+			for (const name of names) {
+				attribute = nonEmpty(row.getAttribute(name));
+				if (attribute !== null) break;
+			}
+			const cells = texts.rows[r] ?? [];
+			if (attribute === null) {
+				all ??= readTexts(model, false).rows;
+				return { key: "text:" + JSON.stringify(all[r] ?? []), index: null, texts: cells };
+			}
+			const index = Number(attribute);
+			return { key: attribute, index: isFinite(index) ? index : null, texts: cells };
+		});
+		return { keys: texts.keys, rows: rows };
+	}
+
+	/**
+	 * The `aria-rowcount` of the grid (on `root`, inside it, or around it), and the number of rows it counts
+	 * that are not body rows: the other rows of the grid, by `aria-rowindex` when they have one.
+	 */
+	function readTotal(root: Element, model: TableModel): EngineTotal {
+		const body = model.body();
+		const holder = root.hasAttribute("aria-rowcount")
+			? root
+			: (root.querySelector("[aria-rowcount]") ?? root.closest("[aria-rowcount]"));
+		const count = holder === null ? NaN : parseInt(holder.getAttribute("aria-rowcount") ?? "", 10);
+		const scope = holder !== null && holder.contains(root) ? holder : root;
+		const anyCell = model.cfg.headerCell + "," + model.cfg.bodyCell;
+		const others = new Set<string>();
+		ownRows(scope, "[role=row], tr", anyCell, hasShadowHost(scope)).forEach(function (row, i) {
+			if (body.rowOf.has(row)) return;
+			others.add(row.getAttribute("aria-rowindex") ?? "row " + i);
+		});
+		return {
+			ariaRowCount: isNaN(count) || count < 0 ? null : count,
+			otherRows: others.size,
+			bodyRows: body.rows.length,
+		};
 	}
 
 	/**
@@ -1158,6 +1245,8 @@ export function tableSelectorEngine(
 					return queryColumn(root, query);
 				case "header":
 					return queryHeader(root, query);
+				case "footer":
+					return queryFooter(root, query);
 				default:
 					return [];
 			}
@@ -1169,13 +1258,19 @@ export function tableSelectorEngine(
 	/** Answers a request that reads the table. */
 	function read(
 		model: TableModel | null,
-		request: EngineKeysRequest | EngineTextsRequest | EngineValuesRequest | EngineFingerprintRequest
-	): string[] | EngineTexts | EngineValues | EngineFingerprint {
+		request:
+			| EngineKeysRequest
+			| EngineTextsRequest
+			| EngineValuesRequest
+			| EngineFingerprintRequest
+			| EngineWindowRequest
+	): string[] | EngineTexts | EngineValues | EngineFingerprint | EngineWindow {
 		if (request.op === "keys") return model === null ? [] : model.keys;
 		if (request.op === "texts") {
 			return model === null ? { keys: [], rows: [] } : readTexts(model, request.raw === true, request.columns);
 		}
 		if (request.op === "values") return model === null ? { keys: [], values: null } : readValues(model, request.column);
+		if (request.op === "window") return model === null ? { keys: [], rows: [] } : readWindow(model, request);
 		return model === null ? { rows: 0, hash: "" } : fingerprint(model);
 	}
 
@@ -1199,6 +1294,10 @@ export function tableSelectorEngine(
 	if (root !== undefined && request !== undefined) {
 		const cfg = resolveConfig(request.cfg);
 		if (request.op === "text") return normalizeCell(readText(root, cfg));
+		if (request.op === "total") {
+			const totalModel = buildModel(root, cfg);
+			return totalModel === null ? { ariaRowCount: null, otherRows: 0, bodyRows: 0 } : readTotal(root, totalModel);
+		}
 		const model = buildModel(root, cfg);
 		if (request.op === "find" || request.op === "match" || request.op === "matrix") return match(model, request);
 		return read(model, request);
@@ -1281,6 +1380,22 @@ export const readTableFingerprint: (root: Element, request: EngineFingerprintReq
  */
 export const matchTableMatrix: (root: Element, request: EngineMatrixRequest) => EngineMatrixResult =
 	tableSelectorEngine;
+
+/**
+ * The engine function typed for its "window" mode, for use with `locator.evaluate`.
+ * Same function object as {@link tableSelectorEngine}.
+ *
+ * @internal
+ */
+export const readTableWindow: (root: Element, request: EngineWindowRequest) => EngineWindow = tableSelectorEngine;
+
+/**
+ * The engine function typed for its "total" mode, for use with `locator.evaluate`.
+ * Same function object as {@link tableSelectorEngine}.
+ *
+ * @internal
+ */
+export const readTableTotal: (root: Element, request: EngineTotalRequest) => EngineTotal = tableSelectorEngine;
 
 const engine = tableSelectorEngine();
 

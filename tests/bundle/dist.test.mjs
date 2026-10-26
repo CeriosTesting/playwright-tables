@@ -1,6 +1,6 @@
 // Runs against the built ES module bundle (`npm run build` first) to prove the selector engine
 // survives bundling. Plain JS so `tsc` does not need `dist/` to exist.
-import { defineTable, expect, TableLocator, tableMatchers, test } from "../../dist/index.mjs";
+import { defineTable, expect, presets, TableLocator, tableMatchers, test } from "../../dist/index.mjs";
 
 test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async ({ page }) => {
 	expect(typeof TableLocator).toBe("function");
@@ -14,6 +14,9 @@ test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async 
 		"toHaveHeaders",
 		"toHaveCells",
 		"toBeSortedBy",
+		"toHaveTotalRowCount",
+		"toBeSelected",
+		"toBeExpanded",
 	]);
 
 	await page.goto("/combined-span-table");
@@ -30,6 +33,8 @@ test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async 
 	await expect(table).toContainRows([{ Q4: { gt: 700 } }, { Region: "North" }]);
 	await expect(table).toHaveColumnValues("Region", ["East", "North", "South"], { anyOrder: true });
 	await table.waitForStable({ quiet: 100 });
+	expect(await table.totalRowCount()).toBe(3);
+	await expect(table.footer.locator).toHaveCount(0);
 	await expect(table.rows.last().cell("Q4")).toHaveText("800");
 	expect((await table.toJson())[1]).toEqual({
 		Region: "South",
@@ -51,4 +56,12 @@ test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async 
 	const sortable = defineTable(page.locator("#SortableTable"));
 	await sortable.header("Salary").click();
 	await expect(sortable).toBeSortedBy("Salary", { type: "number", ariaSort: true });
+
+	// Scrolling runs a function in the page, which must survive bundling too
+	await page.goto("/ag-grid");
+	const cars = defineTable(page.locator("#cars"), presets.agGrid());
+	const car = await cars.findRow({ Model: "Model 150" });
+	await expect(car.cell("Id")).toHaveText("150");
+	await car.select();
+	await expect(car).toBeSelected();
 });

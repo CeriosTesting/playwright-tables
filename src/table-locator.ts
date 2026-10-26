@@ -3,20 +3,26 @@ import { Locator } from "@playwright/test";
 import { CellContentType } from "./cell-content-type";
 import { describeWhere, serializeWhere } from "./cell-matcher-serializer";
 import { describeLastError, MIN_READ_TIMEOUT, pollUntil } from "./polling";
+import { formatRows } from "./table-format";
 import {
 	ColumnKey,
 	ColumnParser,
 	ColumnParsers,
 	DecimalSeparator,
 	EngineConfig,
+	EngineFindRequest,
 	EngineFingerprint,
 	EngineFingerprintRequest,
 	EngineKeysRequest,
 	EngineQuery,
 	EngineTexts,
 	EngineTextsRequest,
+	EngineTotalRequest,
 	EngineValuesRequest,
+	EngineWindowRequest,
 	HeaderKey,
+	LocatorRef,
+	NavigationOptions,
 	RowWhere,
 	StableOptions,
 	TableJsonOptions,
@@ -24,7 +30,9 @@ import {
 	TableLocatorOptions,
 	ValidRowWhere,
 } from "./table-locator.types";
+import { NavigationHost, NavigationPosition, resolveRef, TableNavigator } from "./table-navigation";
 import {
+	findTableRows,
 	normalizeCell,
 	normalizeLine,
 	parseNumber,
@@ -32,6 +40,8 @@ import {
 	readTableFingerprint,
 	readTableHeaderKeys,
 	readTableTexts,
+	readTableTotal,
+	readTableWindow,
 	TABLE_SELECTOR_ENGINE_NAME,
 } from "./table-selector-engine";
 import { TableUtils } from "./table-utils";
@@ -131,6 +141,243 @@ export class TableRow<H extends string = string> {
 		const description = `${this.locator.toString()}.filter(${describeFilter(options)})`;
 		return new TableRow(this.table, described(this.locator.filter(options), description));
 	}
+
+	/**
+	 * Fills the controls in the cells of this row, one column after the other. A boolean checks or unchecks
+	 * a checkbox or switch; a string selects an option of a `<select>`, or fills an input, a text area or
+	 * an editable element.
+	 *
+	 * A cell without a control is edited in place, as data grids do: it is double-clicked, the editor that
+	 * appears in the cell is filled, and `commit` is pressed. Editors that open outside the cell (a popup)
+	 * are not found.
+	 *
+	 * Columns are filled in the order of `values`. When the row is found by the value of a column you fill,
+	 * fill that column last: after it changes, the row no longer matches.
+	 *
+	 * @param values - The value per column.
+	 * @param options - Optional settings.
+	 * @param options.commit - (Optional) The key that ends in-place editing. Defaults to `"Enter"`; `false` presses nothing.
+	 * @param options.timeout - (Optional) The time per action, in milliseconds. Defaults to 5000.
+	 * @throws Error if a cell has no control, also not after a double-click.
+	 *
+	 * @example
+	 * await users.row({ Name: "John" }).fill({ Email: "john@example.org", Active: false, Role: "Admin" });
+	 */
+	async fill(
+		values: { [K in HeaderKey<H>]?: string | boolean },
+		options?: { commit?: string | false; timeout?: number }
+	): Promise<void> {
+		const entries: [string, string | boolean | undefined][] = Object.entries(values);
+		for (const [column, value] of entries) {
+			if (value !== undefined) await fillCell(this.cell(column as HeaderKey<H>), column, value, options);
+		}
+	}
+
+	/**
+	 * Selects this row: checks the checkbox in the row, or clicks the row if it has none, and waits until
+	 * the row is selected (see {@link isSelected}). A selected row is left as it is.
+	 *
+	 * @param options - Optional timeout, in milliseconds. Defaults to 5000.
+	 * @throws Error if the row is not selected within the timeout.
+	 *
+	 * @example
+	 * await users.row({ Name: "John" }).select();
+	 * await expect(users.row({ Name: "John" })).toBeSelected();
+	 */
+	async select(options?: { timeout?: number }): Promise<void> {
+		await this.setSelected(true, options?.timeout ?? 5_000);
+	}
+
+	/**
+	 * Deselects this row: unchecks the checkbox in the row, or clicks the row if it has none, and waits
+	 * until the row is not selected. A row that is not selected is left as it is.
+	 *
+	 * @param options - Optional timeout, in milliseconds. Defaults to 5000.
+	 * @throws Error if the row is still selected after the timeout.
+	 */
+	async deselect(options?: { timeout?: number }): Promise<void> {
+		await this.setSelected(false, options?.timeout ?? 5_000);
+	}
+
+	/**
+	 * Whether this row is selected: it has `aria-selected="true"`, or the first checkbox in it is checked.
+	 * Reads the row once; for a retrying check, use `expect(row).toBeSelected()`.
+	 *
+	 * @param options - Optional timeout for finding the row, in milliseconds.
+	 * @returns A promise that resolves to whether the row is selected.
+	 */
+	async isSelected(options?: { timeout?: number }): Promise<boolean> {
+		return this.locator.evaluate(readSelected, undefined, options);
+	}
+
+	/**
+	 * Expands this row of a tree grid, and waits until it is expanded. An expanded row is left as it is.
+	 * It clicks `toggle`, or else the first element in the row with `aria-expanded`, or else the first
+	 * button in the row. Without any of them, it focuses the row and presses `ArrowRight`, as tree grids do.
+	 *
+	 * @param options - Optional settings.
+	 * @param options.toggle - (Optional) The control that expands and collapses the row, from the row locator.
+	 * @param options.timeout - (Optional) The time to wait, in milliseconds. Defaults to 5000.
+	 * @throws Error if the row has no `aria-expanded` (on the row or an element in it), or doesn't expand.
+	 *
+	 * @example
+	 * await files.row({ Name: "src" }).expand();
+	 * await expect(files.row({ Name: "index.ts" }).locator).toBeVisible();
+	 */
+	async expand(options?: { toggle?: (row: Locator) => Locator; timeout?: number }): Promise<void> {
+		await this.setExpanded(true, options);
+	}
+
+	/**
+	 * Collapses this row of a tree grid, like {@link expand} does, but with `ArrowLeft` as the fallback.
+	 *
+	 * @throws Error if the row has no `aria-expanded` (on the row or an element in it), or doesn't collapse.
+	 */
+	async collapse(options?: { toggle?: (row: Locator) => Locator; timeout?: number }): Promise<void> {
+		await this.setExpanded(false, options);
+	}
+
+	/**
+	 * Whether this row is expanded: the `aria-expanded` of the row, or else of the first element in it that
+	 * has one. `null` if there is none, for a row that cannot expand.
+	 *
+	 * @returns A promise that resolves to `true`, `false` or `null`.
+	 */
+	async isExpanded(options?: { timeout?: number }): Promise<boolean | null> {
+		return this.locator.evaluate(readExpanded, undefined, options);
+	}
+
+	/**
+	 * The `aria-level` of this row in a tree grid (1 for the top level), or `null` if it has none.
+	 *
+	 * @example
+	 * expect(await files.row({ Name: "index.ts" }).level()).toBe(2);
+	 */
+	async level(options?: { timeout?: number }): Promise<number | null> {
+		const level = await this.locator.getAttribute("aria-level", options);
+		const value = level === null ? NaN : parseInt(level, 10);
+		return isNaN(value) ? null : value;
+	}
+
+	private async setSelected(selected: boolean, timeout: number): Promise<void> {
+		const deadline = Date.now() + timeout;
+		if ((await this.isSelected({ timeout })) === selected) return;
+		const checkbox = this.locator.locator(CHECKBOX).first();
+		if ((await checkbox.count()) > 0) {
+			await checkbox.setChecked(selected, { timeout });
+		} else {
+			await this.locator.click({ timeout });
+		}
+		const poll = await pollUntil(
+			readTimeout => this.isSelected({ timeout: readTimeout }),
+			value => value === selected,
+			!selected,
+			deadline
+		);
+		if (poll.value !== selected) {
+			throw new Error(
+				`TableRow.${selected ? "select" : "deselect"}() timed out: the row is ${selected ? "not " : ""}selected.\n` +
+					describeLastError(poll.error) +
+					`Row locator: ${this.locator.toString()}`
+			);
+		}
+	}
+
+	private async setExpanded(
+		expanded: boolean,
+		options: { toggle?: (row: Locator) => Locator; timeout?: number } | undefined
+	): Promise<void> {
+		const timeout = options?.timeout ?? 5_000;
+		const deadline = Date.now() + timeout;
+		const name = expanded ? "expand" : "collapse";
+		const state = await this.isExpanded({ timeout });
+		if (state === null) {
+			throw new Error(
+				`TableRow.${name}(): the row has no aria-expanded, so it cannot expand or collapse.\n` +
+					`Row locator: ${this.locator.toString()}`
+			);
+		}
+		if (state === expanded) return;
+		const toggle =
+			options?.toggle?.(this.locator) ??
+			this.locator.locator("[aria-expanded]").or(this.locator.locator("button, [role=button]")).first();
+		if ((await toggle.count()) > 0) {
+			await toggle.click({ timeout });
+		} else {
+			await this.locator.focus({ timeout });
+			await this.locator.press(expanded ? "ArrowRight" : "ArrowLeft", { timeout });
+		}
+		const poll = await pollUntil(
+			readTimeout => this.isExpanded({ timeout: readTimeout }),
+			value => value === expanded,
+			state,
+			deadline
+		);
+		if (poll.value !== expanded) {
+			throw new Error(
+				`TableRow.${name}() timed out: the row is ${expanded ? "still collapsed" : "still expanded"}.\n` +
+					describeLastError(poll.error) +
+					`Row locator: ${this.locator.toString()}`
+			);
+		}
+	}
+}
+
+/** The checkboxes that select a row. */
+const CHECKBOX = "input[type=checkbox], [role=checkbox]";
+
+/** The controls {@link TableRow.fill} fills. */
+const CONTROLS =
+	"input:not([type=hidden]), textarea, select, [contenteditable=''], [contenteditable='true'], " +
+	"[role=checkbox], [role=switch], [role=textbox], [role=combobox]";
+
+/** Whether a row element is selected. Runs in the browser. */
+function readSelected(row: Element): boolean {
+	if (row.getAttribute("aria-selected") === "true") return true;
+	const box = row.querySelector("input[type=checkbox], [role=checkbox]");
+	if (box === null) return false;
+	if (box instanceof HTMLInputElement) return box.checked;
+	return box.getAttribute("aria-checked") === "true";
+}
+
+/** Whether a row element is expanded, or `null` if it has no `aria-expanded`. Runs in the browser. */
+function readExpanded(row: Element): boolean | null {
+	const value =
+		row.getAttribute("aria-expanded") ?? row.querySelector("[aria-expanded]")?.getAttribute("aria-expanded");
+	return value === null || value === undefined ? null : value === "true";
+}
+
+/** Fills the control in `cell`, after double-clicking the cell if it has none. */
+async function fillCell(
+	cell: Locator,
+	column: string,
+	value: string | boolean,
+	options: { commit?: string | false; timeout?: number } | undefined
+): Promise<void> {
+	const timeout = options?.timeout ?? 5_000;
+	const control = cell.locator(CONTROLS).first();
+	let editing = false;
+	if ((await control.count()) === 0) {
+		await cell.dblclick({ timeout });
+		editing = true;
+		try {
+			await control.waitFor({ state: "visible", timeout });
+		} catch {
+			throw new Error(
+				`TableRow.fill(): the cell under "${column}" has no input, also not after a double-click.\n` +
+					`Cell locator: ${cell.toString()}`
+			);
+		}
+	}
+	if (typeof value === "boolean") {
+		await control.setChecked(value, { timeout });
+	} else if (await control.evaluate(element => element.localName === "select", undefined, { timeout })) {
+		await control.selectOption(value, { timeout });
+	} else {
+		await control.fill(value, { timeout });
+	}
+	const commit = options?.commit ?? "Enter";
+	if (editing && commit !== false) await control.press(commit, { timeout });
 }
 
 /**
@@ -161,6 +408,9 @@ export class TableLocator<const H extends string = string> {
 	readonly root: Locator;
 	private readonly _config: EngineConfig;
 	private readonly _headers: readonly H[] | undefined;
+	private readonly _loading: Locator | undefined;
+	private readonly _navigator: TableNavigator;
+	private readonly _rowKey: string | undefined;
 
 	/**
 	 * Creates a table with customizable selectors for headers and rows.
@@ -180,6 +430,10 @@ export class TableLocator<const H extends string = string> {
 	 * @param options.row.columnSelector - (Optional) CSS selector for body cells. Defaults to `"td, th"`.
 	 * @param options.cellContentType - (Optional) How cell text is read. Defaults to `InnerText`.
 	 * @param options.ignore - (Optional) CSS selectors of elements inside cells whose text is left out. Defaults to {@link DEFAULT_IGNORE}.
+	 * @param options.footer.rowSelector - (Optional) CSS selector for footer rows. Defaults to `"tfoot>tr"`, or none with `aria`.
+	 * @param options.paginate - (Optional) How to go to the next page, see {@link PaginateOptions}.
+	 * @param options.scroll - (Optional) How to scroll a virtualized grid, see {@link ScrollOptions}.
+	 * @param options.loading - (Optional) The loading indicator of the table.
 	 *
 	 * @example
 	 * // Typed headers: header arguments are checked at compile time
@@ -200,6 +454,27 @@ export class TableLocator<const H extends string = string> {
 		this.root = root;
 		this._headers = options?.headers;
 		this._config = resolveEngineConfig(options);
+		this._loading = options?.loading === undefined ? undefined : resolveRef(options.loading, root);
+		const host: NavigationHost = {
+			root,
+			loading: this._loading,
+			fingerprint: timeout => this.fingerprint(timeout),
+			waitForStable: stable => this.waitForStable(stable),
+		};
+		this._navigator = new TableNavigator(host, options?.paginate, options?.scroll);
+		this._rowKey = options?.scroll?.rowKey;
+	}
+
+	/**
+	 * The footer rows of the table, such as a totals row, with typed cell access. Footer rows are not body
+	 * rows: `rows`, `row()`, `toJson()` and the matchers leave them out.
+	 *
+	 * @example
+	 * await expect(orders.footer.cell("Total")).toHaveText("€ 1,295.75");
+	 */
+	get footer(): TableRow<H> {
+		const rows = this.root.locator(this.selector({ op: "footer", cfg: this._config }));
+		return new TableRow(this, described(rows, `${this.root.toString()}.footer`));
 	}
 
 	/**
@@ -236,6 +511,11 @@ export class TableLocator<const H extends string = string> {
 	 * await table.row({ Name: { startsWith: "Jo" }, Remarks: { empty: true } }).cell("Actions").click();
 	 */
 	row<W extends RowWhere<H>>(where: W & ValidRowWhere<H, W>): TableRow<H> {
+		return this.matchingRows(where);
+	}
+
+	/** {@link row}, without the compile-time checks of the conditions. */
+	private matchingRows(where: RowWhere<string>): TableRow<H> {
 		const conditions = serializeWhere(where);
 		if (conditions.length === 0) {
 			throw new Error(`TableLocator.row() requires at least one condition.\nTable locator: ${this.root.toString()}`);
@@ -280,7 +560,7 @@ export class TableLocator<const H extends string = string> {
 		// be in. Intersecting with this table's column keeps it from resolving through another table.
 		const cell = row
 			.locator(this.selector({ op: "cell", cfg: this._config, header }))
-			.and(this.root.locator(this.selector({ op: "column", cfg: this._config, header })));
+			.and(this.root.locator(this.selector({ op: "column", cfg: this._config, header, f: 1 })));
 		return described(cell, `${row.toString()}.cell(${JSON.stringify(column)})`);
 	}
 
@@ -442,7 +722,7 @@ export class TableLocator<const H extends string = string> {
 	 * @param options - Optional settings. See {@link StableOptions}.
 	 * @param options.quiet - (Optional) How long nothing may change, in milliseconds. Defaults to 500.
 	 * @param options.timeout - (Optional) The time to wait in milliseconds. Defaults to 5000.
-	 * @param options.loading - (Optional) A loading indicator that must be hidden.
+	 * @param options.loading - (Optional) A loading indicator that must be hidden. Defaults to the `loading` option of the table.
 	 * @returns A promise that resolves once the table is stable.
 	 * @throws Error if the table is not stable within the timeout: it kept changing, the loading indicator
 	 *   stayed visible, or the table could not be read.
@@ -458,7 +738,7 @@ export class TableLocator<const H extends string = string> {
 		if (!(quiet >= 0) || !Number.isFinite(quiet)) {
 			throw new Error(`quiet must be a non-negative number, got: ${quiet}`);
 		}
-		const loading = options?.loading;
+		const loading = this.resolveLoading(options?.loading);
 		const request: EngineFingerprintRequest = { op: "fingerprint", cfg: this._config };
 		const deadline = Date.now() + timeout;
 		const state: StableState = { last: undefined, since: Date.now(), changes: 0, rows: undefined, busy: false };
@@ -488,6 +768,107 @@ export class TableLocator<const H extends string = string> {
 				describeLastError(error) +
 				`Table locator: ${this.root.toString()}`
 		);
+	}
+
+	/**
+	 * Finds a body row on any page or scroll position: it searches the rows in view, then (with the
+	 * `paginate` and `scroll` options) goes through the pages from the first one (with `paginate.first`)
+	 * and scrolls each page from the top, until a row matches. The table is left showing that row, and the
+	 * returned row locator resolves to it.
+	 *
+	 * Without `paginate` and `scroll`, it waits until a row in view matches, like a locator.
+	 *
+	 * @param where - At least one condition, as for {@link row}.
+	 * @param options - Optional timeout for the whole search, in milliseconds. Defaults to 30000.
+	 * @returns A promise that resolves to the {@link TableRow} for `row(where)`.
+	 * @throws Error if no row matches on any page, with the number of pages and scroll steps searched.
+	 *
+	 * @example
+	 * const orders = defineTable(page.getByRole("grid"), {
+	 *   aria: true,
+	 *   paginate: { next: page.getByRole("button", { name: "Next page" }) },
+	 * });
+	 * const row = await orders.findRow({ Id: "1042" });
+	 * await row.cell("Status").click();
+	 */
+	async findRow<W extends RowWhere<H>>(
+		where: W & ValidRowWhere<H, W>,
+		options?: NavigationOptions
+	): Promise<TableRow<H>> {
+		const row = this.matchingRows(where);
+		const request: EngineFindRequest = { op: "find", cfg: this._config, where: serializeWhere(where) };
+		const timeout = options?.timeout ?? 30_000;
+		const deadline = Date.now() + timeout;
+		const matches = async (readTimeout: number): Promise<boolean> =>
+			(await this.root.evaluate(findTableRows, request, { timeout: readTimeout })).matches > 0;
+
+		const now = await pollUntil(
+			matches,
+			found => found || this._navigator.active,
+			false,
+			this._navigator.active ? Date.now() : deadline
+		);
+		if (now.value) return row;
+		let last: NavigationPosition = { page: 0, step: 0 };
+		if (this._navigator.active) {
+			for await (const position of this._navigator.positions(deadline)) {
+				last = position;
+				if (await matches(Math.max(MIN_READ_TIMEOUT, deadline - Date.now()))) return row;
+				if (Date.now() >= deadline) break;
+			}
+		}
+		throw new Error(
+			`TableLocator.findRow() found no row matching ${describeWhere(where)}` +
+				(this._navigator.active ? ` on ${last.page + 1} pages (${last.step} scroll steps on the last page)` : "") +
+				`.\n` +
+				describeLastError(now.error) +
+				`Table locator: ${this.root.toString()}\n` +
+				`Timeout: ${timeout}ms`
+		);
+	}
+
+	/**
+	 * The number of body rows in the whole table, also the rows that are not rendered or are on other pages.
+	 *
+	 * - A grid with `aria-rowcount` (on the root, inside it or around it) declares it: `aria-rowcount` minus
+	 *   the rows it counts that are not body rows, such as header rows.
+	 * - Otherwise, with the `paginate` or `scroll` option, every row is read, as `toJson({ allRows: true })` does.
+	 * - Otherwise, the number of body rows.
+	 *
+	 * @param options - Optional timeout, in milliseconds. Defaults to 30000.
+	 * @returns A promise that resolves to the number of body rows.
+	 *
+	 * @example
+	 * expect(await grid.totalRowCount()).toBe(200);
+	 */
+	async totalRowCount(options?: NavigationOptions): Promise<number> {
+		const timeout = options?.timeout ?? 30_000;
+		const deadline = Date.now() + timeout;
+		const request: EngineTotalRequest = { op: "total", cfg: this._config };
+		const total = await this.root.evaluate(readTableTotal, request, { timeout });
+		if (total.ariaRowCount !== null) return Math.max(0, total.ariaRowCount - total.otherRows);
+		if (!this._navigator.active) return total.bodyRows;
+		return (await this.readAllTexts(false, undefined, deadline)).rows.length;
+	}
+
+	/**
+	 * The body rows in view as an aligned text table, with the row index in front, for logs and debugging.
+	 * Long cells are cut off.
+	 *
+	 * @param options - Optional settings.
+	 * @param options.columns - (Optional) Only these columns. Defaults to every column.
+	 * @param options.maxRows - (Optional) The most rows to show. Defaults to 50.
+	 * @returns A promise that resolves to the table as text.
+	 *
+	 * @example
+	 * console.log(await users.format());
+	 * //   # | Name | Status
+	 * //   0 | John | Active
+	 * //   1 | Jane | Inactive
+	 */
+	async format(options?: { columns?: readonly ColumnKey<H>[]; maxRows?: number; timeout?: number }): Promise<string> {
+		const texts = await this.readTexts(false, undefined, { timeout: options?.timeout });
+		return formatRows(texts, { columns: options?.columns, maxRows: options?.maxRows ?? 50 });
 	}
 
 	/**
@@ -538,28 +919,20 @@ export class TableLocator<const H extends string = string> {
 		options: TableJsonOptions<string, unknown>,
 		columns: readonly string[] | undefined
 	): Promise<EngineTexts> {
-		const minRows = options.minRows ?? 0;
-		if (minRows < 0 || !Number.isInteger(minRows)) {
-			throw new Error(`minRows must be a non-negative integer, got: ${minRows}`);
-		}
+		const minRows = checkMinRows(options.minRows);
 		const raw = options.raw === true;
+		// Each wait gets the whole timeout; reading all rows has its own, longer default.
 		const timeout = options.timeout ?? 5_000;
-		const deadline = Date.now() + timeout;
-		const stable = options.stable === undefined || options.stable === false ? undefined : options.stable;
+		const stable = options.stable === false ? undefined : options.stable;
 		let texts: EngineTexts | undefined;
 		if (minRows > 0) {
 			texts = await this.readTextsWithRows(minRows, timeout, raw, columns);
 		}
 		if (stable !== undefined) {
-			await this.waitForStable({
-				timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()),
-				...(stable === true ? {} : stable),
-			});
+			await this.waitForStable({ timeout, ...(stable === true ? {} : stable) });
 		}
 		if (texts === undefined || stable !== undefined) {
-			texts = await this.readTexts(raw, columns, {
-				timeout: stable === undefined ? options.timeout : MIN_READ_TIMEOUT,
-			});
+			texts = await this.readTexts(raw, columns, { timeout: stable === undefined ? options.timeout : timeout });
 		}
 		if (texts.keys.length === 0) {
 			const selector = this._config.headerRow;
@@ -569,7 +942,8 @@ export class TableLocator<const H extends string = string> {
 					`Table locator: ${this.root.toString()}`
 			);
 		}
-		return texts;
+		if (options.allRows !== true) return texts;
+		return this.readAllTexts(raw, columns, Date.now() + (options.timeout ?? 30_000));
 	}
 
 	/**
@@ -602,6 +976,68 @@ export class TableLocator<const H extends string = string> {
 					`Table locator: ${this.root.toString()}`
 			);
 		}
+	}
+
+	/** The loading indicator for `loading`, or else the `loading` option of the table. */
+	private resolveLoading(loading: LocatorRef | undefined): Locator | undefined {
+		return loading === undefined ? this._loading : resolveRef(loading, this.root);
+	}
+
+	/** A fingerprint of the header keys and body cell texts. */
+	private async fingerprint(timeout: number): Promise<string> {
+		const request: EngineFingerprintRequest = { op: "fingerprint", cfg: this._config };
+		const print = await this.root.evaluate(readTableFingerprint, request, { timeout });
+		return `${print.rows}|${print.hash}`;
+	}
+
+	/**
+	 * Reads every row on every page and scroll position. Rows are told apart by their key per page, and
+	 * ordered by their index when every row has one. Header keys are merged across positions, so a grid
+	 * that renders only some columns at a time still gets every column it showed.
+	 */
+	private async readAllTexts(
+		raw: boolean,
+		columns: readonly string[] | undefined,
+		deadline: number
+	): Promise<EngineTexts> {
+		const request: EngineWindowRequest = { op: "window", cfg: this._config };
+		if (raw) request.raw = true;
+		if (columns !== undefined) request.columns = [...columns];
+		if (this._rowKey !== undefined) request.rowKey = this._rowKey;
+
+		const keys: string[] = [];
+		const rows: Record<string, string>[] = [];
+		let page: Map<string, { index: number | null; cells: Record<string, string> }> = new Map();
+		let pageNumber = 0;
+		const flush = (): void => {
+			const entries = [...page.values()];
+			if (entries.every(entry => entry.index !== null)) {
+				entries.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+			}
+			rows.push(...entries.map(entry => entry.cells));
+			page = new Map();
+		};
+		for await (const position of this._navigator.positions(deadline)) {
+			if (position.page !== pageNumber) {
+				flush();
+				pageNumber = position.page;
+			}
+			const read = await this.root.evaluate(readTableWindow, request, {
+				timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()),
+			});
+			const names = columns ?? read.keys;
+			for (const key of read.keys) if (!keys.includes(key)) keys.push(key);
+			for (const row of read.rows) {
+				const cells = page.get(row.key)?.cells ?? {};
+				names.forEach((name, index) => {
+					cells[name] = row.texts[index] ?? "";
+				});
+				page.set(row.key, { index: row.index, cells });
+			}
+		}
+		flush();
+		const names = columns ?? keys;
+		return { keys, rows: rows.map(cells => names.map(name => cells[name] ?? "")) };
 	}
 
 	private readTexts(
@@ -689,6 +1125,7 @@ function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineC
 	if (header.setMainHeaderRow !== undefined) cfg.mainHeaderRow = header.setMainHeaderRow;
 	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
 	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
+	if (options.footer?.rowSelector !== undefined) cfg.footerRow = options.footer.rowSelector;
 	return cfg;
 }
 
@@ -724,6 +1161,15 @@ function describeUnstable(state: StableState, quiet: number): string {
 	if (state.busy) return "the loading indicator is still visible";
 	if (state.changes > 0) return `the table kept changing (${state.changes} changes seen)`;
 	return `it did not stay the same for ${quiet}ms`;
+}
+
+/** `minRows` of `toJson()`, checked. */
+function checkMinRows(minRows: number | undefined): number {
+	const value = minRows ?? 0;
+	if (value < 0 || !Number.isInteger(value)) {
+		throw new Error(`minRows must be a non-negative integer, got: ${value}`);
+	}
+	return value;
 }
 
 /** Whether any element of `locator` is visible. Doesn't wait, and works when it matches several elements. */

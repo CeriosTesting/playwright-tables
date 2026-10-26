@@ -12,6 +12,8 @@ export default defineConfig({
 	workers: process.env.CI ? 1 : undefined,
 	/* Reporter to use. See https://playwright.dev/docs/test-reporters */
 	reporter: "html",
+	/* Copies the grid libraries that demo pages load into tests/demo-html/vendor. */
+	globalSetup: "./tests/global-setup.ts",
 	/* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
 	use: {
 		/* Keep the trace of a failed test. See https://playwright.dev/docs/trace-viewer */
@@ -37,6 +39,7 @@ export default defineConfig({
 				"table-locator-text.test.ts",
 				"table-matchers.test.ts",
 				"table-data.test.ts",
+				"table-grids.test.ts",
 				"table-selector-engine.test.ts",
 			],
 		},
@@ -49,6 +52,7 @@ export default defineConfig({
 				"table-locator-text.test.ts",
 				"table-matchers.test.ts",
 				"table-data.test.ts",
+				"table-grids.test.ts",
 				"table-selector-engine.test.ts",
 			],
 		},

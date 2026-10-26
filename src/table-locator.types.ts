@@ -184,6 +184,30 @@ export type TableLocatorOptions<H extends string> = {
 		/** CSS selector for body cells. Defaults to `"td, th"`, so row header cells are columns too. */
 		columnSelector?: string;
 	};
+	footer?: {
+		/**
+		 * CSS selector for footer rows, such as a totals row. Their cells are found with `row.columnSelector`.
+		 * Defaults to `"tfoot>tr"`, or no footer rows with `aria: true`. Footer rows are not body rows.
+		 */
+		rowSelector?: string;
+	};
+	/**
+	 * How to go to the next page of a paginated table, so {@link TableLocator.findRow},
+	 * `toJson({ allRows: true })` and {@link TableLocator.totalRowCount} see every page.
+	 * See {@link PaginateOptions}.
+	 */
+	paginate?: PaginateOptions;
+	/**
+	 * How to scroll a virtualized grid (one that only renders the rows in view), so
+	 * {@link TableLocator.findRow}, `toJson({ allRows: true })` and {@link TableLocator.totalRowCount}
+	 * see every row. See {@link ScrollOptions}.
+	 */
+	scroll?: ScrollOptions;
+	/**
+	 * The loading indicator of the table, such as a spinner or an overlay. {@link TableLocator.waitForStable}
+	 * and the page and scroll navigation wait until it is hidden.
+	 */
+	loading?: LocatorRef;
 	/**
 	 * How cell text is read, for both header and body cells. Defaults to `InnerText`: the text as it is
 	 * shown, without hidden text and with CSS `text-transform`. `TextContent` reads all text in the DOM,
@@ -200,6 +224,77 @@ export type TableLocatorOptions<H extends string> = {
 	 * filtered.
 	 */
 	ignore?: readonly string[];
+};
+
+/**
+ * A Playwright `Locator`, or a function that finds it from the table root. A function lets an option point
+ * inside the table before the root is known, as the grid presets do.
+ *
+ * @example
+ * const next: LocatorRef = root => root.getByRole("button", { name: "Next page" });
+ */
+export type LocatorRef = Locator | ((root: Locator) => Locator);
+
+/**
+ * Options for the `paginate` option of {@link TableLocator}.
+ *
+ * @example
+ * defineTable(page.locator("#users"), {
+ *   paginate: { next: page.getByRole("button", { name: "Next" }), first: page.getByRole("button", { name: "First" }) },
+ * });
+ */
+export type PaginateOptions = {
+	/** The control that goes to the next page. */
+	next: LocatorRef;
+	/**
+	 * The control that goes to the first page. When set, navigation starts by clicking it (unless it is
+	 * disabled), so it always covers every page. Without it, navigation starts at the current page.
+	 */
+	first?: LocatorRef;
+	/**
+	 * Whether the table shows the last page. Defaults to: `next` is missing, hidden or disabled (with the
+	 * `disabled` attribute or `aria-disabled="true"`).
+	 */
+	isLastPage?: (next: Locator) => Promise<boolean>;
+	/** The most pages to visit. Defaults to 100. */
+	maxPages?: number;
+};
+
+/**
+ * Options for the `scroll` option of {@link TableLocator}.
+ *
+ * Navigation scrolls the container from the top to the bottom, one step at a time, and reads the rows in
+ * view after each step. Rows are told apart by their key, so a row seen twice is read once.
+ *
+ * @example
+ * defineTable(page.getByRole("grid"), { aria: true, scroll: { container: root => root.locator(".viewport") } });
+ */
+export type ScrollOptions = {
+	/** The element that scrolls. Defaults to the table root. */
+	container?: LocatorRef;
+	/** How far to scroll per step, in pixels. Defaults to 90% of the container height. */
+	step?: number;
+	/**
+	 * The attribute of a row element that identifies the row, such as `"data-id"`. Defaults to the first
+	 * of `aria-rowindex`, `row-index`, `data-rowindex`, `data-index` and `data-id` that the row has, or
+	 * else the text of its cells (so two rows with the same text are read once).
+	 */
+	rowKey?: string;
+	/**
+	 * How long the table must stay the same after a scroll before it is read, in
+	 * milliseconds. Defaults to 50; `0` reads the rows two animation frames after the scroll.
+	 */
+	settle?: number;
+	/** The most scroll steps per page. Defaults to 1000. */
+	maxSteps?: number;
+};
+
+/**
+ * Options for {@link TableLocator.findRow} and {@link TableLocator.totalRowCount}.
+ */
+export type NavigationOptions = {
+	/** The time for the whole search, in milliseconds. Defaults to 30000. */
+	timeout?: number;
 };
 
 /**
@@ -254,7 +349,7 @@ export type StableOptions = {
 	 * A loading indicator, such as a spinner or an overlay. The table is only stable while it is hidden
 	 * (not attached, or not visible), so a table that is about to refresh isn't read too early.
 	 */
-	loading?: Locator;
+	loading?: LocatorRef;
 };
 
 /**
@@ -285,13 +380,20 @@ export type TableJsonOptions<C extends string = string, P = {}> = {
 	 */
 	stable?: boolean | StableOptions;
 	/**
+	 * Read every row: on every page with the `paginate` option, and from top to bottom with the `scroll`
+	 * option of the table. `minRows` and `stable` apply to the first view. Defaults to `false`: the rows the
+	 * table shows now.
+	 */
+	allRows?: boolean;
+	/**
 	 * Wait for a header row and at least this many body rows with content (a row where at least one cell
 	 * has text) before reading. Defaults to `0`: read once, without waiting.
 	 */
 	minRows?: number;
 	/**
-	 * With `minRows`, the time to wait in milliseconds. Defaults to 5000.
-	 * Without it, the time to wait for the table element to be attached.
+	 * With `minRows` or `stable`, the time to wait in milliseconds (default 5000). With `allRows`, the time
+	 * for the whole read, pages and scrolling included (default 30000). Without any of them, the time to
+	 * wait for the table element to be attached.
 	 */
 	timeout?: number;
 	/**
@@ -330,6 +432,8 @@ export type EngineConfig = {
 	headerCell?: string;
 	bodyRow?: string;
 	bodyCell?: string;
+	/** Footer row selector, or `""` for none. Defaults to `"tfoot>tr"`, or none for ARIA. */
+	footerRow?: string;
 	/** Index of the main header row. Defaults to the last header row. */
 	mainHeaderRow?: number;
 	/** Read text with `textContent` instead of `innerText`. */
@@ -353,7 +457,9 @@ export type EngineQuery =
 	| { op: "rows"; cfg: EngineConfig }
 	| { op: "row"; cfg: EngineConfig; where: SerializedWhere }
 	| { op: "cell"; cfg: EngineConfig; header: string | number }
-	| { op: "column"; cfg: EngineConfig; header: string | number }
+	// `f: 1` also finds the cells of footer rows.
+	| { op: "column"; cfg: EngineConfig; header: string | number; f?: 1 }
+	| { op: "footer"; cfg: EngineConfig }
 	| { op: "header"; cfg: EngineConfig; header: string | number };
 
 /**
@@ -384,6 +490,41 @@ export type EngineTextsRequest = {
  * @internal
  */
 export type EngineFingerprintRequest = { op: "fingerprint"; cfg: EngineConfig };
+
+/**
+ * Argument for evaluating the engine function directly to read the body rows in view with a key per row,
+ * so rows read at several scroll positions can be told apart. `rowKey` is the attribute that identifies a
+ * row; without it, the first of the default key attributes is used, or the cell texts.
+ * @internal
+ */
+export type EngineWindowRequest = {
+	op: "window";
+	cfg: EngineConfig;
+	raw?: true;
+	columns?: string[];
+	rowKey?: string;
+};
+
+/**
+ * Result of an {@link EngineWindowRequest}. `index` is the key as a number when it is one, to order rows.
+ * @internal
+ */
+export type EngineWindow = { keys: string[]; rows: { key: string; index: number | null; texts: string[] }[] };
+
+/**
+ * Argument for evaluating the engine function directly to read the total number of rows a grid declares.
+ * @internal
+ */
+export type EngineTotalRequest = { op: "total"; cfg: EngineConfig };
+
+/**
+ * Result of an {@link EngineTotalRequest}. `ariaRowCount` is the `aria-rowcount` of the grid (on the root,
+ * inside it, or around it), or `null` if there is none or it is `-1`. `otherRows` is the number of rows
+ * that count in `aria-rowcount` but are not body rows, such as header rows. `bodyRows` is the number of
+ * body rows in the DOM.
+ * @internal
+ */
+export type EngineTotal = { ariaRowCount: number | null; otherRows: number; bodyRows: number };
 
 /**
  * Result of an {@link EngineFingerprintRequest}: the number of body rows, and a hash of the header keys

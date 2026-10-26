@@ -3,7 +3,7 @@
  * Every `@ts-expect-error` line must produce a type error, otherwise compilation fails.
  */
 import { Locator } from "@playwright/test";
-import { DEFAULT_IGNORE, defineTable, expect, HeaderKey, TableLocator, TableRow } from "src";
+import { DEFAULT_IGNORE, defineTable, expect, HeaderKey, presets, TableLocator, TableRow } from "src";
 
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 function assertType<T extends true>(value?: T): T | undefined {
@@ -244,4 +244,88 @@ export async function matcherTypeTests(root: Locator): Promise<void> {
 	await expect(users.rowAt(0)).toHaveEveryRow({ Name: "John" });
 	// Locator matchers keep working
 	await expect(users.rows.locator).toHaveCount(2);
+}
+
+export async function navigationTypeTests(root: Locator, page: { getByRole: Locator["getByRole"] }): Promise<void> {
+	// Presets spread into options and keep typed headers
+	const cars = defineTable(root, { ...presets.agGrid(), headers: ["Make", "Model"] });
+	assertType<Equals<typeof cars, TableLocator<"Make" | "Model">>>();
+	defineTable(root, presets.muiDataGrid());
+	defineTable(root, presets.angularMaterial({ paginator: root }));
+	defineTable(root, presets.tanstackVirtual({ container: root }));
+	// @ts-expect-error tanstackVirtual needs the scroll container
+	presets.tanstackVirtual();
+
+	// paginate, scroll and loading take locators or functions of the root
+	defineTable(root, {
+		paginate: { next: page.getByRole("button", { name: "Next" }), first: r => r.locator(".first"), maxPages: 5 },
+		scroll: { container: r => r.locator(".viewport"), step: 200, rowKey: "data-id", settle: 0 },
+		loading: r => r.getByRole("progressbar"),
+		footer: { rowSelector: "tfoot>tr" },
+	});
+	// @ts-expect-error next is required
+	defineTable(root, { paginate: {} });
+	// @ts-expect-error a locator or a function of the root
+	defineTable(root, { loading: ".spinner" });
+
+	// findRow takes typed conditions and returns a typed row
+	const row = await cars.findRow({ Model: "Model 1" }, { timeout: 10_000 });
+	assertType<Equals<typeof row, TableRow<"Make" | "Model">>>();
+	// @ts-expect-error unknown header
+	await cars.findRow({ Mdl: "Model 1" });
+	const total = await cars.totalRowCount();
+	assertType<Equals<typeof total, number>>();
+	const all = await cars.toJson({ allRows: true, columns: ["Model"] });
+	assertType<Equals<typeof all, { Model: string }[]>>();
+	cars.footer.cell("Make");
+	// @ts-expect-error unknown header
+	cars.footer.cell("Price");
+	const text = await cars.format({ columns: ["Make", 1], maxRows: 10 });
+	assertType<Equals<typeof text, string>>();
+
+	// Row interactions
+	await row.fill({ Make: "Ford", Model: true }, { commit: "Tab" });
+	// @ts-expect-error unknown header
+	await row.fill({ Price: "1" });
+	// @ts-expect-error values are strings or booleans
+	await row.fill({ Make: 1 });
+	await row.select();
+	await row.deselect({ timeout: 1_000 });
+	assertType<Equals<Awaited<ReturnType<typeof row.isSelected>>, boolean>>();
+	await row.expand({ toggle: r => r.getByRole("button") });
+	await row.collapse();
+	assertType<Equals<Awaited<ReturnType<typeof row.isExpanded>>, boolean | null>>();
+	assertType<Equals<Awaited<ReturnType<typeof row.level>>, number | null>>();
+
+	// Typed matchers: header keys are checked, also with .not and expect.soft
+	await expect(cars).toHaveTotalRowCount(200);
+	await expect(cars).toHaveRow({ Make: "Ford" });
+	await expect(cars).not.toHaveRow({ Make: { gt: 1 } });
+	await expect.soft(cars).toHaveEveryRow({ Model: /x/ });
+	await expect(cars).toHaveColumnValues(0, ["a"]);
+	await expect(cars).toBeSortedBy("Model", { order: "desc" });
+	// Headers that the table doesn't declare can be asserted absent
+	await expect(cars).not.toHaveHeaders(["Deleted"]);
+	// @ts-expect-error unknown header
+	await expect(cars).toHaveRow({ Mke: "Ford" });
+	// @ts-expect-error unknown header, also after .not
+	await expect(cars).not.toHaveRow({ Mke: "Ford" });
+	// @ts-expect-error unknown header, also with expect.soft
+	await expect.soft(cars).toHaveRow({ Mke: "Ford" });
+	// @ts-expect-error unknown header in a list of rows
+	await expect(cars).toHaveRows([{ Mke: "Ford" }]);
+	// @ts-expect-error unknown column
+	await expect(cars).toHaveColumnValues("Mke", []);
+	// @ts-expect-error unknown column
+	await expect(cars).toBeSortedBy("Price");
+	await expect(row).toHaveCells({ Make: "Ford" });
+	await expect(row).toBeSelected();
+	await expect(row).not.toBeExpanded({ timeout: 1_000 });
+	// @ts-expect-error unknown header
+	await expect(row).toHaveCells({ Mke: "Ford" });
+	// @ts-expect-error toBeSelected is a row matcher
+	await expect(cars).toBeSelected();
+	// Generic matchers stay available on tables and rows
+	expect(cars).toBeDefined();
+	expect(row).toBeTruthy();
 }

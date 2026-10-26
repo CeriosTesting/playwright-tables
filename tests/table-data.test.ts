@@ -1,5 +1,5 @@
 import { Page } from "@playwright/test";
-import { defineTable, expect, TableLocator, test } from "src";
+import { defineTable, expect, RowWhere, TableLocator, test } from "src";
 import { parseNumber } from "src/table-selector-engine";
 
 import { Route } from "./demo-html/routes";
@@ -110,7 +110,7 @@ test.describe("numbers", () => {
 		const prices = defineTable(page.locator("#prices"));
 
 		await expect(prices).toBeSortedBy("Price", { type: "number", decimal: "," });
-		const message = await errorMessage(() => expect(prices).toBeSortedBy("Price", { type: "number", timeout: 300 }));
+		const message = await errorMessage(() => expect(prices).toBeSortedBy("Price", { type: "number", timeout: 1_000 }));
 		expect(message).toContain('Received: row 0 ("9,99") is not a number');
 	});
 });
@@ -260,8 +260,8 @@ test.describe("waitForStable", () => {
 		const orders = defineTable(page.locator("#Orders"));
 		await page.locator("#tick").click();
 
-		const message = await errorMessage(() => orders.waitForStable({ quiet: 300, timeout: 1_000 }));
-		expect(message).toContain("TableLocator.waitForStable() timed out after 1000ms: the table kept changing");
+		const message = await errorMessage(() => orders.waitForStable({ quiet: 300, timeout: 2_000 }));
+		expect(message).toContain("TableLocator.waitForStable() timed out after 2000ms: the table kept changing");
 		expect(message).toContain("Body rows: 4");
 		expect(message).toContain("Table locator: locator('#Orders')");
 	});
@@ -281,7 +281,7 @@ test.describe("waitForStable", () => {
 		await page.setContent(ordersTable);
 		const missing = defineTable(page.locator("#missing"));
 
-		const message = await errorMessage(() => missing.waitForStable({ timeout: 300 }));
+		const message = await errorMessage(() => missing.waitForStable({ timeout: 1_000 }));
 		expect(message).toContain("the table could not be read");
 	});
 
@@ -313,7 +313,7 @@ test.describe("dataset matchers", () => {
 		const orders = await openOrders(page);
 
 		const message = await errorMessage(() =>
-			expect(orders).toContainRows([{ Customer: "Joe" }, { Customer: "Ghost", Status: "Active" }], { timeout: 300 })
+			expect(orders).toContainRows([{ Customer: "Joe" }, { Customer: "Ghost", Status: "Active" }], { timeout: 1_000 })
 		);
 		expect(message).toContain("Expected: body rows matching, in any order (other rows allowed)");
 		expect(message).toContain('No body row left for [1] { "Customer": "Ghost", "Status": "Active" }');
@@ -330,9 +330,11 @@ test.describe("dataset matchers", () => {
 	test("toContainRows fails on an unknown header, also with .not", async ({ page }) => {
 		const orders = await openOrders(page);
 
-		const message = await errorMessage(() => expect(orders).toContainRows([{ Custmer: "Joe" }], { timeout: 300 }));
+		// Untyped, like JavaScript callers: a typo is also checked at runtime
+		const typo: RowWhere<string>[] = [{ Custmer: "Joe" }];
+		const message = await errorMessage(() => expect(orders).toContainRows(typo, { timeout: 1_000 }));
 		expect(message).toContain('Header "Custmer" not found.');
-		const negated = await errorMessage(() => expect(orders).not.toContainRows([{ Custmer: "Joe" }], { timeout: 300 }));
+		const negated = await errorMessage(() => expect(orders).not.toContainRows(typo, { timeout: 1_000 }));
 		expect(negated).toContain('Header "Custmer" not found.');
 	});
 
@@ -345,7 +347,7 @@ test.describe("dataset matchers", () => {
 		await expect(orders).not.toHaveRows([{ Customer: "Joe" }, { Customer: "John" }], { anyOrder: true });
 
 		const message = await errorMessage(() =>
-			expect(orders).toHaveRows([{ Customer: "Joe" }, { Customer: "John" }], { anyOrder: true, timeout: 300 })
+			expect(orders).toHaveRows([{ Customer: "Joe" }, { Customer: "John" }], { anyOrder: true, timeout: 1_000 })
 		);
 		expect(message).toContain("Expected: 2 body rows matching, in any order");
 		expect(message).toContain("Received: 3 body rows");
@@ -357,7 +359,7 @@ test.describe("dataset matchers", () => {
 		await expect(orders).toHaveEveryRow({ Total: { gt: 0 } });
 		await expect(orders).not.toHaveEveryRow({ Status: "Active" });
 
-		const message = await errorMessage(() => expect(orders).toHaveEveryRow({ Status: "Active" }, { timeout: 300 }));
+		const message = await errorMessage(() => expect(orders).toHaveEveryRow({ Status: "Active" }, { timeout: 1_000 }));
 		expect(message).toContain('Expected: every body row matching { "Status": "Active" }');
 		expect(message).toContain("Received: 2 of 3 body rows match");
 		expect(message).toContain(["Body rows that do not match:", "  # | Status", "  1 | Inactive"].join("\n"));
@@ -376,10 +378,11 @@ test.describe("dataset matchers", () => {
 		await page.setContent(`<table id="t"><thead><tr><th>Name</th></tr></thead><tbody></tbody></table>`);
 		const table = defineTable(page.locator("#t"));
 
-		const message = await errorMessage(() => expect(table).toHaveEveryRow({ Name: "x" }, { timeout: 300 }));
+		const message = await errorMessage(() => expect(table).toHaveEveryRow({ Name: "x" }, { timeout: 1_000 }));
 		expect(message).toContain("Received: the table has no body rows");
-		const negated = await errorMessage(() => expect(table).not.toHaveEveryRow({ Name: "x" }, { timeout: 300 }));
+		const negated = await errorMessage(() => expect(table).not.toHaveEveryRow({ Name: "x" }, { timeout: 1_000 }));
 		expect(negated).toContain("Received: the table has no body rows");
+		// @ts-expect-error empty conditions, checked at runtime too
 		await expect(expect(table).toHaveEveryRow({})).rejects.toThrow("requires at least one condition");
 	});
 
@@ -402,7 +405,7 @@ test.describe("dataset matchers", () => {
 		const message = await errorMessage(() =>
 			expect(orders).toHaveColumnValues("Status", ["Inactive", "Inactive", "Active"], {
 				anyOrder: true,
-				timeout: 300,
+				timeout: 1_000,
 			})
 		);
 		expect(message).toContain(
@@ -416,7 +419,7 @@ test.describe("dataset matchers", () => {
 		const orders = await openOrders(page);
 
 		const message = await errorMessage(() =>
-			expect(orders).toHaveColumnValues("Status", ["Active", "Active"], { timeout: 300 })
+			expect(orders).toHaveColumnValues("Status", ["Active", "Active"], { timeout: 1_000 })
 		);
 		expect(message).toContain('Expected: column "Status" with 2 values: ["Active", "Active"]');
 		expect(message).toContain('Received: ["Active", "Inactive", "Active"]');
@@ -427,9 +430,10 @@ test.describe("dataset matchers", () => {
 	test("toHaveColumnValues fails on an unknown column, also with .not", async ({ page }) => {
 		const orders = await openOrders(page);
 
-		const header = await errorMessage(() => expect(orders).toHaveColumnValues("Stat", ["Active"], { timeout: 300 }));
+		// @ts-expect-error unknown header, checked at runtime too
+		const header = await errorMessage(() => expect(orders).toHaveColumnValues("Stat", ["Active"], { timeout: 1_000 }));
 		expect(header).toContain('Header "Stat" not found.');
-		const index = await errorMessage(() => expect(orders).not.toHaveColumnValues(7, ["Active"], { timeout: 300 }));
+		const index = await errorMessage(() => expect(orders).not.toHaveColumnValues(7, ["Active"], { timeout: 1_000 }));
 		expect(index).toContain("Column 7 does not exist.");
 		await expect(expect(orders).toHaveColumnValues(-1, [])).rejects.toThrow(
 			"Column index must be a non-negative integer"

@@ -1,10 +1,12 @@
-import { expect as baseExpect, Expect, ExpectMatcherState, Locator } from "@playwright/test";
+import { expect as baseExpect, Expect, ExpectMatcherState, Locator, test, TestInfo } from "@playwright/test";
 
 import { describeMatcher, describeWhere, serializeMatcher, serializeWhere } from "./cell-matcher-serializer";
 import { describeLastError, MIN_READ_TIMEOUT, PollOutcome, pollUntil } from "./polling";
+import { formatMarkdown, formatRows } from "./table-format";
 import { TableLocator, TableRow } from "./table-locator";
 import {
 	CellMatcher,
+	ColumnKey,
 	DecimalSeparator,
 	EngineFindRequest,
 	EngineMatchRequest,
@@ -14,11 +16,13 @@ import {
 	EngineTextRequest,
 	EngineTexts,
 	EngineTextsRequest,
+	EngineTotalRequest,
 	EngineValues,
 	EngineValuesRequest,
 	RowWhere,
 	SerializedMatcher,
 	SerializedWhere,
+	ValidRowWhere,
 } from "./table-locator.types";
 import {
 	findTableRows,
@@ -29,10 +33,14 @@ import {
 	readCellText,
 	readColumnValues,
 	readTableTexts,
+	readTableTotal,
 } from "./table-selector-engine";
 
 /** Maximum number of mismatching rows listed in a `toHaveRows` failure message. */
 const MAX_REPORTED_ROWS = 10;
+
+/** Time for the extra reads that describe a failure, in milliseconds. */
+const FAILURE_READ_TIMEOUT = 5_000;
 
 /** Maximum number of column values listed in a `toBeSortedBy` failure message. */
 const MAX_REPORTED_VALUES = 20;
@@ -457,7 +465,8 @@ async function toHaveEveryRow(
 						: `Received: ${result.count - mismatches.length} of ${result.count} body rows match\n`) +
 			(body === undefined
 				? ""
-				: "Body rows that do not match:\n" + describeBodyRows(body, mismatches, conditionHeaders(where))) +
+				: "Body rows that do not match:\n" +
+					formatRows(body, { indexes: mismatches, columns: conditionHeaders(where), maxRows: MAX_REPORTED_ROWS })) +
 			describePredicateErrors(result.errors) +
 			describeLastError(poll.error) +
 			`Table locator: ${table.root.toString()}\n` +
@@ -700,6 +709,187 @@ function describeReceivedSort(
 }
 
 /**
+ * Asserts the number of body rows in the whole table, also the rows that are not rendered or are on
+ * other pages (see {@link TableLocator.totalRowCount}). Retries until the timeout.
+ *
+ * @example
+ * await expect(grid).toHaveTotalRowCount(200);
+ */
+async function toHaveTotalRowCount(
+	this: ExpectMatcherState,
+	table: TableLocator,
+	count: number,
+	options?: TableMatcherOptions
+): Promise<MatcherResult> {
+	const matcherName = "toHaveTotalRowCount";
+	const timeout = options?.timeout ?? this.timeout;
+	const poll = await pollUntil(
+		readTimeout => table.totalRowCount({ timeout: readTimeout }),
+		total => (total === count) !== this.isNot,
+		-1,
+		Date.now() + timeout
+	);
+	// A table that was never read fails both the assertion and its negation.
+	const pass = poll.read ? poll.value === count : this.isNot;
+	const source = pass === this.isNot && poll.read ? await describeTotal(table) : "";
+
+	return {
+		name: matcherName,
+		pass,
+		expected: count,
+		actual: poll.read ? poll.value : undefined,
+		timeout,
+		message: () =>
+			this.utils.matcherHint(matcherName, "table", "count", { isNot: this.isNot }) +
+			"\n\n" +
+			`Expected: ${this.isNot ? "not " : ""}${this.utils.printExpected(count)} body rows in total\n` +
+			(poll.read
+				? `Received: ${this.utils.printReceived(poll.value)}${source}\n`
+				: "Received: the table could not be read\n") +
+			describeLastError(poll.error) +
+			`Table locator: ${table.root.toString()}\n` +
+			`Timeout: ${timeout}ms`,
+	};
+}
+
+/** Where the total of `toHaveTotalRowCount` comes from, such as ` (aria-rowcount 201, minus 1 other row)`. */
+async function describeTotal(table: TableLocator): Promise<string> {
+	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
+	const request: EngineTotalRequest = { op: "total", cfg: table["_config"] };
+	try {
+		const total = await table.root.evaluate(readTableTotal, request, { timeout: 1_000 });
+		if (total.ariaRowCount === null) return "";
+		const others = total.otherRows === 1 ? "1 other row" : `${total.otherRows} other rows`;
+		return ` (aria-rowcount ${total.ariaRowCount}, minus ${others})`;
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Asserts that a {@link TableRow} is selected: it has `aria-selected="true"`, or the first checkbox in it
+ * is checked. Retries until the timeout.
+ *
+ * @example
+ * await users.row({ Name: "John" }).select();
+ * await expect(users.row({ Name: "John" })).toBeSelected();
+ */
+async function toBeSelected(
+	this: ExpectMatcherState,
+	row: TableRow,
+	options?: TableMatcherOptions
+): Promise<MatcherResult> {
+	return checkRowState(this, {
+		matcherName: "toBeSelected",
+		row,
+		state: "selected",
+		read: readTimeout => row.isSelected({ timeout: readTimeout }),
+		timeout: options?.timeout ?? this.timeout,
+	});
+}
+
+/**
+ * Asserts that a {@link TableRow} of a tree grid is expanded (see {@link TableRow.isExpanded}). A row that
+ * cannot expand fails both the assertion and its negation. Retries until the timeout.
+ *
+ * @example
+ * await expect(files.row({ Name: "src" })).not.toBeExpanded();
+ */
+async function toBeExpanded(
+	this: ExpectMatcherState,
+	row: TableRow,
+	options?: TableMatcherOptions
+): Promise<MatcherResult> {
+	return checkRowState(this, {
+		matcherName: "toBeExpanded",
+		row,
+		state: "expanded",
+		read: readTimeout => row.isExpanded({ timeout: readTimeout }),
+		timeout: options?.timeout ?? this.timeout,
+	});
+}
+
+/** `toBeSelected` and `toBeExpanded`: reads a state of the row until it is (or with `.not`, isn't) set. */
+async function checkRowState(
+	state: ExpectMatcherState,
+	details: {
+		matcherName: string;
+		row: TableRow;
+		state: string;
+		read: (timeout: number) => Promise<boolean | null>;
+		timeout: number;
+	}
+): Promise<MatcherResult> {
+	const { matcherName, row, timeout } = details;
+	const poll = await pollUntil(
+		details.read,
+		value => value !== null && value !== state.isNot,
+		null as boolean | null,
+		Date.now() + timeout
+	);
+	const pass = poll.value ?? state.isNot;
+	const received = !poll.read
+		? "the row could not be read"
+		: poll.value === null
+			? `a row that cannot be ${details.state}`
+			: `${poll.value ? "" : "not "}${details.state}`;
+
+	return {
+		name: matcherName,
+		pass,
+		expected: !state.isNot,
+		actual: poll.value,
+		timeout,
+		message: () =>
+			state.utils.matcherHint(matcherName, "row", "", { isNot: state.isNot }) +
+			"\n\n" +
+			`Expected: ${state.isNot ? "not " : ""}${details.state}\n` +
+			`Received: ${received}\n` +
+			describeLastError(poll.error) +
+			`Row locator: ${row.locator.toString()}\n` +
+			`Timeout: ${timeout}ms`,
+	};
+}
+
+/** The tests and tables that already have a table attachment, so retries inside a test attach it once. */
+const attachedTables = new Set<string>();
+
+/**
+ * Attaches the body rows of `table` to the report of the running test, as a Markdown table, once per
+ * test and table. Does nothing outside a test.
+ */
+async function attachTable(table: TableLocator): Promise<void> {
+	let info: TestInfo;
+	try {
+		info = test.info();
+	} catch {
+		return;
+	}
+	const key = `${info.testId}|${info.retry}|${table.root.toString()}`;
+	if (attachedTables.has(key)) return;
+	attachedTables.add(key);
+	const body = await readBody(table);
+	if (body === undefined) return;
+	await info.attach(`table ${table.root.toString()}`, {
+		body: formatMarkdown(body, { maxRows: 1_000 }),
+		contentType: "text/markdown",
+	});
+}
+
+/** `matcher`, also attaching the table to the test report when the assertion fails. */
+function attachOnFailure<R extends TableLocator | TableRow, A extends unknown[]>(
+	matcher: (this: ExpectMatcherState, receiver: R, ...args: A) => Promise<MatcherResult>
+): (this: ExpectMatcherState, receiver: R, ...args: A) => Promise<MatcherResult> {
+	return async function (this: ExpectMatcherState, receiver: R, ...args: A): Promise<MatcherResult> {
+		const result = await matcher.call(this, receiver, ...args);
+		if (result.pass === this.isNot) {
+			await attachTable(receiver instanceof TableRow ? receiver.table : receiver).catch(() => undefined);
+		}
+		return result;
+	};
+}
+
+/**
  * Custom `expect` matchers for {@link TableLocator} and {@link TableRow}. Use them to extend your own `expect`.
  *
  * - `toHaveRow(where, options?)`: at least one body row matches every condition.
@@ -710,7 +900,13 @@ function describeReceivedSort(
  * - `toHaveColumnValues(column, values, options?)`: one value per body row, in order (or `anyOrder`).
  * - `toHaveHeaders(headers, options?)`: the main header row contains these header keys (`exact` for an ordered match).
  * - `toBeSortedBy(column, options?)`: the body rows are sorted by a column (see {@link TableSortOptions}).
+ * - `toHaveTotalRowCount(count, options?)`: the number of body rows in the whole table, on every page.
  * - `toHaveCells(cells, options?)` on a {@link TableRow}: exactly one row, whose cells match every condition.
+ * - `toBeSelected(options?)` on a {@link TableRow}: the row is selected.
+ * - `toBeExpanded(options?)` on a {@link TableRow}: the row of a tree grid is expanded.
+ *
+ * When a table matcher fails inside a test, the body rows are attached to the test report as a Markdown
+ * table, once per test and table.
  *
  * @example
  * // Combine with your own matchers
@@ -739,16 +935,22 @@ export const tableMatchers: {
 	toHaveHeaders: typeof toHaveHeaders;
 	toHaveCells: typeof toHaveCells;
 	toBeSortedBy: typeof toBeSortedBy;
+	toHaveTotalRowCount: typeof toHaveTotalRowCount;
+	toBeSelected: typeof toBeSelected;
+	toBeExpanded: typeof toBeExpanded;
 } = {
-	toHaveRow,
-	toHaveRowCount,
-	toHaveRows,
-	toContainRows,
-	toHaveEveryRow,
-	toHaveColumnValues,
-	toHaveHeaders,
-	toHaveCells,
-	toBeSortedBy,
+	toHaveRow: attachOnFailure(toHaveRow),
+	toHaveRowCount: attachOnFailure(toHaveRowCount),
+	toHaveRows: attachOnFailure(toHaveRows),
+	toContainRows: attachOnFailure(toContainRows),
+	toHaveEveryRow: attachOnFailure(toHaveEveryRow),
+	toHaveColumnValues: attachOnFailure(toHaveColumnValues),
+	toHaveHeaders: attachOnFailure(toHaveHeaders),
+	toHaveCells: attachOnFailure(toHaveCells),
+	toBeSortedBy: attachOnFailure(toBeSortedBy),
+	toHaveTotalRowCount: attachOnFailure(toHaveTotalRowCount),
+	toBeSelected,
+	toBeExpanded,
 };
 
 /**
@@ -771,7 +973,57 @@ export const tableMatchers: {
  *   await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active" });
  * });
  */
-export const expect: Expect<typeof tableMatchers> = baseExpect.extend(tableMatchers);
+const tableExpect: Expect<typeof tableMatchers> = baseExpect.extend(tableMatchers);
+
+/** The matchers Playwright's `expect` (extended with {@link tableMatchers}) has for a value of type `T`. */
+type BaseAssertions<T> = ReturnType<typeof tableExpect<T>>;
+
+/** `Base` with the matchers of `Typed` replaced by their typed versions, also after `.not`. */
+type WithTyped<Base, Typed> = Omit<Base, keyof Typed | "not"> &
+	Typed & { not: Omit<Base, keyof Typed | "not"> & Typed };
+
+/**
+ * The table matchers of {@link expect} on a {@link TableLocator} with typed headers: header keys in
+ * conditions and columns are checked at compile time, like in {@link TableLocator.row}.
+ */
+export interface TableAssertions<H extends string> {
+	toHaveRow<W extends RowWhere<H>>(where: W & ValidRowWhere<H, W>, options?: TableMatcherOptions): Promise<void>;
+	toHaveRowCount(count: number, options?: TableMatcherOptions): Promise<void>;
+	toHaveRows(rows: readonly RowWhere<H>[], options?: TableRowsOptions): Promise<void>;
+	toContainRows(rows: readonly RowWhere<H>[], options?: TableMatcherOptions): Promise<void>;
+	toHaveEveryRow<W extends RowWhere<H>>(where: W & ValidRowWhere<H, W>, options?: TableMatcherOptions): Promise<void>;
+	toHaveColumnValues(column: ColumnKey<H>, values: readonly CellMatcher[], options?: TableRowsOptions): Promise<void>;
+	/** Header keys are not checked: a header that the table doesn't declare may be asserted absent. */
+	toHaveHeaders(headers: readonly string[], options?: TableMatcherOptions & { exact?: boolean }): Promise<void>;
+	toBeSortedBy(column: ColumnKey<H>, options?: TableSortOptions): Promise<void>;
+	toHaveTotalRowCount(count: number, options?: TableMatcherOptions): Promise<void>;
+}
+
+/** The row matchers of {@link expect} on a {@link TableRow} with typed headers. */
+export interface RowAssertions<H extends string> {
+	toHaveCells<W extends RowWhere<H>>(cells: W & ValidRowWhere<H, W>, options?: TableMatcherOptions): Promise<void>;
+	toBeSelected(options?: TableMatcherOptions): Promise<void>;
+	toBeExpanded(options?: TableMatcherOptions): Promise<void>;
+}
+
+/**
+ * The type of {@link expect}: Playwright's `expect` extended with {@link tableMatchers}, whose table and
+ * row matchers check header keys at compile time (also with `expect.soft`).
+ */
+export type TableExpect = {
+	<H extends string>(
+		actual: TableLocator<H>,
+		messageOrOptions?: string | { message?: string }
+	): WithTyped<BaseAssertions<TableLocator<H>>, TableAssertions<H>>;
+	<H extends string>(
+		actual: TableRow<H>,
+		messageOrOptions?: string | { message?: string }
+	): WithTyped<BaseAssertions<TableRow<H>>, RowAssertions<H>>;
+	soft: TableExpect;
+} & Expect<typeof tableMatchers>;
+
+// The typed signatures only narrow the arguments of the same matchers.
+export const expect: TableExpect = tableExpect as TableExpect;
 
 async function readCells(row: TableRow, headers: readonly string[]): Promise<string> {
 	// Read the cells the way the table compares them. `_config` is private to TableLocator; the matchers
@@ -978,7 +1230,7 @@ async function matchUnordered(
 						.map(index => `No body row left for [${index}] ${describeWhere(rows[index] ?? {})}\n`)
 						.join("") +
 					(missing.length > MAX_REPORTED_ROWS ? `... and ${missing.length - MAX_REPORTED_ROWS} more\n` : "")) +
-			(body === undefined ? "" : "Body rows:\n" + describeBodyRows(body, range(body.rows.length), headers)) +
+			(body === undefined ? "" : "Body rows:\n" + formatRows(body, { columns: headers, maxRows: MAX_REPORTED_ROWS })) +
 			(result.unknown.length > 0 ? describeUnknown(result.unknown, result.keys) : "") +
 			describePredicateErrors(result.errors) +
 			describeLastError(poll.error) +
@@ -991,56 +1243,15 @@ async function matchUnordered(
 async function readBody(table: TableLocator): Promise<EngineTexts | undefined> {
 	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
 	const request: EngineTextsRequest = { op: "texts", cfg: table["_config"] };
-	return table.root.evaluate(readTableTexts, request, { timeout: 1_000 }).catch(() => undefined);
+	return table.root.evaluate(readTableTexts, request, { timeout: FAILURE_READ_TIMEOUT }).catch(() => undefined);
 }
 
 /** Reads the body cell texts of `column` for a failure message. */
 async function readValues(table: TableLocator, column: string | number): Promise<string[] | undefined> {
 	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
 	const request: EngineValuesRequest = { op: "values", cfg: table["_config"], column };
-	const read = await table.root.evaluate(readColumnValues, request, { timeout: 1_000 });
+	const read = await table.root.evaluate(readColumnValues, request, { timeout: FAILURE_READ_TIMEOUT });
 	return read.values ?? undefined;
-}
-
-/** Longest cell text shown in a table of body rows. */
-const MAX_CELL_WIDTH = 30;
-
-/**
- * The body rows at `indexes` as an aligned text table, with the row index in front. Only the columns of
- * `headers` are shown (all of them if none of `headers` is a column), and at most `MAX_REPORTED_ROWS` rows.
- *
- * @example
- *   #  | Name | Status
- *   0  | John | Active
- */
-function describeBodyRows(
-	body: EngineTexts,
-	indexes: readonly number[],
-	headers: readonly (string | number)[]
-): string {
-	if (indexes.length === 0) return "  (none)\n";
-	const columns: number[] = [];
-	for (const header of headers) {
-		const column = typeof header === "number" ? header : body.keys.indexOf(normalizeLine(header));
-		if (column >= 0 && column < body.keys.length && !columns.includes(column)) columns.push(column);
-	}
-	if (columns.length === 0) columns.push(...range(body.keys.length));
-
-	const shown = indexes.slice(0, MAX_REPORTED_ROWS);
-	const cell = (text: string): string => {
-		const line = text.replace(/\n/g, "↵");
-		return line.length > MAX_CELL_WIDTH ? `${line.slice(0, MAX_CELL_WIDTH - 1)}…` : line;
-	};
-	const lines = [
-		["#", ...columns.map(column => cell(body.keys[column] ?? ""))],
-		...shown.map(index => [String(index), ...columns.map(column => cell(body.rows[index]?.[column] ?? ""))]),
-	];
-	const widths = (lines[0] ?? []).map((_text, c) => Math.max(...lines.map(line => line[c]?.length ?? 0)));
-	let table = lines
-		.map(line => `  ${line.map((text, c) => text.padEnd(widths[c] ?? 0)).join(" | ")}`.trimEnd() + "\n")
-		.join("");
-	if (indexes.length > shown.length) table += `  ... and ${indexes.length - shown.length} more rows\n`;
-	return table;
 }
 
 /** The "Received:" lines of a `toHaveColumnValues` failure. */

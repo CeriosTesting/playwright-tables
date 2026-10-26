@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@cerios/playwright-table.svg?style=flat-square)](https://www.npmjs.com/package/@cerios/playwright-table)
 [![npm downloads](https://img.shields.io/npm/dm/@cerios/playwright-table.svg?style=flat-square)](https://www.npmjs.com/package/@cerios/playwright-table)
 [![license](https://img.shields.io/npm/l/@cerios/playwright-table.svg?style=flat-square)](https://github.com/CeriosTesting/playwright-tables/blob/main/LICENSE)
-[![Playwright](https://img.shields.io/badge/playwright-%3E%3D1.40.0-45ba4b.svg?style=flat-square&logo=playwright)](https://playwright.dev)
+[![Playwright](https://img.shields.io/badge/playwright-%3E%3D1.45.0-45ba4b.svg?style=flat-square&logo=playwright)](https://playwright.dev)
 
 ## Introduction
 
@@ -20,6 +20,23 @@ Testing HTML tables can be challenging due to their complex structures with cols
 - ✅ Works with standard `<table>` elements and custom div-based tables
 - ✅ Comprehensive **waiting utilities** for dynamic tables
 - ✅ **Type-safe, auto-waiting locators** with `TableLocator` (see [Pure locators](#pure-locators-auto-waiting))
+- ✅ **Retrying table matchers** with typed headers: `toHaveRows`, `toContainRows`, `toHaveEveryRow`, `toHaveColumnValues`, `toBeSortedBy`, `toHaveTotalRowCount`
+- ✅ **Data grids**: presets for AG Grid, MUI X Data Grid, Angular Material and TanStack Virtual, with **pagination** and **virtual scrolling** (`findRow`, `toJson({ allRows: true })`)
+- ✅ **Row interactions**: fill inputs and in-place editors, select rows, expand tree grid rows
+
+### How it compares
+
+Playwright has no table API: finding "the cell under _Status_ in the row where _Name_ is John" means chaining `getByRole("row").filter(...)` and counting header positions yourself. The request for a built-in table selector ([microsoft/playwright#4646](https://github.com/microsoft/playwright/issues/4646)) was closed as not planned, so this package fills that gap.
+
+|                                                       | Playwright locators | Most table helpers | `TableLocator`           |
+| ----------------------------------------------------- | ------------------- | ------------------ | ------------------------ |
+| Cell by row condition and header name                 | manual              | ✔                  | ✔, as a retrying locator |
+| Conditions per cell (not row-wide `hasText`)          | manual              | some               | ✔                        |
+| `colspan` / `rowspan`, multi-row headers              | ✗                   | rarely             | ✔                        |
+| ARIA grids, pinned columns, `aria-rowindex`           | `getByRole` only    | some               | ✔                        |
+| Retrying `expect` matchers for rows, columns, sorting | ✗                   | ✗                  | ✔                        |
+| Pagination and virtual scrolling                      | ✗                   | some               | ✔                        |
+| Typed header names, checked at compile time           | ✗                   | ✗                  | ✔                        |
 
 ---
 
@@ -136,12 +153,19 @@ users.header("Name"); // Locator: the header cell
 await users.toJson(); // Snapshot: every body row as an object keyed by header
 await users.columnValues("Status"); // Snapshot: the text of every body cell in a column
 await users.waitForStable(); // Waits until the table stops changing
+await users.findRow({ Name: "Joe" }); // TableRow: searches every page and scroll position
+await users.totalRowCount(); // Number: every body row, also on other pages
+users.footer; // TableRow: the footer rows
+await users.format(); // String: the rows in view as a text table
 
 const row = users.row({ Name: "John" });
 row.locator; // Locator for the row element(s)
 row.cell("Email"); // Locator for the cell
 row.filter({ hasText: "x" }); // TableRow narrowed with Locator.filter()
 row.first(); // TableRow: the first of these rows (also last() and nth(i))
+await row.fill({ Email: "x@y.z", Active: true }); // fills the controls in the cells
+await row.select(); // selects the row (also deselect(), isSelected())
+await row.expand(); // tree grids (also collapse(), isExpanded(), level())
 ```
 
 Without `headers`, any string is accepted as a header. The other options are the same as for `PlaywrightTable`: `header.rowSelector`, `header.columnSelector`, `header.setMainHeaderRow`, `row.rowSelector` and `row.columnSelector`. Only the defaults differ: `TableLocator` takes both `th` and `td` in header and body rows (see [Row headers and nested tables](#row-headers-and-nested-tables)), and in a table without a `<thead>`, the leading rows of `<th>` cells (without `<td>`) in the first `<tbody>` are header rows, not body rows. To turn that off, set `header.rowSelector` to `"thead>tr"` and `row.rowSelector` to `"tbody>tr"`. `cellContentType` sets how text is read for both header and body cells (`InnerText` by default, see [How text is read](#how-text-is-read)). `aria: true` switches the defaults to ARIA roles (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)).
@@ -223,9 +247,76 @@ These ARIA attributes are used whenever they are present, with or without `aria:
 - **`aria-rowindex`** joins row elements with the same index into one row. Grids with pinned columns render each row as several elements (one per pinned area), and `row()`, `cell()` and `toJson()` see them as one row. A joined row's `locator` is its first element, so `row.locator.filter({ hasText })` only sees the text of that part; use `row()` conditions instead. When every row has an `aria-rowindex`, rows are ordered by it, because grids don't always keep the DOM in visual order.
 - **`aria-colspan`** and **`aria-rowspan`** work like `colspan` and `rowspan`.
 
-Grids also virtualize rows: only the rows in view (plus a buffer) exist in the DOM. `toHaveRowCount`, `toHaveRows` and `toJson()` only see rendered rows, so scroll a row into view (or filter the grid) before asserting on it, and find rows by their content rather than by `rowAt()`.
+Grids also virtualize rows: only the rows in view (plus a buffer) exist in the DOM. `toHaveRowCount`, `toHaveRows` and `toJson()` only see rendered rows. To reach the other rows, set the `scroll` option and use `findRow()`, `toJson({ allRows: true })` and `toHaveTotalRowCount` (see [Pages and virtual scrolling](#pages-and-virtual-scrolling)), and find rows by their content rather than by `rowAt()`.
 
 A row without header cells that shares its `aria-rowindex` with a header row (such as the header row of an empty pinned container) belongs to the header, not to the body.
+
+### Grid presets
+
+`presets` holds ready-made options for popular data grids: the selectors, the loading indicator, the scroll container and the pagination controls. Spread a preset into your options to add typed headers or change a setting:
+
+```ts
+import { defineTable, presets } from "@cerios/playwright-table";
+
+const cars = defineTable(page.locator("#myGrid"), { ...presets.agGrid(), headers: ["Make", "Model", "Price"] });
+const users = defineTable(page.getByRole("grid"), presets.muiDataGrid());
+const orders = defineTable(
+	page.locator("table[mat-table]"),
+	presets.angularMaterial({ paginator: page.locator("mat-paginator") })
+);
+const people = defineTable(page.locator("table"), presets.tanstackVirtual({ container: page.locator(".scroller") }));
+```
+
+| Preset                           | Covers                                                                                                                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agGrid()`                       | ARIA roles, header rows without the floating filter row, pinned bottom rows as footer rows, the body viewport, the paging panel, the loading overlay. Tested with AG Grid Community 36. |
+| `muiDataGrid()`                  | ARIA roles, rows and cells without filler cells, the virtual scroller, the "Go to next page" button, the loading indicator (MUI X v7/v8 markup).                                        |
+| `angularMaterial({ paginator })` | `mat-table` rows and cells (MDC and legacy classes), footer rows, no "no data" row, and the `mat-paginator` buttons.                                                                    |
+| `tanstackVirtual({ container })` | The scroll container, and rows told apart by `data-index`. TanStack Table itself renders plain tables and needs no preset.                                                              |
+
+AG Grid also virtualizes columns: only the columns in view are rendered. Rows are read with every column the grid has rendered; to read the others, set `suppressColumnVirtualisation: true` in your test setup or make the grid wide enough.
+
+### Pages and virtual scrolling
+
+Tell the table how to reach its other rows, and `findRow()`, `toJson({ allRows: true })`, `totalRowCount()` and `toHaveTotalRowCount` go through them:
+
+```ts
+const orders = defineTable(page.locator("#orders"), {
+	// Paginated: the next page control (and optionally the first page control, to always start on page 1)
+	paginate: { next: page.getByRole("button", { name: "Next" }), first: page.getByRole("button", { name: "First" }) },
+	// Virtualized: the element that scrolls (a function gets the table root)
+	scroll: { container: root => root.locator(".viewport") },
+	// Wait for this indicator to be hidden after every page change or scroll
+	loading: root => root.getByRole("progressbar"),
+});
+
+const row = await orders.findRow({ Id: "1042" }); // searches every page and scroll position
+await row.cell("Status").click(); // the table is left showing the row
+
+const all = await orders.toJson({ allRows: true }); // every row of every page, in order
+await expect(orders).toHaveTotalRowCount(312);
+```
+
+- **`findRow(where)`** checks the rows in view first. Then it starts on the first page (with `paginate.first`) and the top, scrolls each page down step by step, and goes to the next page until a row matches. It returns `row(where)`, which now resolves to the row. Without `paginate` and `scroll`, it waits until a row matches, like a locator. On failure it says how many pages it searched.
+- **`toJson({ allRows: true })`** reads the rows at every position. Rows seen at several scroll positions are read once: they are told apart by `aria-rowindex`, `row-index`, `data-rowindex`, `data-index` or `data-id` (or `scroll.rowKey`), or else by their text. When every row has a numeric key, rows are ordered by it. The default `timeout` is 30 seconds for the whole read.
+- **`totalRowCount()`** and **`toHaveTotalRowCount(n)`** use `aria-rowcount` when the grid declares it (minus the header rows it also counts). Without it, they read every row like `toJson({ allRows: true })`, or count the body rows of a table without `paginate` and `scroll`.
+
+| `paginate` option | Description                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| `next`            | The control that goes to the next page. Required.                                                           |
+| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless it is disabled.           |
+| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled` or `aria-disabled="true"`. |
+| `maxPages`        | The most pages to visit. Defaults to 100.                                                                   |
+
+| `scroll` option | Description                                                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `container`     | The element that scrolls. Defaults to the table root.                                                                               |
+| `step`          | Pixels per step. Defaults to 90% of the container height.                                                                           |
+| `rowKey`        | The attribute that identifies a row, such as `"data-id"`.                                                                           |
+| `settle`        | After each scroll (and two animation frames), how long the table must stay the same, in milliseconds. Defaults to 50; `0` skips it. |
+| `maxSteps`      | The most scroll steps per page. Defaults to 1000.                                                                                   |
+
+After each page change, the table must change and then settle; a `next` that doesn't change the table fails with a clear error. Reading a large virtualized grid takes one step per screen of rows, so for big grids prefer filtering the grid down, or asserting `toHaveTotalRowCount`, over reading every row.
 
 ### Shadow DOM
 
@@ -528,7 +619,22 @@ For numbers like `1.234,56`, pass `decimal: ","`. For other formats, pass a `com
 
 When `toHaveRow`, `toHaveRows` or `toHaveCells` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers. A condition on an unknown header can never be checked, so it fails with `.not` too: `.not` first waits for the headers, then asserts that no row matches. A typo in a negated assertion never passes silently. When `toHaveCells` fails on a known header, the message shows the cells the row actually has. When `toHaveRows` fails, the message shows the number of rows received and, for each row that doesn't match, the cells it actually has.
 
-Playwright's `expect.extend` cannot carry the table's header types into matcher arguments, so matcher conditions are checked at runtime. For compile-time checks, assert on `table.row({...}).locator` instead.
+With the exported `expect`, matcher arguments are typed by the table's headers, also after `.not` and with `expect.soft`: a misspelled header in `toHaveRow`, `toHaveRows`, `toContainRows`, `toHaveEveryRow`, `toHaveColumnValues`, `toBeSortedBy` or `toHaveCells` is a compile-time error. `toHaveHeaders` takes any string, so you can assert that a header the table doesn't declare is absent. Conditions are checked at runtime too, for JavaScript and for tables without `headers`.
+
+```ts
+const users = defineTable(page.locator("#users"), { headers: ["Name", "Status"] });
+await expect(users).toHaveRow({ Name: "John" });
+// @ts-expect-error "Stauts" is not a header of this table
+await expect(users).toHaveRow({ Stauts: "Active" });
+```
+
+#### More matchers
+
+```ts
+await expect(grid).toHaveTotalRowCount(200); // every row, also on other pages or not rendered (see Pages and virtual scrolling)
+await expect(users.row({ Name: "John" })).toBeSelected(); // aria-selected="true", or a checked checkbox in the row
+await expect(files.row({ Name: "src" })).not.toBeExpanded(); // tree grids: aria-expanded
+```
 
 #### Bring your own matchers
 
@@ -555,6 +661,52 @@ import { mergeExpects } from "@playwright/test";
 export const expect = mergeExpects(tableExpect, myExpect);
 ```
 
+An `expect` you extend or merge yourself has Playwright's own matcher types, so the table matcher arguments are checked at runtime only.
+
+### Footer rows
+
+Footer rows, such as a totals row, are not body rows: `rows`, `row()`, `toJson()` and the matchers leave them out. `footer` gives them typed cells:
+
+```ts
+await expect(orders.footer.cell("Total")).toHaveText("€ 1,295.75");
+```
+
+Footer rows are `tfoot>tr` by default (none with `aria: true`); set `footer.rowSelector` for others. Their cells are found with `row.columnSelector`.
+
+### Row interactions
+
+```ts
+const john = users.row({ Name: "John" });
+
+// Fills the controls in the cells: a boolean checks a checkbox or switch, a string selects an option or fills an input
+await john.fill({ Email: "john@example.org", Role: "Admin", Active: false });
+
+// A cell without a control is edited in place, as data grids do: double-click, fill the editor, press Enter
+await grid.row({ Id: "2" }).fill({ Model: "New model" }); // `commit: "Tab"` or `false` to press another key or none
+
+await john.select(); // checks the checkbox in the row, or clicks the row; waits until selected
+await expect(john).toBeSelected();
+await john.deselect();
+
+// Tree grids
+await files.row({ Name: "src" }).expand(); // clicks the toggle, or presses ArrowRight; waits for aria-expanded="true"
+await files.row({ Name: "src" }).collapse();
+expect(await files.row({ Name: "index.ts" }).level()).toBe(2); // aria-level
+```
+
+`fill()` goes through the columns in order. When the row is found by a column you fill, fill that column last: after it changes, the row no longer matches. Editors that open outside the cell (popups) are not found; fill those with Playwright locators.
+
+### Debugging failures
+
+When a table matcher fails inside a test, the body rows are attached to the test report as a Markdown table (once per test and table), so the HTML report and trace viewer show what the table contained. To print a table yourself:
+
+```ts
+console.log(await users.format({ columns: ["Name", "Status"] }));
+//   # | Name | Status
+//   0 | John | Active
+//   1 | Jane | Inactive
+```
+
 ### `TableLocator` or `PlaywrightTable`?
 
 | Use                   | When                                                                                                                                    |
@@ -570,20 +722,21 @@ Both can be used on the same table.
 
 ### Common pitfalls
 
-| Pitfall                                                                           | Fix                                                                                                                                                                                |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hard-coded row or column numbers break when columns move or rows reorder.         | Find rows by content with `row({...})` and cells by header name. Use `rowAt()` only when the position is what you test.                                                            |
-| Reading the table, then asserting on the snapshot, is flaky.                      | Assert with retrying matchers (`toHaveRow`, `toHaveRows`, `toHaveCells`, `toBeSortedBy`, `expect(cell).toHaveText()`). Use `toJson()` only after one of them has passed.           |
-| Skeleton or "Loading…" rows make a table look loaded.                             | Assert on content you expect (`toHaveRow`), or use `toJson({ minRows })`. `toBeSortedBy` fails on an empty body.                                                                   |
-| Reading the table right after a search or filter returns stale or partial rows.   | `await table.waitForStable({ loading })` first, or `toJson({ stable: { loading } })` (see [Waiting for a table to settle](#waiting-for-a-table-to-settle)).                        |
-| A filter test only checks the first row, or passes when nothing is left.          | `toHaveEveryRow({ Status: "Active" })` checks every row, and fails on an empty body.                                                                                               |
-| Numbers with a decimal comma (`1.234,56`) don't compare.                          | Add `decimal: ","` to numeric conditions, `toJson({ parse })` and `toBeSortedBy`.                                                                                                  |
-| A sort test only checks the arrow icon or `aria-sort`.                            | `toBeSortedBy` checks the data; add `ariaSort: true` to check the header too.                                                                                                      |
-| Numbers or dates sort as text (`"10"` before `"9"`, `"€ 950"` after `"€ 1,200"`). | Pass `type: "number"` or `type: "date"` to `toBeSortedBy`, or a `compare` for other formats.                                                                                       |
-| A row header (`<th scope="row">`) or a nested table shifts the columns.           | `TableLocator` handles both by default (see [Row headers and nested tables](#row-headers-and-nested-tables)).                                                                      |
-| Data grids only render the rows and columns in view.                              | Use `aria: true`, scroll the row or column into view before asserting, and don't count rendered rows to get the total (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)).       |
-| `expect(cell).toHaveText()` fails on a cell with an icon or screen reader text.   | `toHaveText` uses Playwright's own text rules. Compare as the table reads text with `toHaveCells`, `toHaveRow` or a `row()` condition (see [How text is read](#how-text-is-read)). |
-| `row()` throws a strict mode violation.                                           | Several rows match. Add a condition, or pick one with `first()`, `last()` or `nth()`.                                                                                              |
+| Pitfall                                                                           | Fix                                                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hard-coded row or column numbers break when columns move or rows reorder.         | Find rows by content with `row({...})` and cells by header name. Use `rowAt()` only when the position is what you test.                                                                                                            |
+| Reading the table, then asserting on the snapshot, is flaky.                      | Assert with retrying matchers (`toHaveRow`, `toHaveRows`, `toHaveCells`, `toBeSortedBy`, `expect(cell).toHaveText()`). Use `toJson()` only after one of them has passed.                                                           |
+| Skeleton or "Loading…" rows make a table look loaded.                             | Assert on content you expect (`toHaveRow`), or use `toJson({ minRows })`. `toBeSortedBy` fails on an empty body.                                                                                                                   |
+| Reading the table right after a search or filter returns stale or partial rows.   | `await table.waitForStable({ loading })` first, or `toJson({ stable: { loading } })` (see [Waiting for a table to settle](#waiting-for-a-table-to-settle)).                                                                        |
+| A filter test only checks the first row, or passes when nothing is left.          | `toHaveEveryRow({ Status: "Active" })` checks every row, and fails on an empty body.                                                                                                                                               |
+| Numbers with a decimal comma (`1.234,56`) don't compare.                          | Add `decimal: ","` to numeric conditions, `toJson({ parse })` and `toBeSortedBy`.                                                                                                                                                  |
+| A sort test only checks the arrow icon or `aria-sort`.                            | `toBeSortedBy` checks the data; add `ariaSort: true` to check the header too.                                                                                                                                                      |
+| Numbers or dates sort as text (`"10"` before `"9"`, `"€ 950"` after `"€ 1,200"`). | Pass `type: "number"` or `type: "date"` to `toBeSortedBy`, or a `compare` for other formats.                                                                                                                                       |
+| A row header (`<th scope="row">`) or a nested table shifts the columns.           | `TableLocator` handles both by default (see [Row headers and nested tables](#row-headers-and-nested-tables)).                                                                                                                      |
+| Data grids only render the rows and columns in view.                              | Use a [preset](#grid-presets) or the `scroll` option, then `findRow()`, `toJson({ allRows: true })` and `toHaveTotalRowCount` instead of counting rendered rows (see [Pages and virtual scrolling](#pages-and-virtual-scrolling)). |
+| A row is on another page.                                                         | Set `paginate` and use `findRow()`; it goes through the pages until a row matches.                                                                                                                                                 |
+| `expect(cell).toHaveText()` fails on a cell with an icon or screen reader text.   | `toHaveText` uses Playwright's own text rules. Compare as the table reads text with `toHaveCells`, `toHaveRow` or a `row()` condition (see [How text is read](#how-text-is-read)).                                                 |
+| `row()` throws a strict mode violation.                                           | Several rows match. Add a condition, or pick one with `first()`, `last()` or `nth()`.                                                                                                                                              |
 
 ---
 

@@ -19,3 +19,12 @@ export enum Route {
 	ShadowDomTable = "/shadow-dom-table",
 	RefreshingTable = "/refreshing-table",
 }
+
+/** Pages of data grids, virtualized or paged, tested in `table-grids.test.ts`. */
+export enum GridRoute {
+	AgGrid = "/ag-grid",
+	MuiDataGrid = "/mui-data-grid",
+	TanstackVirtual = "/tanstack-virtual",
+	AngularMaterial = "/angular-material-table",
+	Interactive = "/interactive-table",
+}

@@ -12,20 +12,28 @@ export type {
 	ColumnParsers,
 	DecimalSeparator,
 	HeaderKey,
+	LocatorRef,
+	NavigationOptions,
 	NumberCondition,
+	PaginateOptions,
 	ParsedValue,
 	RowWhere,
+	ScrollOptions,
 	StableOptions,
 	TableJsonOptions,
 	TableJsonRow,
 	TableLocatorOptions,
 	ValidRowWhere,
 } from "./table-locator.types";
+export { presets, type TablePreset } from "./table-presets";
 export { registerTableSelectors, test } from "./table-selectors";
 export { DEFAULT_IGNORE } from "./table-selector-engine";
 export {
 	expect,
 	tableMatchers,
+	type RowAssertions,
+	type TableAssertions,
+	type TableExpect,
 	type TableMatcherOptions,
 	type TableRowsOptions,
 	type TableSortOptions,

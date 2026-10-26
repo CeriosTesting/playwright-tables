@@ -295,10 +295,10 @@ test.describe("TableLocator header names you pass are normalized", () => {
 		await table.validateHeaders();
 		await untyped.validateHeaders(["First\u00A0name"]);
 		await expect(table).toHaveHeaders(["First\tname", "Date  of  birth"], { exact: true });
-		await expect(table).toHaveRow({ "First\r\nname": "Jane" });
+		await expect(untyped).toHaveRow({ "First\r\nname": "Jane" });
 		await expect(table).toHaveRows([{ "First\nname": "John" }, { "First\nname": "Jane" }]);
-		await expect(table.rowAt(0)).toHaveCells({ " First name ": "John" });
-		await expect(table).toBeSortedBy("Date\nof birth", { order: "desc", type: "number" });
+		await expect(untyped.rowAt(0)).toHaveCells({ " First name ": "John" });
+		await expect(untyped).toBeSortedBy("Date\nof birth", { order: "desc", type: "number" });
 		await expect(table).not.toHaveRow({ "First\nname": "Ghost" });
 	});
 });

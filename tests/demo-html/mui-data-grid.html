@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>MUI X Data Grid markup</title>
+		<style>
+			.MuiDataGrid-virtualScroller {
+				height: 260px;
+				width: 600px;
+				overflow: auto;
+				position: relative;
+			}
+			.MuiDataGrid-topContainer {
+				position: sticky;
+				top: 0;
+				z-index: 1;
+				background: white;
+			}
+			[role="row"] {
+				display: flex;
+				height: 36px;
+				align-items: center;
+			}
+			[role="columnheader"],
+			[role="gridcell"] {
+				width: 130px;
+				flex: none;
+			}
+			.MuiDataGrid-columnHeaderCheckbox,
+			.MuiDataGrid-cellCheckbox {
+				width: 50px;
+			}
+			.MuiDataGrid-virtualScrollerRenderZone {
+				position: absolute;
+				left: 0;
+			}
+			.MuiDataGrid-overlay {
+				position: absolute;
+				inset: 0;
+				background: rgba(255, 255, 255, 0.6);
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Markup of a MUI X Data Grid (v7) with row virtualization, pagination and checkbox selection</h2>
+		<p>
+			Not the real MUI X: a small script that renders the same roles, classes and attributes, to test the
+			<code>muiDataGrid</code> preset without React.
+		</p>
+		<button id="load">Reload</button>
+
+		<div class="MuiDataGrid-root" role="grid" id="users" aria-colcount="4" aria-multiselectable="true">
+			<div class="MuiDataGrid-main">
+				<div class="MuiDataGrid-virtualScroller">
+					<div class="MuiDataGrid-topContainer">
+						<div class="MuiDataGrid-columnHeaders" role="rowgroup">
+							<div class="MuiDataGrid-columnHeaderRow" role="row" aria-rowindex="1">
+								<div
+									class="MuiDataGrid-columnHeader MuiDataGrid-columnHeaderCheckbox"
+									role="columnheader"
+									aria-colindex="1"
+								>
+									<input type="checkbox" aria-label="Select all rows" />
+								</div>
+								<div class="MuiDataGrid-columnHeader" role="columnheader" aria-colindex="2" data-field="id">
+									<div class="MuiDataGrid-columnHeaderTitle">ID</div>
+									<div class="MuiDataGrid-iconButtonContainer">
+										<button aria-label="Sort"><svg></svg></button>
+									</div>
+								</div>
+								<div class="MuiDataGrid-columnHeader" role="columnheader" aria-colindex="3" data-field="name">
+									<div class="MuiDataGrid-columnHeaderTitle">Name</div>
+								</div>
+								<div class="MuiDataGrid-columnHeader" role="columnheader" aria-colindex="4" data-field="age">
+									<div class="MuiDataGrid-columnHeaderTitle">Age</div>
+								</div>
+								<div class="MuiDataGrid-filler" role="presentation"></div>
+							</div>
+						</div>
+					</div>
+					<div class="MuiDataGrid-virtualScrollerContent">
+						<div class="MuiDataGrid-virtualScrollerRenderZone" role="rowgroup"></div>
+					</div>
+				</div>
+				<div class="MuiDataGrid-overlayWrapper" hidden>
+					<div class="MuiDataGrid-overlay"><span class="MuiCircularProgress-root" role="progressbar"></span></div>
+				</div>
+			</div>
+			<div class="MuiDataGrid-footerContainer">
+				<p class="MuiTablePagination-displayedRows"></p>
+				<button aria-label="Go to previous page">‹</button>
+				<button aria-label="Go to next page">›</button>
+			</div>
+		</div>
+
+		<script>
+			const ROW_HEIGHT = 36;
+			const PAGE_SIZE = 25;
+			const OVERSCAN = 3;
+			const users = Array.from({ length: 60 }, (_, i) => ({ id: i + 1, name: `User ${i + 1}`, age: 20 + (i % 40) }));
+			const selected = new Set();
+			const grid = document.getElementById("users");
+			const scroller = grid.querySelector(".MuiDataGrid-virtualScroller");
+			const content = grid.querySelector(".MuiDataGrid-virtualScrollerContent");
+			const zone = grid.querySelector(".MuiDataGrid-virtualScrollerRenderZone");
+			const overlay = grid.querySelector(".MuiDataGrid-overlayWrapper");
+			const prev = grid.querySelector("[aria-label='Go to previous page']");
+			const next = grid.querySelector("[aria-label='Go to next page']");
+			let page = 0;
+
+			grid.setAttribute("aria-rowcount", String(users.length + 1));
+
+			function pageRows() {
+				return users.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+			}
+
+			function cell(field, colindex, text, extra) {
+				const div = document.createElement("div");
+				div.className = "MuiDataGrid-cell" + (extra ?? "");
+				div.setAttribute("role", "gridcell");
+				div.setAttribute("aria-colindex", String(colindex));
+				if (field !== null) div.dataset.field = field;
+				div.textContent = text;
+				return div;
+			}
+
+			function render() {
+				const rows = pageRows();
+				content.style.height = `${rows.length * ROW_HEIGHT}px`;
+				const first = Math.max(0, Math.floor(scroller.scrollTop / ROW_HEIGHT) - OVERSCAN);
+				const last = Math.min(
+					rows.length,
+					Math.ceil((scroller.scrollTop + scroller.clientHeight) / ROW_HEIGHT) + OVERSCAN
+				);
+				zone.style.transform = `translateY(${first * ROW_HEIGHT}px)`;
+				zone.replaceChildren();
+				for (let i = first; i < last; i++) {
+					const user = rows[i];
+					const index = page * PAGE_SIZE + i;
+					const row = document.createElement("div");
+					row.className = "MuiDataGrid-row" + (selected.has(user.id) ? " Mui-selected" : "");
+					row.setAttribute("role", "row");
+					row.dataset.id = String(user.id);
+					row.dataset.rowindex = String(index);
+					row.setAttribute("aria-rowindex", String(index + 2));
+					row.setAttribute("aria-selected", String(selected.has(user.id)));
+					const box = cell(null, 1, "", " MuiDataGrid-cellCheckbox");
+					const input = document.createElement("input");
+					input.type = "checkbox";
+					input.setAttribute("aria-label", "Select row");
+					input.checked = selected.has(user.id);
+					input.addEventListener("change", () => {
+						if (input.checked) selected.add(user.id);
+						else selected.delete(user.id);
+						render();
+					});
+					box.appendChild(input);
+					row.append(box, cell("id", 2, String(user.id)), cell("name", 3, user.name), cell("age", 4, String(user.age)));
+					const empty = document.createElement("div");
+					empty.className = "MuiDataGrid-cell MuiDataGrid-cellEmpty";
+					empty.setAttribute("role", "gridcell");
+					row.appendChild(empty);
+					zone.appendChild(row);
+				}
+				const start = page * PAGE_SIZE;
+				grid.querySelector(".MuiDataGrid-displayedRows, .MuiTablePagination-displayedRows").textContent =
+					`${start + 1}–${start + rows.length} of ${users.length}`;
+				prev.disabled = page === 0;
+				next.disabled = (page + 1) * PAGE_SIZE >= users.length;
+			}
+
+			function goTo(target) {
+				overlay.hidden = false;
+				setTimeout(() => {
+					page = target;
+					scroller.scrollTop = 0;
+					overlay.hidden = true;
+					render();
+				}, 200);
+			}
+
+			scroller.addEventListener("scroll", () => requestAnimationFrame(render));
+			next.addEventListener("click", () => goTo(page + 1));
+			prev.addEventListener("click", () => goTo(page - 1));
+			document.getElementById("load").addEventListener("click", () => goTo(page));
+			render();
+		</script>
+	</body>
+</html>

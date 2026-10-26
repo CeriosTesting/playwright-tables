@@ -308,6 +308,7 @@ test.describe("table matchers", () => {
 		const users = await openUsers(page);
 
 		const message = await errorMessage(() =>
+			// @ts-expect-error unknown header, checked at runtime too
 			expect(users).toHaveRows([{ Stauts: "Active" }, {}, {}], { timeout: 300 })
 		);
 		expect(message).toContain('Header "Stauts" not found.');
@@ -480,6 +481,7 @@ test.describe("toBeSortedBy", () => {
 	test("a table that cannot be checked fails, also with .not", async ({ page }) => {
 		const table = await openSortable(page);
 
+		// @ts-expect-error unknown header, checked at runtime too
 		const unknown = await errorMessage(() => expect(table).not.toBeSortedBy("Nmae", { timeout: 1_000 }));
 		expect(unknown).toContain('Received: Header "Nmae" not found.');
 		expect(unknown).toContain("Available headers: [Name, Salary, Joined]");

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>AG Grid</title>
+		<!-- Copied from node_modules by tests/global-setup.ts -->
+		<script src="/vendor/ag-grid-community.min.js"></script>
+	</head>
+	<body>
+		<h2>AG Grid with row virtualization, a pinned column, row selection and an editable column</h2>
+		<div id="cars" style="height: 450px; width: 700px"></div>
+
+		<h2>AG Grid with pagination</h2>
+		<div id="paged" style="height: 400px; width: 700px"></div>
+
+		<script>
+			if (agGrid.ModuleRegistry && agGrid.AllCommunityModule) {
+				agGrid.ModuleRegistry.registerModules([agGrid.AllCommunityModule]);
+			}
+			const makes = ["Toyota", "Ford", "Porsche", "Volvo", "Fiat"];
+			const cars = Array.from({ length: 200 }, (_, i) => ({
+				id: String(i + 1),
+				make: makes[i % makes.length],
+				model: `Model ${i + 1}`,
+				price: 10_000 + i * 250,
+			}));
+
+			window.carsGrid = agGrid.createGrid(document.getElementById("cars"), {
+				rowData: cars,
+				getRowId: params => params.data.id,
+				rowSelection: { mode: "multiRow" },
+				columnDefs: [
+					{ field: "id", headerName: "Id", pinned: "left", width: 90 },
+					{ field: "make", headerName: "Make" },
+					{ field: "model", headerName: "Model", editable: true },
+					{ field: "price", headerName: "Price", valueFormatter: p => `€ ${p.value.toLocaleString("en-US")}` },
+				],
+			});
+
+			window.pagedGrid = agGrid.createGrid(document.getElementById("paged"), {
+				rowData: cars.slice(0, 45),
+				pagination: true,
+				paginationPageSize: 20,
+				paginationPageSizeSelector: false,
+				columnDefs: [
+					{ field: "id", headerName: "Id" },
+					{ field: "make", headerName: "Make" },
+					{ field: "model", headerName: "Model" },
+				],
+			});
+		</script>
+	</body>
+</html>
