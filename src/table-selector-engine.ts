@@ -1,10 +1,15 @@
 import type {
+	DecimalSeparator,
 	EngineConfig,
 	EngineFindRequest,
 	EngineFindResult,
+	EngineFingerprint,
+	EngineFingerprintRequest,
 	EngineKeysRequest,
 	EngineMatchRequest,
 	EngineMatchResult,
+	EngineMatrixRequest,
+	EngineMatrixResult,
 	EngineQuery,
 	EngineTextRequest,
 	EngineTexts,
@@ -38,8 +43,10 @@ export const TABLE_SELECTOR_ENGINE_NAME = "pw-table-v1";
  * - Called as `locator.evaluate(tableSelectorEngine, request)`, it reads the table exactly as the engine
  *   resolves it: `{ op: "keys" }` returns the header keys, `{ op: "texts" }` the header keys and body cell
  *   texts, `{ op: "values" }` the body cell texts of one column, and `{ op: "match" }` matches every body
- *   row against its own conditions. `{ op: "find" }` counts the body rows that match one set of conditions;
- *   it and "match" also report problems with `predicate` conditions. `{ op: "text" }` reads one body cell.
+ *   row against its own conditions. `{ op: "find" }` counts the body rows that match one set of conditions,
+ *   and `{ op: "matrix" }` lists the body rows that match each of several sets; these three also report
+ *   problems with `predicate` conditions. `{ op: "text" }` reads one body cell, and `{ op: "fingerprint" }`
+ *   hashes the header keys and body cell texts, to tell whether the table changed.
  *
  * Header text is read on one line (`normalizeLine`); body cell text keeps its line breaks (`normalizeCell`).
  * Both leave out what the user doesn't see: icon glyphs, invisible characters and the text of the elements
@@ -57,6 +64,8 @@ export function tableSelectorEngine(root: Element, request: EngineMatchRequest):
 export function tableSelectorEngine(root: Element, request: EngineValuesRequest): EngineValues;
 export function tableSelectorEngine(root: Element, request: EngineFindRequest): EngineFindResult;
 export function tableSelectorEngine(root: Element, request: EngineTextRequest): string;
+export function tableSelectorEngine(root: Element, request: EngineFingerprintRequest): EngineFingerprint;
+export function tableSelectorEngine(root: Element, request: EngineMatrixRequest): EngineMatrixResult;
 export function tableSelectorEngine(
 	root?: Element,
 	request?:
@@ -66,7 +75,18 @@ export function tableSelectorEngine(
 		| EngineValuesRequest
 		| EngineFindRequest
 		| EngineTextRequest
-): SelectorEngine | string[] | string | EngineTexts | EngineMatchResult | EngineValues | EngineFindResult {
+		| EngineFingerprintRequest
+		| EngineMatrixRequest
+):
+	| SelectorEngine
+	| string[]
+	| string
+	| EngineTexts
+	| EngineMatchResult
+	| EngineValues
+	| EngineFindResult
+	| EngineFingerprint
+	| EngineMatrixResult {
 	type GridCell = { el: Element; rowOffset: number; colOffset: number };
 	/** One row of the visual grid. Positions without a cell are holes. */
 	type GridLine = (GridCell | undefined)[];
@@ -223,6 +243,31 @@ export function tableSelectorEngine(
 			if (text !== "") lines.push(text);
 		}
 		return lines.join("\n");
+	}
+
+	// A minus sign in front of a number, possibly with a currency symbol in between, that is not part of a
+	// word such as "Item-5".
+	const MINUS_BEFORE = /(?:^|[^\p{L}\p{N}])[-−]\s*\p{Sc}?\s*$/u;
+
+	/**
+	 * The one number in `value`, or `NaN` if it has no number or more than one. Digits may be grouped by
+	 * thousands with the other separator, `'` or a (non-breaking) space, so with `"."` both `"€ 1,200.50"`
+	 * and `"1 200.5"` are numbers, and `"12:30"` or `"5 of 10"` are not.
+	 */
+	function parseNumber(value: string, decimal: DecimalSeparator): number {
+		const text = clean(value);
+		const group = decimal === "," ? "[.'\\u00a0\\u202f ]" : "[,'\\u00a0\\u202f ]";
+		const separator = decimal === "," ? "," : "\\.";
+		const pattern = new RegExp(
+			"(\\d{1,3}(?:" + group + "\\d{3})+|\\d+)(?:" + separator + "(\\d+))?|" + separator + "(\\d+)",
+			"g"
+		);
+		const first = pattern.exec(text);
+		if (first === null || pattern.exec(text) !== null) return NaN;
+		const integer = (first[1] ?? "0").replace(/\D/g, "");
+		const fraction = first[2] ?? first[3] ?? "0";
+		const number = Number(integer + "." + fraction);
+		return MINUS_BEFORE.test(text.slice(0, first.index)) ? -number : number;
 	}
 
 	/** The text of `el` as the browser reads it (`innerText` or `textContent`), without any changes. */
@@ -719,6 +764,8 @@ export function tableSelectorEngine(
 				};
 			case "f":
 				return compilePredicateMatcher(matcher.src, header);
+			case "g":
+				return compileNumberMatcher(matcher);
 			case "n": {
 				const inner = compileMatcher(matcher.m, header);
 				return function (text, raw) {
@@ -761,6 +808,23 @@ export function tableSelectorEngine(
 			if (op === "contains") return actual.indexOf(expected) !== -1;
 			if (op === "startsWith") return actual.slice(0, expected.length) === expected;
 			return expected.length <= actual.length && actual.slice(actual.length - expected.length) === expected;
+		};
+	}
+
+	/** A numeric condition. A cell that is not a number never matches. */
+	function compileNumberMatcher(matcher: Extract<SerializedMatcher, { t: "g" }>): TextTest {
+		const op = matcher.op;
+		const low = matcher.v;
+		const high = matcher.w;
+		const decimal = matcher.d;
+		return function (text) {
+			const value = parseNumber(text, decimal);
+			if (isNaN(value)) return false;
+			if (op === "gt") return value > low;
+			if (op === "gte") return value >= low;
+			if (op === "lt") return value < low;
+			if (op === "lte") return value <= low;
+			return value >= low && value <= high;
 		};
 	}
 
@@ -842,15 +906,45 @@ export function tableSelectorEngine(
 		return cell === undefined ? "" : rawOf(model, cell.el);
 	}
 
+	/** The number of grid columns: the header keys, or the widest body row if that is wider. */
+	function gridWidth(model: TableModel): number {
+		let width = model.keys.length;
+		for (const line of model.body().grid) {
+			if (line.length > width) width = line.length;
+		}
+		return width;
+	}
+
+	/**
+	 * The grid column of a condition: of its header key, or its column index (up to the widest body row),
+	 * or -1 if the table has no such column.
+	 */
+	function conditionColumn(model: TableModel, header: string | number): number {
+		if (typeof header === "string") return model.keys.indexOf(normalizeLine(header));
+		return header >= 0 && header % 1 === 0 && header < gridWidth(model) ? header : -1;
+	}
+
 	/** The conditions of `where` with the grid columns of their headers, or `null` if a header is unknown. */
 	function whereColumns(model: TableModel, where: SerializedWhere): ColumnCondition[] | null {
 		const conditions: ColumnCondition[] = [];
 		for (const condition of where) {
-			const column = model.keys.indexOf(normalizeLine(condition.h));
+			const column = conditionColumn(model, condition.h);
 			if (column === -1) return null;
-			conditions.push({ column: column, test: compileMatcher(condition.m, condition.h) });
+			conditions.push({ column: column, test: compileMatcher(condition.m, String(condition.h)) });
 		}
 		return conditions;
+	}
+
+	/** The headers (or column indexes) of the conditions in `expected` that the table doesn't have. */
+	function unknownHeaders(model: TableModel, expected: SerializedWhere[]): (string | number)[] {
+		const unknown: (string | number)[] = [];
+		for (const where of expected) {
+			for (const condition of where) {
+				const header = condition.h;
+				if (conditionColumn(model, header) === -1 && unknown.indexOf(header) === -1) unknown.push(header);
+			}
+		}
+		return unknown;
 	}
 
 	/** Whether row `r` matches every condition. A predicate that cannot run fails the row. */
@@ -940,17 +1034,40 @@ export function tableSelectorEngine(
 		return cell === undefined ? [] : [cell];
 	}
 
-	/** Header keys and the text of every body cell under them: normalized, or with `raw`, as the browser reads it. */
-	function readTexts(model: TableModel, raw: boolean): EngineTexts {
+	/**
+	 * Header keys and the text of every body cell under them (or only under `columns`, in that order):
+	 * normalized, or with `raw`, as the browser reads it.
+	 */
+	function readTexts(model: TableModel, raw: boolean, columns?: string[]): EngineTexts {
+		const indexes =
+			columns === undefined
+				? model.keys.map(function (_key, c) {
+						return c;
+					})
+				: columns.map(function (key) {
+						return model.keys.indexOf(normalizeLine(key));
+					});
 		const rows: string[][] = [];
 		for (let r = 0; r < model.body().rows.length; r++) {
 			const texts: string[] = [];
-			for (let c = 0; c < model.keys.length; c++) {
-				texts.push(raw ? cellRaw(model, r, c) : cellText(model, r, c));
+			for (const c of indexes) {
+				texts.push(c === -1 ? "" : raw ? cellRaw(model, r, c) : cellText(model, r, c));
 			}
 			rows.push(texts);
 		}
 		return { keys: model.keys, rows: rows };
+	}
+
+	/** A hash of the header keys and body cell texts (FNV-1a), with the number of body rows. */
+	function fingerprint(model: TableModel): EngineFingerprint {
+		const texts = readTexts(model, false);
+		const data = JSON.stringify([texts.keys, texts.rows]);
+		let hash = 0x811c9dc5;
+		for (let i = 0; i < data.length; i++) {
+			hash ^= data.charCodeAt(i);
+			hash = Math.imul(hash, 0x01000193);
+		}
+		return { rows: texts.rows.length, hash: (hash >>> 0).toString(16) + ":" + data.length };
 	}
 
 	/**
@@ -959,12 +1076,8 @@ export function tableSelectorEngine(
 	 */
 	function readValues(model: TableModel, column: string | number): EngineValues {
 		const body = model.body();
-		let width = model.keys.length;
-		for (const line of body.grid) {
-			if (line.length > width) width = line.length;
-		}
 		const c = columnOf(model, column);
-		if (c === -1 || c >= width) return { keys: model.keys, values: null };
+		if (c === -1 || c >= gridWidth(model)) return { keys: model.keys, values: null };
 		const values: string[] = [];
 		for (let r = 0; r < body.rows.length; r++) {
 			values.push(cellText(model, r, c));
@@ -973,13 +1086,7 @@ export function tableSelectorEngine(
 	}
 
 	function matchRows(model: TableModel, expected: SerializedWhere[]): EngineMatchResult {
-		const unknown: string[] = [];
-		for (const where of expected) {
-			for (const condition of where) {
-				const header = condition.h;
-				if (model.keys.indexOf(normalizeLine(header)) === -1 && unknown.indexOf(header) === -1) unknown.push(header);
-			}
-		}
+		const unknown = unknownHeaders(model, expected);
 		const count = model.body().rows.length;
 		// Only rows that exist both in the table and in `expected` are matched.
 		const matched = expected.slice(0, count).map(function (where, r) {
@@ -1016,6 +1123,27 @@ export function tableSelectorEngine(
 		return { matches: matches, errors: predicateErrors ?? [] };
 	}
 
+	/** For each set of conditions in `expected`, the indexes of the body rows that match it. */
+	function matrixRows(model: TableModel, expected: SerializedWhere[]): EngineMatrixResult {
+		const count = model.body().rows.length;
+		const matches = expected.map(function (where) {
+			const conditions = whereColumns(model, where);
+			const found: number[] = [];
+			if (conditions === null) return found;
+			for (let r = 0; r < count; r++) {
+				if (rowMatches(model, r, conditions)) found.push(r);
+			}
+			return found;
+		});
+		return {
+			keys: model.keys,
+			count: count,
+			matches: matches,
+			unknown: unknownHeaders(model, expected),
+			errors: predicateErrors ?? [],
+		};
+	}
+
 	function queryAll(root: Node, body: string): Element[] {
 		try {
 			const query = JSON.parse(body) as EngineQuery;
@@ -1038,18 +1166,42 @@ export function tableSelectorEngine(
 		}
 	}
 
+	/** Answers a request that reads the table. */
+	function read(
+		model: TableModel | null,
+		request: EngineKeysRequest | EngineTextsRequest | EngineValuesRequest | EngineFingerprintRequest
+	): string[] | EngineTexts | EngineValues | EngineFingerprint {
+		if (request.op === "keys") return model === null ? [] : model.keys;
+		if (request.op === "texts") {
+			return model === null ? { keys: [], rows: [] } : readTexts(model, request.raw === true, request.columns);
+		}
+		if (request.op === "values") return model === null ? { keys: [], values: null } : readValues(model, request.column);
+		return model === null ? { rows: 0, hash: "" } : fingerprint(model);
+	}
+
+	/** Answers a request that matches conditions, collecting the problems with `predicate` conditions. */
+	function match(
+		model: TableModel | null,
+		request: EngineFindRequest | EngineMatchRequest | EngineMatrixRequest
+	): EngineFindResult | EngineMatchResult | EngineMatrixResult {
+		predicateErrors = [];
+		if (request.op === "find") return model === null ? { matches: 0, errors: [] } : findRows(model, request.where);
+		if (request.op === "matrix") {
+			return model === null
+				? { keys: [], count: 0, matches: [], unknown: [], errors: [] }
+				: matrixRows(model, request.rows);
+		}
+		return model === null
+			? { keys: [], rows: [], count: 0, matched: [], unknown: [], errors: [] }
+			: matchRows(model, request.rows);
+	}
+
 	if (root !== undefined && request !== undefined) {
 		const cfg = resolveConfig(request.cfg);
 		if (request.op === "text") return normalizeCell(readText(root, cfg));
 		const model = buildModel(root, cfg);
-		if (request.op === "keys") return model === null ? [] : model.keys;
-		if (request.op === "texts") return model === null ? { keys: [], rows: [] } : readTexts(model, request.raw === true);
-		if (request.op === "values") return model === null ? { keys: [], values: null } : readValues(model, request.column);
-		predicateErrors = [];
-		if (request.op === "find") return model === null ? { matches: 0, errors: [] } : findRows(model, request.where);
-		return model === null
-			? { keys: [], rows: [], count: 0, matched: [], unknown: [], errors: [] }
-			: matchRows(model, request.rows);
+		if (request.op === "find" || request.op === "match" || request.op === "matrix") return match(model, request);
+		return read(model, request);
 	}
 
 	return {
@@ -1059,6 +1211,7 @@ export function tableSelectorEngine(
 		queryAll: queryAll,
 		normalizeLine: normalizeLine,
 		normalizeCell: normalizeCell,
+		parseNumber: parseNumber,
 		defaultIgnore: DEFAULT_IGNORE.slice(),
 	};
 }
@@ -1111,6 +1264,24 @@ export const findTableRows: (root: Element, request: EngineFindRequest) => Engin
  */
 export const readCellText: (root: Element, request: EngineTextRequest) => string = tableSelectorEngine;
 
+/**
+ * The engine function typed for its "fingerprint" mode, for use with `locator.evaluate`.
+ * Same function object as {@link tableSelectorEngine}.
+ *
+ * @internal
+ */
+export const readTableFingerprint: (root: Element, request: EngineFingerprintRequest) => EngineFingerprint =
+	tableSelectorEngine;
+
+/**
+ * The engine function typed for its "matrix" mode, for use with `locator.evaluate`.
+ * Same function object as {@link tableSelectorEngine}.
+ *
+ * @internal
+ */
+export const matchTableMatrix: (root: Element, request: EngineMatrixRequest) => EngineMatrixResult =
+	tableSelectorEngine;
+
 const engine = tableSelectorEngine();
 
 /**
@@ -1129,6 +1300,14 @@ export const normalizeLine: (text: string) => string = engine.normalizeLine;
  * @internal
  */
 export const normalizeCell: (text: string) => string = engine.normalizeCell;
+
+/**
+ * Parses the one number in a text exactly as numeric cell conditions do, or returns `NaN`. See
+ * {@link DecimalSeparator} for the rules.
+ *
+ * @internal
+ */
+export const parseNumber: (text: string, decimal: DecimalSeparator) => number = engine.parseNumber;
 
 /**
  * The default `ignore` option of {@link TableLocator}: CSS selectors of the elements inside a cell whose

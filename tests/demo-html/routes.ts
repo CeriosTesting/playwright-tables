@@ -17,4 +17,5 @@ export enum Route {
 	AriaGridTable = "/aria-grid-table",
 	SortableTable = "/sortable-table",
 	ShadowDomTable = "/shadow-dom-table",
+	RefreshingTable = "/refreshing-table",
 }

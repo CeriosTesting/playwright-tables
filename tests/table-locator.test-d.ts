@@ -191,6 +191,57 @@ export async function matcherTypeTests(root: Locator): Promise<void> {
 	await users.toJson({ raw: true });
 	// @ts-expect-error raw is a boolean
 	await users.toJson({ raw: "yes" });
+	// columns narrows the keys, parse types the values
+	const picked = await users.toJson({ columns: ["Status"] });
+	assertType<Equals<typeof picked, { Status: string }[]>>();
+	const parsed = await users.toJson({
+		columns: ["Name", "Status"],
+		parse: { Status: "number", Name: text => text.length > 3 },
+		decimal: ",",
+	});
+	assertType<Equals<typeof parsed, { Name: boolean; Status: number | null }[]>>();
+	const dated = await users.toJson({ parse: { Name: "date" } });
+	assertType<Equals<(typeof dated)[number]["Name"], Date | null>>();
+	assertType<Equals<(typeof dated)[number]["Status"], string>>();
+	// @ts-expect-error unknown column
+	await users.toJson({ columns: ["Mail"] });
+	// @ts-expect-error unknown parser
+	await users.toJson({ parse: { Name: "boolean" } });
+	// @ts-expect-error unknown decimal separator
+	await users.toJson({ decimal: ";" });
+	await users.toJson({ stable: true });
+	await users.toJson({ stable: { quiet: 200, loading: root } });
+	// @ts-expect-error stable takes options or a boolean
+	await users.toJson({ stable: 200 });
+	// waitForStable and columnValues
+	await users.waitForStable({ quiet: 200, timeout: 1_000, loading: root });
+	const values = await users.columnValues("Status");
+	assertType<Equals<typeof values, string[]>>();
+	await users.columnValues(1);
+	// @ts-expect-error unknown header
+	await users.columnValues("Mail");
+	// Numeric conditions
+	users.row({ Status: { gt: 1 } });
+	users.row({ Status: { between: [1, 2], decimal: "," } });
+	// @ts-expect-error numeric conditions take numbers
+	users.row({ Status: { gt: "1" } });
+	// @ts-expect-error between takes a pair
+	users.row({ Status: { between: [1, 2, 3] } });
+	// @ts-expect-error decimal only goes with numeric conditions
+	users.row({ Status: { equals: "1", decimal: "," } });
+	// @ts-expect-error a condition has exactly one kind
+	users.row({ Status: { gt: 1, lt: 5 } });
+	// Dataset matchers
+	await expect(users).toContainRows([{ Name: "John" }, { Status: { gte: 2 } }], { timeout: 1_000 });
+	await expect(users).toHaveRows([{ Name: "John" }], { anyOrder: true });
+	await expect(users).toHaveEveryRow({ Status: "Active" });
+	await expect(users).toHaveColumnValues("Status", ["Active", /x/, { lt: 3 }], { anyOrder: true });
+	await expect(users).toHaveColumnValues(0, []);
+	await expect(users).toBeSortedBy("Status", { type: "number", decimal: "," });
+	// @ts-expect-error wrong matcher value type
+	await expect(users).toHaveColumnValues("Status", [5]);
+	// @ts-expect-error toHaveEveryRow is a table matcher, not a row matcher
+	await expect(users.rowAt(0)).toHaveEveryRow({ Name: "John" });
 	// Locator matchers keep working
 	await expect(users.rows.locator).toHaveCount(2);
 }

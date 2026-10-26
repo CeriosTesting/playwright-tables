@@ -8,6 +8,9 @@ test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async 
 		"toHaveRow",
 		"toHaveRowCount",
 		"toHaveRows",
+		"toContainRows",
+		"toHaveEveryRow",
+		"toHaveColumnValues",
 		"toHaveHeaders",
 		"toHaveCells",
 		"toBeSortedBy",
@@ -24,6 +27,9 @@ test("pw-table engine from dist/index.mjs (ESM) resolves rows and cells", async 
 	expect(await table.headerKeys()).toEqual(["Region", "Q1", "Q2", "Q3", "Q4"]);
 	await expect(table).toHaveRows([{ Region: "North" }, { Region: "South", Q3: "350" }, { Region: "East" }]);
 	await expect(table.row({ Region: "South" }).cell(3)).toHaveText("350");
+	await expect(table).toContainRows([{ Q4: { gt: 700 } }, { Region: "North" }]);
+	await expect(table).toHaveColumnValues("Region", ["East", "North", "South"], { anyOrder: true });
+	await table.waitForStable({ quiet: 100 });
 	await expect(table.rows.last().cell("Q4")).toHaveText("800");
 	expect((await table.toJson())[1]).toEqual({
 		Region: "South",

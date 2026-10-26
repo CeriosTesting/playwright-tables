@@ -1,3 +1,5 @@
+import type { Locator } from "@playwright/test";
+
 import { CellContentType } from "./cell-content-type";
 
 /**
@@ -41,6 +43,9 @@ export type ColumnKey<H extends string> = HeaderKey<H> | number;
  * table.row({ Status: { not: "Deleted" } });
  * table.row({ Email: { anyOf: [{ endsWith: "@example.com" }, /@test\./] } });
  * table.row({ Name: { allOf: [{ startsWith: "J" }, { not: { contains: "Doe" } }] } });
+ * // Numeric comparisons on the number in the cell (see {@link NumberCondition})
+ * table.row({ Age: { gte: 18 } });
+ * table.row({ Price: { between: [10, 20], decimal: "," } });
  */
 export type CellCondition =
 	| ExclusiveCondition<{ equals: string; ignoreCase?: boolean }>
@@ -61,7 +66,36 @@ export type CellCondition =
 	  }>
 	| ExclusiveCondition<{ not: CellMatcher }>
 	| ExclusiveCondition<{ anyOf: readonly [CellMatcher, ...CellMatcher[]] }>
-	| ExclusiveCondition<{ allOf: readonly [CellMatcher, ...CellMatcher[]] }>;
+	| ExclusiveCondition<{ allOf: readonly [CellMatcher, ...CellMatcher[]] }>
+	| NumberCondition;
+
+/**
+ * A numeric cell condition: the cell holds exactly one number, and it compares as asked. `between` is
+ * inclusive. A cell without a number, or with more than one, never matches.
+ *
+ * The number is read like {@link DecimalSeparator} describes: `"€ 1,200.50"` is 1200.5 and, with
+ * `decimal: ","`, `"1.234,5 kg"` is 1234.5.
+ *
+ * @example
+ * table.row({ Age: { gt: 65 } });
+ * table.row({ Total: { between: [100, 200] } });
+ */
+export type NumberCondition =
+	| ExclusiveCondition<{ gt: number; decimal?: DecimalSeparator }>
+	| ExclusiveCondition<{ gte: number; decimal?: DecimalSeparator }>
+	| ExclusiveCondition<{ lt: number; decimal?: DecimalSeparator }>
+	| ExclusiveCondition<{ lte: number; decimal?: DecimalSeparator }>
+	| ExclusiveCondition<{ between: readonly [number, number]; decimal?: DecimalSeparator }>;
+
+/**
+ * The decimal separator of the numbers in a table. Defaults to `"."`.
+ *
+ * A number is the one run of digits in the text, with an optional `-` or `−` in front (a currency symbol
+ * may come in between). Digits are grouped by the other separator, `'`, or a (non-breaking) space, in
+ * groups of three: with `"."`, `"1,234.5"`, `"1 234.5"` and `"1'234.5"` are all 1234.5. Other text, such
+ * as a currency or a unit, is ignored. Text with no number, or with more than one, is not a number.
+ */
+export type DecimalSeparator = "." | ",";
 
 type CellConditionKey =
 	| "equals"
@@ -74,7 +108,13 @@ type CellConditionKey =
 	| "not"
 	| "anyOf"
 	| "allOf"
-	| "ignoreCase";
+	| "gt"
+	| "gte"
+	| "lt"
+	| "lte"
+	| "between"
+	| "ignoreCase"
+	| "decimal";
 
 /** Forbids the keys of the other condition kinds, so a condition object has exactly one kind. */
 type ExclusiveCondition<T> = T & { [K in Exclude<CellConditionKey, keyof T>]?: never };
@@ -163,12 +203,87 @@ export type TableLocatorOptions<H extends string> = {
 };
 
 /**
+ * How {@link TableLocator.toJson} converts the text of a column:
+ * - `"number"`: a number, read as {@link DecimalSeparator} describes; an empty cell is `null`.
+ * - `"date"`: a `Date`, parsed with `Date.parse`; an empty cell is `null`.
+ * - A function: called in Node with the cell text, so it can use test variables. Its result is the value.
+ *
+ * A cell that `"number"` or `"date"` cannot parse, or a function that throws, fails `toJson()` with the
+ * row, the column and the text.
+ */
+export type ColumnParser = "number" | "date" | ((text: string) => unknown);
+
+/**
+ * `T`, but not a place to infer `T` from: like `NoInfer`, which needs TypeScript 5.4.
+ * @internal
+ */
+export type NotInferred<T> = [T][T extends unknown ? 0 : never];
+
+/** The {@link ColumnParser}s of {@link TableJsonOptions.parse}, by header key. */
+export type ColumnParsers<C extends string> = { readonly [K in C]?: ColumnParser };
+
+/** The value a {@link ColumnParser} produces. */
+export type ParsedValue<P> = P extends "number"
+	? number | null
+	: P extends "date"
+		? Date | null
+		: P extends (text: string) => infer R
+			? R
+			: string;
+
+/**
+ * One row of {@link TableLocator.toJson}: the text of every column in `C`, or the parsed value for the
+ * columns in `P`.
+ */
+export type TableJsonRow<C extends string, P = {}> = { [K in C]: K extends keyof P ? ParsedValue<P[K]> : string };
+
+/**
+ * Options for {@link TableLocator.waitForStable}.
+ *
+ * @example
+ * await users.waitForStable({ quiet: 300, loading: page.getByRole("progressbar") });
+ */
+export type StableOptions = {
+	/**
+	 * How long the header keys and body cell texts must stay the same, in milliseconds. Defaults to 500.
+	 */
+	quiet?: number;
+	/** The time to wait in milliseconds. Defaults to 5000. */
+	timeout?: number;
+	/**
+	 * A loading indicator, such as a spinner or an overlay. The table is only stable while it is hidden
+	 * (not attached, or not visible), so a table that is about to refresh isn't read too early.
+	 */
+	loading?: Locator;
+};
+
+/**
  * Options for {@link TableLocator.toJson}.
  *
  * @example
  * await users.toJson({ minRows: 1, timeout: 10_000 });
+ *
+ * @example
+ * // Some columns, with typed values
+ * await orders.toJson({ columns: ["Id", "Total"], parse: { Total: "number" }, decimal: "," });
  */
-export type TableJsonOptions = {
+export type TableJsonOptions<C extends string = string, P = {}> = {
+	/**
+	 * Only these columns, in this order. Defaults to every column of the main header row. A key that is not
+	 * a header key of the table fails `toJson()` with the available headers.
+	 */
+	columns?: readonly C[];
+	/** Converts the text of some columns to typed values, see {@link ColumnParser}. */
+	// Intersected with the parsers type, so a function parser gets its `text: string` parameter type. The
+	// columns are not inferred from it, so `parse` alone keeps every column.
+	parse?: P & ColumnParsers<NotInferred<C>>;
+	/** The decimal separator of the `"number"` columns of `parse`. Defaults to `"."`. */
+	decimal?: DecimalSeparator;
+	/**
+	 * Wait until the table stops changing before reading it, see {@link TableLocator.waitForStable}.
+	 * `true` uses the default options. The `timeout` of the stable options defaults to `timeout`.
+	 */
+	stable?: boolean | StableOptions;
 	/**
 	 * Wait for a header row and at least this many body rows with content (a row where at least one cell
 	 * has text) before reading. Defaults to `0`: read once, without waiting.
@@ -200,7 +315,8 @@ export type SerializedMatcher =
 	| { t: "f"; src: string }
 	| { t: "n"; m: SerializedMatcher }
 	| { t: "a"; m: SerializedMatcher[] }
-	| { t: "l"; m: SerializedMatcher[] };
+	| { t: "l"; m: SerializedMatcher[] }
+	| { t: "g"; op: "gt" | "gte" | "lt" | "lte" | "between"; v: number; w: number; d: DecimalSeparator };
 
 /**
  * Table configuration shared by every `pw-table-v1` query. Only what differs from the defaults is set,
@@ -223,10 +339,11 @@ export type EngineConfig = {
 };
 
 /**
- * Row conditions in wire format: one entry per header, every entry must match.
+ * Row conditions in wire format: one entry per header, every entry must match. The matchers of this
+ * package can also pass a column index as `h`.
  * @internal
  */
-export type SerializedWhere = { h: string; m: SerializedMatcher }[];
+export type SerializedWhere = { h: string | number; m: SerializedMatcher }[];
 
 /**
  * Body of a `pw-table-v1=` selector (JSON encoded).
@@ -250,7 +367,51 @@ export type EngineKeysRequest = { op: "keys"; cfg: EngineConfig };
  * or with `raw`, as the browser reads it.
  * @internal
  */
-export type EngineTextsRequest = { op: "texts"; cfg: EngineConfig; raw?: true };
+export type EngineTextsRequest = {
+	op: "texts";
+	cfg: EngineConfig;
+	raw?: true;
+	/**
+	 * Only read the cells under these header keys, in this order. `keys` still lists every header key, and
+	 * a key that is not one of them reads as `""`.
+	 */
+	columns?: string[];
+};
+
+/**
+ * Argument for evaluating the engine function directly to read a fingerprint of the table: the header
+ * keys and every body cell text, so a change shows up as a different fingerprint.
+ * @internal
+ */
+export type EngineFingerprintRequest = { op: "fingerprint"; cfg: EngineConfig };
+
+/**
+ * Result of an {@link EngineFingerprintRequest}: the number of body rows, and a hash of the header keys
+ * and body cell texts.
+ * @internal
+ */
+export type EngineFingerprint = { rows: number; hash: string };
+
+/**
+ * Argument for evaluating the engine function directly to find, for each set of conditions in `rows`, the
+ * body rows that match it.
+ * @internal
+ */
+export type EngineMatrixRequest = { op: "matrix"; cfg: EngineConfig; rows: SerializedWhere[] };
+
+/**
+ * Result of an {@link EngineMatrixRequest}. `matches[i]` lists the indexes of the body rows that match
+ * `rows[i]` of the request. `count` is the number of body rows; `unknown` lists the headers (or column
+ * indexes) the table doesn't have; `errors` lists problems with `predicate` conditions.
+ * @internal
+ */
+export type EngineMatrixResult = {
+	keys: string[];
+	count: number;
+	matches: number[][];
+	unknown: (string | number)[];
+	errors: string[];
+};
 
 /**
  * Argument for evaluating the engine function directly on a body cell, to read its normalized text.
@@ -300,7 +461,7 @@ export type EngineTexts = { keys: string[]; rows: string[][] };
 export type EngineMatchResult = EngineTexts & {
 	count: number;
 	matched: boolean[];
-	unknown: string[];
+	unknown: (string | number)[];
 	errors: string[];
 };
 
@@ -321,5 +482,6 @@ export type SelectorEngine = {
 	queryAll(root: Node, body: string): Element[];
 	normalizeLine: (text: string) => string;
 	normalizeCell: (text: string) => string;
+	parseNumber: (text: string, decimal: DecimalSeparator) => number;
 	defaultIgnore: string[];
 };

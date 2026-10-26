@@ -1,24 +1,31 @@
 import { expect as baseExpect, Expect, ExpectMatcherState, Locator } from "@playwright/test";
 
-import { describeWhere, serializeWhere } from "./cell-matcher-serializer";
-import { describeLastError, MIN_READ_TIMEOUT, pollUntil } from "./polling";
+import { describeMatcher, describeWhere, serializeMatcher, serializeWhere } from "./cell-matcher-serializer";
+import { describeLastError, MIN_READ_TIMEOUT, PollOutcome, pollUntil } from "./polling";
 import { TableLocator, TableRow } from "./table-locator";
 import {
 	CellMatcher,
+	DecimalSeparator,
 	EngineFindRequest,
 	EngineMatchRequest,
 	EngineMatchResult,
+	EngineMatrixRequest,
+	EngineMatrixResult,
 	EngineTextRequest,
+	EngineTexts,
 	EngineTextsRequest,
 	EngineValues,
 	EngineValuesRequest,
 	RowWhere,
 	SerializedMatcher,
+	SerializedWhere,
 } from "./table-locator.types";
 import {
 	findTableRows,
+	matchTableMatrix,
 	matchTableRows,
 	normalizeLine,
+	parseNumber,
 	readCellText,
 	readColumnValues,
 	readTableTexts,
@@ -56,10 +63,13 @@ export type TableSortOptions = TableMatcherOptions & {
 	/**
 	 * How cell texts are compared. Defaults to `"text"`.
 	 * - `"text"`: case-insensitive, with digit runs compared as numbers (`"item 9"` before `"item 10"`).
-	 * - `"number"`: the number in the text, ignoring everything but digits, `.` and `-` (`"€ 1,200"` is 1200).
+	 * - `"number"`: the one number in the text, read with the `decimal` separator (`"€ 1,200"` is 1200).
+	 *   See {@link DecimalSeparator} for the rules.
 	 * - `"date"`: parsed with `Date.parse`.
 	 */
 	type?: "text" | "number" | "date";
+	/** The decimal separator for `type: "number"`. Defaults to `"."`. */
+	decimal?: DecimalSeparator;
 	/**
 	 * Custom comparison of two cell texts, like `Array.sort`. Runs in Node, so it can use test variables.
 	 * Overrides `type`.
@@ -67,6 +77,15 @@ export type TableSortOptions = TableMatcherOptions & {
 	compare?: (a: string, b: string) => number;
 	/** Also require `aria-sort="ascending"` or `"descending"` on the header cell. Defaults to `false`. */
 	ariaSort?: boolean;
+};
+
+/** Options for the `toHaveRows` and `toHaveColumnValues` matchers. */
+export type TableRowsOptions = TableMatcherOptions & {
+	/**
+	 * Accept the rows (or values) in any order: each expected entry must match a different body row.
+	 * Defaults to `false`: body row `i` must match entry `i`.
+	 */
+	anyOrder?: boolean;
 };
 
 /**
@@ -297,6 +316,7 @@ async function toHaveCells(
 /**
  * Asserts that the table has exactly as many body rows as `rows`, and that body row `i` matches every
  * condition of `rows[i]`. Headers that a row does not mention are not checked, so `{}` matches any row.
+ * With `anyOrder: true`, the rows may come in any order: each entry must match a different body row.
  * With `.not`, the table must not match. Retries until the timeout.
  *
  * @example
@@ -309,10 +329,13 @@ async function toHaveRows(
 	this: ExpectMatcherState,
 	table: TableLocator,
 	rows: readonly RowWhere<string>[],
-	options?: TableMatcherOptions
+	options?: TableRowsOptions
 ): Promise<MatcherResult> {
 	const matcherName = "toHaveRows";
 	const timeout = options?.timeout ?? this.timeout;
+	if (options?.anyOrder === true) {
+		return matchUnordered(this, { matcherName, table, rows, exact: true, timeout });
+	}
 	const deadline = Date.now() + timeout;
 	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
 	const request: EngineMatchRequest = { op: "match", cfg: table["_config"], rows: rows.map(serializeWhere) };
@@ -358,6 +381,167 @@ async function toHaveRows(
 }
 
 /**
+ * Asserts that every entry of `rows` matches a different body row, in any order; other body rows are
+ * allowed. With `.not`, at least one entry has no body row of its own. Retries until the timeout.
+ *
+ * @example
+ * await expect(users).toContainRows([
+ *   { Name: "Joe", Status: "Active" },
+ *   { Name: "John" },
+ * ]);
+ */
+async function toContainRows(
+	this: ExpectMatcherState,
+	table: TableLocator,
+	rows: readonly RowWhere<string>[],
+	options?: TableMatcherOptions
+): Promise<MatcherResult> {
+	const timeout = options?.timeout ?? this.timeout;
+	return matchUnordered(this, { matcherName: "toContainRows", table, rows, exact: false, timeout });
+}
+
+/**
+ * Asserts that the table has body rows and that every one of them matches `where`, for example after
+ * filtering. With `.not`, at least one body row doesn't match. A table without body rows fails both,
+ * so a filter that leaves nothing never passes. Retries until the timeout.
+ *
+ * @example
+ * await page.getByLabel("Status").selectOption("Active");
+ * await expect(users).toHaveEveryRow({ Status: "Active" });
+ */
+async function toHaveEveryRow(
+	this: ExpectMatcherState,
+	table: TableLocator,
+	where: RowWhere<string>,
+	options?: TableMatcherOptions
+): Promise<MatcherResult> {
+	const matcherName = "toHaveEveryRow";
+	const timeout = options?.timeout ?? this.timeout;
+	const conditions = serializeWhere(where);
+	if (conditions.length === 0) {
+		throw new Error(`${matcherName}() requires at least one condition.`);
+	}
+	const checkable = (result: EngineMatrixResult): boolean => result.unknown.length === 0 && result.count > 0;
+	const every = (result: EngineMatrixResult): boolean => (result.matches[0]?.length ?? 0) === result.count;
+
+	const poll = await pollMatrix(
+		table,
+		[conditions],
+		Date.now() + timeout,
+		read => checkable(read) && every(read) !== this.isNot
+	);
+	const result = poll.value;
+	const canCheck = poll.read && checkable(result);
+	const pass = canCheck ? every(result) : this.isNot;
+	const failed = pass === this.isNot;
+	const matching = new Set(result.matches[0] ?? []);
+	const mismatches = range(result.count).filter(index => !matching.has(index));
+	const body = failed && canCheck && !this.isNot ? await readBody(table) : undefined;
+
+	return {
+		name: matcherName,
+		pass,
+		expected: where,
+		actual: result.count - mismatches.length,
+		timeout,
+		message: () =>
+			this.utils.matcherHint(matcherName, "table", "where", { isNot: this.isNot }) +
+			"\n\n" +
+			`Expected: ${this.isNot ? "not every" : "every"} body row matching ${describeWhere(where)}\n` +
+			(!poll.read
+				? "Received: the table could not be read\n"
+				: result.unknown.length > 0
+					? "Received: a table that cannot be checked\n" + describeUnknown(result.unknown, result.keys)
+					: result.count === 0
+						? "Received: the table has no body rows\n"
+						: `Received: ${result.count - mismatches.length} of ${result.count} body rows match\n`) +
+			(body === undefined
+				? ""
+				: "Body rows that do not match:\n" + describeBodyRows(body, mismatches, conditionHeaders(where))) +
+			describePredicateErrors(result.errors) +
+			describeLastError(poll.error) +
+			`Table locator: ${table.root.toString()}\n` +
+			`Timeout: ${timeout}ms`,
+	};
+}
+
+/**
+ * Asserts that `column` has exactly these cell values, one per body row: body row `i` matches `values[i]`,
+ * or with `anyOrder: true`, each value matches a different body row. Values are an exact string, a RegExp
+ * or a {@link CellCondition}, compared as in row conditions. With `.not`, the column must not match.
+ * Retries until the timeout.
+ *
+ * @example
+ * await expect(users).toHaveColumnValues("Status", ["Active", "Inactive", "Active"]);
+ * await expect(orders).toHaveColumnValues("Total", [{ gt: 0 }, { gt: 0 }], { anyOrder: true });
+ */
+async function toHaveColumnValues(
+	this: ExpectMatcherState,
+	table: TableLocator,
+	column: string | number,
+	values: readonly CellMatcher[],
+	options?: TableRowsOptions
+): Promise<MatcherResult> {
+	const matcherName = "toHaveColumnValues";
+	const timeout = options?.timeout ?? this.timeout;
+	const anyOrder = options?.anyOrder === true;
+	if (typeof column === "number" && (column < 0 || !Number.isInteger(column))) {
+		throw new Error(`Column index must be a non-negative integer, got: ${column}`);
+	}
+	const header = typeof column === "string" ? normalizeLine(column) : column;
+	const label = String(column);
+	const rows: SerializedWhere[] = values.map(value => [{ h: header, m: serializeMatcher(label, value) }]);
+	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
+	const request: EngineMatchRequest = { op: "match", cfg: table["_config"], rows };
+	const matches = (result: EngineMatchResult): boolean =>
+		result.unknown.length === 0 && result.count === values.length && result.matched.every(Boolean);
+	const accept = (result: EngineMatchResult): boolean =>
+		matches(result) !== this.isNot && (!this.isNot || result.unknown.length === 0);
+
+	let poll: PollOutcome<EngineMatchResult>;
+	if (anyOrder) {
+		// The matrix lists every body row a value matches; the values match when each gets a row of its own.
+		const matrix = await pollMatrix(table, rows, Date.now() + timeout, read => accept(fromMatrix(read)));
+		poll = { ...matrix, value: fromMatrix(matrix.value) };
+	} else {
+		poll = await pollUntil(
+			readTimeout => table.root.evaluate(matchTableRows, request, { timeout: readTimeout }),
+			accept,
+			{ keys: [], rows: [], count: 0, matched: [], unknown: [], errors: [] },
+			Date.now() + timeout
+		);
+	}
+	const result = poll.value;
+	const uncheckable = !poll.read || result.unknown.length > 0;
+	const pass = uncheckable ? this.isNot : matches(result);
+	const received =
+		pass === this.isNot && !uncheckable ? await readValues(table, header).catch(() => undefined) : undefined;
+
+	return {
+		name: matcherName,
+		pass,
+		expected: values,
+		actual: received,
+		timeout,
+		message: () =>
+			this.utils.matcherHint(matcherName, "table", "values", { isNot: this.isNot }) +
+			"\n\n" +
+			`Expected: ${typeof column === "number" ? `column ${column}` : `column ${JSON.stringify(column)}`} ` +
+			`${this.isNot ? "not " : ""}with ${values.length} values${anyOrder ? " in any order" : ""}: ` +
+			`[${values.map(describeMatcher).join(", ")}]\n` +
+			(!poll.read
+				? "Received: the table could not be read\n"
+				: result.unknown.length > 0
+					? "Received: a table that cannot be checked\n" + describeUnknown(result.unknown, result.keys)
+					: describeReceivedValues(values, result, received, anyOrder, this.isNot)) +
+			describePredicateErrors(result.errors) +
+			describeLastError(poll.error) +
+			`Table locator: ${table.root.toString()}\n` +
+			`Timeout: ${timeout}ms`,
+	};
+}
+
+/**
  * Asserts that the body rows are sorted by `column`. Values are compared in Node, so `compare` can use
  * variables from the test. An empty body, an unknown column or a value that cannot be parsed fails the
  * assertion, also with `.not`. Retries until the timeout.
@@ -378,6 +562,7 @@ async function toBeSortedBy(
 	const sort: SortSettings = {
 		order: options?.order ?? "asc",
 		type: options?.type ?? "text",
+		decimal: options?.decimal ?? ".",
 		compare: options?.compare,
 		ariaSort: options?.ariaSort === true,
 	};
@@ -408,6 +593,7 @@ async function toBeSortedBy(
 type SortSettings = {
 	order: "asc" | "desc";
 	type: "text" | "number" | "date";
+	decimal: DecimalSeparator;
 	compare: ((a: string, b: string) => number) | undefined;
 	ariaSort: boolean;
 };
@@ -447,7 +633,7 @@ async function pollSorted(
 		column: typeof column === "string" ? normalizeLine(column) : column,
 	};
 	const evaluate = (read: SortRead): { check: SortCheck; sorted: boolean } => {
-		const check = checkSorted(read.column, column, sort.order, sort.type, sort.compare);
+		const check = checkSorted(read.column, column, sort);
 		const sorted =
 			check.error === undefined &&
 			check.outOfOrder === undefined &&
@@ -518,7 +704,10 @@ function describeReceivedSort(
  *
  * - `toHaveRow(where, options?)`: at least one body row matches every condition.
  * - `toHaveRowCount(count, options?)`: exactly `count` body rows.
- * - `toHaveRows(rows, options?)`: exactly these body rows, in order, each matching its conditions.
+ * - `toHaveRows(rows, options?)`: exactly these body rows, in order (or `anyOrder`), each matching its conditions.
+ * - `toContainRows(rows, options?)`: each entry matches a different body row, in any order; other rows are allowed.
+ * - `toHaveEveryRow(where, options?)`: there are body rows, and every one matches the conditions.
+ * - `toHaveColumnValues(column, values, options?)`: one value per body row, in order (or `anyOrder`).
  * - `toHaveHeaders(headers, options?)`: the main header row contains these header keys (`exact` for an ordered match).
  * - `toBeSortedBy(column, options?)`: the body rows are sorted by a column (see {@link TableSortOptions}).
  * - `toHaveCells(cells, options?)` on a {@link TableRow}: exactly one row, whose cells match every condition.
@@ -544,10 +733,23 @@ export const tableMatchers: {
 	toHaveRow: typeof toHaveRow;
 	toHaveRowCount: typeof toHaveRowCount;
 	toHaveRows: typeof toHaveRows;
+	toContainRows: typeof toContainRows;
+	toHaveEveryRow: typeof toHaveEveryRow;
+	toHaveColumnValues: typeof toHaveColumnValues;
 	toHaveHeaders: typeof toHaveHeaders;
 	toHaveCells: typeof toHaveCells;
 	toBeSortedBy: typeof toBeSortedBy;
-} = { toHaveRow, toHaveRowCount, toHaveRows, toHaveHeaders, toHaveCells, toBeSortedBy };
+} = {
+	toHaveRow,
+	toHaveRowCount,
+	toHaveRows,
+	toContainRows,
+	toHaveEveryRow,
+	toHaveColumnValues,
+	toHaveHeaders,
+	toHaveCells,
+	toBeSortedBy,
+};
 
 /**
  * Playwright `expect` extended with {@link tableMatchers}.
@@ -562,6 +764,8 @@ export const tableMatchers: {
  *   await expect(users).not.toHaveRow({ Name: "Ghost" });
  *   await expect(users).toHaveRowCount(3);
  *   await expect(users).toHaveRows([{ Name: "John" }, { Name: "Jane" }, { Name: "Joe" }]);
+ *   await expect(users).toContainRows([{ Name: "Joe" }, { Name: "John" }]);
+ *   await expect(users).toHaveColumnValues("Status", ["Active", "Inactive", "Active"]);
  *   await users.header("Name").click();
  *   await expect(users).toBeSortedBy("Name");
  *   await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active" });
@@ -651,10 +855,226 @@ async function waitForHeaders(table: TableLocator, headers: readonly string[], d
 	return unknown.length === 0 ? "" : describeUnknown(unknown, poll.value) + describeLastError(poll.error);
 }
 
-function describeUnknown(unknown: readonly string[], available: readonly string[]): string {
+function describeUnknown(unknown: readonly (string | number)[], available: readonly string[]): string {
 	return (
-		unknown.map(header => `Header "${header}" not found.\n`).join("") + `Available headers: [${available.join(", ")}]\n`
+		unknown
+			.map(header =>
+				typeof header === "number" ? `Column ${header} does not exist.\n` : `Header "${header}" not found.\n`
+			)
+			.join("") + `Available headers: [${available.join(", ")}]\n`
 	);
+}
+
+/** Reads the matrix of `rows` until `done` accepts it, or until `deadline`. */
+function pollMatrix(
+	table: TableLocator,
+	rows: SerializedWhere[],
+	deadline: number,
+	done: (result: EngineMatrixResult) => boolean
+): Promise<PollOutcome<EngineMatrixResult>> {
+	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
+	const request: EngineMatrixRequest = { op: "matrix", cfg: table["_config"], rows };
+	return pollUntil(
+		readTimeout => table.root.evaluate(matchTableMatrix, request, { timeout: readTimeout }),
+		done,
+		{ keys: [], count: 0, matches: [], unknown: [], errors: [] },
+		deadline
+	);
+}
+
+/**
+ * Gives each expected row a different body row, as many as possible (a maximum bipartite matching), so
+ * overlapping conditions such as `{ Status: "Active" }` and `{ Name: "John" }` don't steal each other's
+ * rows. `matches[i]` lists the body rows expected row `i` matches. Returns the body row of every expected
+ * row, or -1 for the ones left without.
+ */
+function assignRows(matches: readonly (readonly number[])[]): number[] {
+	const assigned = matches.map(() => -1);
+	const owner = new Map<number, number>();
+	const assign = (expected: number, seen: Set<number>): boolean => {
+		for (const row of matches[expected] ?? []) {
+			if (seen.has(row)) continue;
+			seen.add(row);
+			const current = owner.get(row);
+			if (current === undefined || assign(current, seen)) {
+				owner.set(row, expected);
+				assigned[expected] = row;
+				return true;
+			}
+		}
+		return false;
+	};
+	matches.forEach((_rows, expected) => assign(expected, new Set()));
+	return assigned;
+}
+
+/** A matrix result as a match result: entry `i` matches when it has a body row of its own. */
+function fromMatrix(result: EngineMatrixResult): EngineMatchResult {
+	return {
+		keys: result.keys,
+		rows: [],
+		count: result.count,
+		matched: assignRows(result.matches).map(row => row !== -1),
+		unknown: result.unknown,
+		errors: result.errors,
+	};
+}
+
+/** `toContainRows`, and `toHaveRows` with `anyOrder`: each entry of `rows` matches a different body row. */
+async function matchUnordered(
+	state: ExpectMatcherState,
+	details: {
+		matcherName: string;
+		table: TableLocator;
+		rows: readonly RowWhere<string>[];
+		/** Whether the table must have exactly as many body rows as `rows`. */
+		exact: boolean;
+		timeout: number;
+	}
+): Promise<MatcherResult> {
+	const { matcherName, table, rows, exact, timeout } = details;
+	const matches = (result: EngineMatchResult): boolean =>
+		result.unknown.length === 0 && result.matched.every(Boolean) && (!exact || result.count === rows.length);
+
+	const poll = await pollMatrix(
+		table,
+		rows.map(serializeWhere),
+		Date.now() + timeout,
+		// With `.not`, an unknown header is not a pass: keep waiting for it to show up.
+		read => {
+			const result = fromMatrix(read);
+			return matches(result) !== state.isNot && (!state.isNot || result.unknown.length === 0);
+		}
+	);
+	const result = fromMatrix(poll.value);
+	const uncheckable = !poll.read || result.unknown.length > 0;
+	const pass = uncheckable ? state.isNot : matches(result);
+	const failed = pass === state.isNot;
+	const body = failed && !uncheckable ? await readBody(table) : undefined;
+	const missing = range(rows.length).filter(index => result.matched[index] !== true);
+	const headers = rows.flatMap(conditionHeaders);
+
+	return {
+		name: matcherName,
+		pass,
+		expected: rows,
+		actual: body?.rows.map(texts => toRecord(body.keys, texts)),
+		timeout,
+		message: () =>
+			state.utils.matcherHint(matcherName, "table", "rows", { isNot: state.isNot }) +
+			"\n\n" +
+			`Expected: ${state.isNot ? "not " : ""}${exact ? `${rows.length} body rows` : "body rows"} ` +
+			`matching, in any order${exact ? "" : " (other rows allowed)"}\n` +
+			rows.map((where, index) => `  [${index}] ${describeWhere(where)}\n`).join("") +
+			(!poll.read
+				? "Received: the table could not be read\n"
+				: `Received: ${result.count} body rows${
+						state.isNot && !uncheckable ? `, and every entry matches a different one` : ""
+					}\n`) +
+			(state.isNot || uncheckable
+				? ""
+				: missing
+						.slice(0, MAX_REPORTED_ROWS)
+						.map(index => `No body row left for [${index}] ${describeWhere(rows[index] ?? {})}\n`)
+						.join("") +
+					(missing.length > MAX_REPORTED_ROWS ? `... and ${missing.length - MAX_REPORTED_ROWS} more\n` : "")) +
+			(body === undefined ? "" : "Body rows:\n" + describeBodyRows(body, range(body.rows.length), headers)) +
+			(result.unknown.length > 0 ? describeUnknown(result.unknown, result.keys) : "") +
+			describePredicateErrors(result.errors) +
+			describeLastError(poll.error) +
+			`Table locator: ${table.root.toString()}\n` +
+			`Timeout: ${timeout}ms`,
+	};
+}
+
+/** Reads the header keys and body cell texts for a failure message, or `undefined` if that fails. */
+async function readBody(table: TableLocator): Promise<EngineTexts | undefined> {
+	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
+	const request: EngineTextsRequest = { op: "texts", cfg: table["_config"] };
+	return table.root.evaluate(readTableTexts, request, { timeout: 1_000 }).catch(() => undefined);
+}
+
+/** Reads the body cell texts of `column` for a failure message. */
+async function readValues(table: TableLocator, column: string | number): Promise<string[] | undefined> {
+	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
+	const request: EngineValuesRequest = { op: "values", cfg: table["_config"], column };
+	const read = await table.root.evaluate(readColumnValues, request, { timeout: 1_000 });
+	return read.values ?? undefined;
+}
+
+/** Longest cell text shown in a table of body rows. */
+const MAX_CELL_WIDTH = 30;
+
+/**
+ * The body rows at `indexes` as an aligned text table, with the row index in front. Only the columns of
+ * `headers` are shown (all of them if none of `headers` is a column), and at most `MAX_REPORTED_ROWS` rows.
+ *
+ * @example
+ *   #  | Name | Status
+ *   0  | John | Active
+ */
+function describeBodyRows(
+	body: EngineTexts,
+	indexes: readonly number[],
+	headers: readonly (string | number)[]
+): string {
+	if (indexes.length === 0) return "  (none)\n";
+	const columns: number[] = [];
+	for (const header of headers) {
+		const column = typeof header === "number" ? header : body.keys.indexOf(normalizeLine(header));
+		if (column >= 0 && column < body.keys.length && !columns.includes(column)) columns.push(column);
+	}
+	if (columns.length === 0) columns.push(...range(body.keys.length));
+
+	const shown = indexes.slice(0, MAX_REPORTED_ROWS);
+	const cell = (text: string): string => {
+		const line = text.replace(/\n/g, "↵");
+		return line.length > MAX_CELL_WIDTH ? `${line.slice(0, MAX_CELL_WIDTH - 1)}…` : line;
+	};
+	const lines = [
+		["#", ...columns.map(column => cell(body.keys[column] ?? ""))],
+		...shown.map(index => [String(index), ...columns.map(column => cell(body.rows[index]?.[column] ?? ""))]),
+	];
+	const widths = (lines[0] ?? []).map((_text, c) => Math.max(...lines.map(line => line[c]?.length ?? 0)));
+	let table = lines
+		.map(line => `  ${line.map((text, c) => text.padEnd(widths[c] ?? 0)).join(" | ")}`.trimEnd() + "\n")
+		.join("");
+	if (indexes.length > shown.length) table += `  ... and ${indexes.length - shown.length} more rows\n`;
+	return table;
+}
+
+/** The "Received:" lines of a `toHaveColumnValues` failure. */
+function describeReceivedValues(
+	values: readonly CellMatcher[],
+	result: EngineMatchResult,
+	received: readonly string[] | undefined,
+	anyOrder: boolean,
+	isNot: boolean
+): string {
+	const shown = (received ?? []).slice(0, MAX_REPORTED_VALUES).map(value => JSON.stringify(value));
+	if (received !== undefined && received.length > MAX_REPORTED_VALUES) {
+		shown.push(`... ${received.length - MAX_REPORTED_VALUES} more`);
+	}
+	let message = received === undefined ? `Received: ${result.count} body rows\n` : `Received: [${shown.join(", ")}]\n`;
+	if (isNot) return message;
+	if (result.count !== values.length) message += `Expected ${values.length} values, received ${result.count}\n`;
+	const mismatches = range(Math.min(values.length, result.matched.length)).filter(i => result.matched[i] !== true);
+	for (const index of mismatches.slice(0, MAX_REPORTED_ROWS)) {
+		const value = values[index];
+		const description = value === undefined ? "" : describeMatcher(value);
+		message += anyOrder
+			? `No body row left for value [${index}] ${description}\n`
+			: `Row ${index} does not match ${description}, received ${JSON.stringify(received?.[index])}\n`;
+	}
+	if (mismatches.length > MAX_REPORTED_ROWS) {
+		message += `... and ${mismatches.length - MAX_REPORTED_ROWS} more that do not match\n`;
+	}
+	return message;
+}
+
+/** The numbers `0` to `count - 1`. */
+function range(count: number): number[] {
+	return Array.from({ length: count }, (_value, index) => index);
 }
 
 /** The headers that have a condition. */
@@ -752,13 +1172,8 @@ type SortCheck = {
 	outOfOrder?: number;
 };
 
-function checkSorted(
-	read: EngineValues,
-	column: string | number,
-	order: "asc" | "desc",
-	type: "text" | "number" | "date",
-	compare?: (a: string, b: string) => number
-): SortCheck {
+function checkSorted(read: EngineValues, column: string | number, sort: SortSettings): SortCheck {
+	const { order, type, compare, decimal } = sort;
 	const values = read.values;
 	if (values === null) {
 		if (typeof column === "number") return { error: `column ${column} does not exist`, unknown: true };
@@ -773,7 +1188,7 @@ function checkSorted(
 	} else if (type === "text") {
 		comparator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }).compare;
 	} else {
-		const parse = type === "number" ? parseNumber : Date.parse;
+		const parse = type === "number" ? (text: string) => parseNumber(text, decimal) : Date.parse;
 		const parsed = new Map<string, number>();
 		for (const [i, text] of values.entries()) {
 			const value = parse(text);
@@ -792,12 +1207,6 @@ function checkSorted(
 		previous = value;
 	}
 	return { values };
-}
-
-/** Parses a number from text such as `"€ 1,200.50"` or `"-3 %"`. Only `.` is a decimal separator. */
-function parseNumber(text: string): number {
-	const digits = text.replace(/[^\d.-]/g, "");
-	return digits === "" ? NaN : Number(digits);
 }
 
 function toRecord(keys: readonly string[], texts: readonly string[]): Record<string, string> {

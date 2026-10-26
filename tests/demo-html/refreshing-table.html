@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>Html Table that refreshes</title>
+		<style>
+			table,
+			th,
+			td {
+				border: 1px solid black;
+				border-collapse: collapse;
+			}
+			#spinner[hidden] {
+				display: none;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Table that refreshes after a search</h2>
+		<p>
+			Searching shows a spinner for a moment, like a server round trip. Then the matching rows come in one by one, and
+			the spinner is gone before the last rows are in.
+		</p>
+		<label>Search <input id="search" /></label>
+		<button id="apply">Apply</button>
+		<button id="tick">Keep changing</button>
+		<span id="spinner" role="progressbar" hidden>Loading...</span>
+
+		<table id="Orders">
+			<thead>
+				<tr>
+					<th>Customer</th>
+					<th>Status</th>
+					<th>Total</th>
+				</tr>
+			</thead>
+			<tbody></tbody>
+		</table>
+
+		<script>
+			const orders = [
+				["John", "Active", "€ 1.200,50"],
+				["Jane", "Inactive", "€ 80,00"],
+				["Joe", "Active", "€ 15,25"],
+				["Jack", "Active", "€ 3.000,00"],
+			];
+			const body = document.querySelector("#Orders tbody");
+			const spinner = document.getElementById("spinner");
+
+			function row(cells) {
+				const tr = document.createElement("tr");
+				for (const text of cells) {
+					const td = document.createElement("td");
+					td.textContent = text;
+					tr.appendChild(td);
+				}
+				return tr;
+			}
+
+			function render(filter) {
+				spinner.hidden = false;
+				setTimeout(() => {
+					body.replaceChildren();
+					const matching = orders.filter(order => order[0].startsWith(filter));
+					// The spinner goes away after the first row: only waiting for stable rows sees them all.
+					matching.forEach((order, index) => {
+						setTimeout(() => {
+							body.appendChild(row(order));
+							if (index === 0) spinner.hidden = true;
+						}, index * 150);
+					});
+					if (matching.length === 0) spinner.hidden = true;
+				}, 400);
+			}
+
+			document.getElementById("apply").addEventListener("click", () => {
+				render(document.getElementById("search").value);
+			});
+			document.getElementById("tick").addEventListener("click", () => {
+				let count = 0;
+				setInterval(() => {
+					const first = body.rows[0];
+					if (first !== undefined) first.cells[2].textContent = `€ ${count++},00`;
+				}, 50);
+			});
+
+			orders.forEach(order => body.appendChild(row(order)));
+		</script>
+	</body>
+</html>

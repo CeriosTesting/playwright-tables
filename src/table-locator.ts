@@ -2,23 +2,34 @@ import { Locator } from "@playwright/test";
 
 import { CellContentType } from "./cell-content-type";
 import { describeWhere, serializeWhere } from "./cell-matcher-serializer";
-import { describeLastError, pollUntil } from "./polling";
+import { describeLastError, MIN_READ_TIMEOUT, pollUntil } from "./polling";
 import {
 	ColumnKey,
+	ColumnParser,
+	ColumnParsers,
+	DecimalSeparator,
 	EngineConfig,
+	EngineFingerprint,
+	EngineFingerprintRequest,
 	EngineKeysRequest,
 	EngineQuery,
 	EngineTexts,
 	EngineTextsRequest,
+	EngineValuesRequest,
 	HeaderKey,
 	RowWhere,
+	StableOptions,
 	TableJsonOptions,
+	TableJsonRow,
 	TableLocatorOptions,
 	ValidRowWhere,
 } from "./table-locator.types";
 import {
 	normalizeCell,
 	normalizeLine,
+	parseNumber,
+	readColumnValues,
+	readTableFingerprint,
 	readTableHeaderKeys,
 	readTableTexts,
 	TABLE_SELECTOR_ENGINE_NAME,
@@ -325,19 +336,26 @@ export class TableLocator<const H extends string = string> {
 	 * Cell text is normalized as in row conditions: line breaks stay as one `\n` between trimmed lines.
 	 * With `raw: true`, cells are returned exactly as the browser reads them.
 	 *
-	 * This is a snapshot, not a locator: without `minRows` it reads the table once and does not wait for
-	 * rows. With `minRows`, it first waits for a header row and at least that many body rows with content
-	 * (a row where at least one cell has text), so empty placeholder rows don't count. To wait for specific
-	 * content, assert first (for example with `toHaveRow` or `toHaveRows`).
+	 * This is a snapshot, not a locator: without `minRows` or `stable` it reads the table once and does not
+	 * wait for rows. With `minRows`, it first waits for a header row and at least that many body rows with
+	 * content (a row where at least one cell has text), so empty placeholder rows don't count. With
+	 * `stable`, it then waits until the table stops changing (see {@link waitForStable}). To wait for
+	 * specific content, assert first (for example with `toHaveRow` or `toHaveRows`).
 	 *
 	 * @param options - Optional settings. See {@link TableJsonOptions}.
+	 * @param options.columns - (Optional) Only these columns, in this order. Defaults to every column.
+	 * @param options.parse - (Optional) Typed values for some columns: `"number"`, `"date"` or a function.
+	 * @param options.decimal - (Optional) The decimal separator of `"number"` columns. Defaults to `"."`.
 	 * @param options.minRows - (Optional) Wait for at least this many body rows with content. Defaults to `0` (no waiting).
-	 * @param options.timeout - (Optional) With `minRows`, the time to wait in milliseconds (default 5000).
-	 *   Without it, the time to wait for the table element to be attached.
+	 * @param options.stable - (Optional) Wait until the table stops changing before reading it. Defaults to `false`.
+	 * @param options.timeout - (Optional) With `minRows` or `stable`, the time to wait in milliseconds (default 5000).
+	 *   Without them, the time to wait for the table element to be attached.
 	 * @param options.raw - (Optional) Return the cell texts without normalization. Defaults to `false`.
 	 * @returns A promise that resolves to one object per body row, or an empty array if there are no body rows.
 	 * @throws Error if the table has no header row (without `minRows`).
-	 * @throws Error if `minRows` is not reached within the timeout, with the rows that were found.
+	 * @throws Error if a key of `columns` or `parse` is not a header key of the table, with the available headers.
+	 * @throws Error if a cell of a `parse` column cannot be parsed, with the row, the column and the text.
+	 * @throws Error if `minRows` is not reached, or the table doesn't become stable, within the timeout.
 	 * @throws Error if `minRows` is not a non-negative integer.
 	 *
 	 * @example
@@ -349,32 +367,127 @@ export class TableLocator<const H extends string = string> {
 	 * @example
 	 * // Wait until at least one row is loaded
 	 * const data = await users.toJson({ minRows: 1 });
+	 *
+	 * @example
+	 * // Some columns, with typed values: { Id: string; Total: number | null }[]
+	 * const totals = await orders.toJson({ columns: ["Id", "Total"], parse: { Total: "number" } });
 	 */
-	async toJson(options?: TableJsonOptions): Promise<Record<HeaderKey<H>, string>[]> {
-		const minRows = options?.minRows ?? 0;
-		if (minRows < 0 || !Number.isInteger(minRows)) {
-			throw new Error(`minRows must be a non-negative integer, got: ${minRows}`);
-		}
-		const raw = options?.raw === true;
-		const { keys, rows } =
-			minRows > 0
-				? await this.readTextsWithRows(minRows, options?.timeout ?? 5_000, raw)
-				: await this.readTexts(raw, { timeout: options?.timeout });
-		if (keys.length === 0) {
-			const selector = this._config.headerRow;
+	async toJson<const C extends HeaderKey<H> = HeaderKey<H>, const P extends ColumnParsers<C> = Record<never, never>>(
+		options?: TableJsonOptions<C, P>
+	): Promise<TableJsonRow<C, P>[]> {
+		const columns: readonly string[] | undefined = options?.columns;
+		const { keys, rows } = await this.readJsonTexts(options ?? {}, columns);
+		const outputKeys = columns ?? keys;
+		const parsers: [string, ColumnParser | undefined][] = Object.entries(options?.parse ?? {});
+		this.checkJsonColumns(keys, outputKeys, columns ?? [], parsers);
+
+		const decimal = options?.decimal ?? ".";
+		const result = rows.map((cells, r) => {
+			const row: Record<string, unknown> = {};
+			outputKeys.forEach((key, index) => {
+				row[key] = cells[index] ?? "";
+			});
+			for (const [key, parser] of parsers) {
+				if (parser !== undefined) row[key] = parseCell(parser, String(row[key]), decimal, r, key);
+			}
+			return row;
+		});
+		// The values are built from `columns` and `parse`, exactly as `TableJsonRow` describes them.
+		return result as TableJsonRow<C, P>[];
+	}
+
+	/**
+	 * Reads the text of every body cell under `column`, one per body row. A cell that spans rows is
+	 * repeated in every row it covers; a row without a cell there reads as `""`. Text is normalized as in
+	 * row conditions.
+	 *
+	 * This is a snapshot, not a locator: it reads the table once. To wait for content, assert first, or
+	 * use `toHaveColumnValues`.
+	 *
+	 * @param column - The header key of the column, or its 0-based index (also works without header rows).
+	 * @param options - Optional timeout for waiting until the table element is attached.
+	 * @returns A promise that resolves to the cell texts, or an empty array if there are no body rows.
+	 * @throws Error if the table has no such column, with the available headers.
+	 *
+	 * @example
+	 * expect(await users.columnValues("Status")).toEqual(["Active", "Inactive", "Active"]);
+	 *
+	 * @example
+	 * // The distinct values of a column
+	 * const statuses = new Set(await users.columnValues("Status"));
+	 */
+	async columnValues(column: ColumnKey<H>, options?: { timeout?: number }): Promise<string[]> {
+		const request: EngineValuesRequest = { op: "values", cfg: this._config, column: resolveColumn(column) };
+		const { keys, values } = await this.root.evaluate(readColumnValues, request, options);
+		if (values === null) {
 			throw new Error(
-				`TableLocator.toJson() needs a header row, but the table has none.\n` +
-					(selector === undefined ? "" : `Header row selector: "${selector}"\n`) +
+				`TableLocator.columnValues(): ` +
+					(typeof column === "number" ? `column ${column} does not exist.` : `Header "${column}" not found.`) +
+					`\nAvailable headers: [${keys.join(", ")}]\n` +
 					`Table locator: ${this.root.toString()}`
 			);
 		}
-		return rows.map(texts => {
-			const row: Record<string, string> = {};
-			keys.forEach((key, index) => {
-				row[key] = texts[index] ?? "";
-			});
-			return row;
-		});
+		return values;
+	}
+
+	/**
+	 * Waits until the table stops changing: the header keys and the text of every body cell stay the same
+	 * for `quiet` milliseconds, and the `loading` indicator (if any) is hidden. Use it after an action that
+	 * refreshes the table (searching, filtering, paging, sorting) before you read it with a snapshot method
+	 * such as {@link toJson}.
+	 *
+	 * Locators and the table matchers retry by themselves and don't need it. A table that has not started
+	 * to refresh yet looks stable, so pass `loading` when the table shows an indicator while it loads.
+	 *
+	 * @param options - Optional settings. See {@link StableOptions}.
+	 * @param options.quiet - (Optional) How long nothing may change, in milliseconds. Defaults to 500.
+	 * @param options.timeout - (Optional) The time to wait in milliseconds. Defaults to 5000.
+	 * @param options.loading - (Optional) A loading indicator that must be hidden.
+	 * @returns A promise that resolves once the table is stable.
+	 * @throws Error if the table is not stable within the timeout: it kept changing, the loading indicator
+	 *   stayed visible, or the table could not be read.
+	 *
+	 * @example
+	 * await page.getByLabel("Search").fill("Jo");
+	 * await users.waitForStable({ loading: page.locator(".spinner") });
+	 * const rows = await users.toJson();
+	 */
+	async waitForStable(options?: StableOptions): Promise<void> {
+		const quiet = options?.quiet ?? 500;
+		const timeout = options?.timeout ?? 5_000;
+		if (!(quiet >= 0) || !Number.isFinite(quiet)) {
+			throw new Error(`quiet must be a non-negative number, got: ${quiet}`);
+		}
+		const loading = options?.loading;
+		const request: EngineFingerprintRequest = { op: "fingerprint", cfg: this._config };
+		const deadline = Date.now() + timeout;
+		const state: StableState = { last: undefined, since: Date.now(), changes: 0, rows: undefined, busy: false };
+		let error: unknown;
+		// Sample often enough that a change within the quiet period is seen.
+		const interval = Math.max(20, Math.min(100, quiet / 4));
+		for (;;) {
+			try {
+				const readTimeout = Math.max(MIN_READ_TIMEOUT, deadline - Date.now());
+				const print = await this.root.evaluate(readTableFingerprint, request, { timeout: readTimeout });
+				const busy = loading !== undefined && (await isShown(loading));
+				error = undefined;
+				if (observe(state, print, busy, quiet)) return;
+			} catch (readError) {
+				error = readError;
+				state.last = undefined;
+			}
+			const left = deadline - Date.now();
+			if (left <= 0) break;
+			await new Promise(resolve => setTimeout(resolve, Math.min(interval, left)));
+		}
+
+		throw new Error(
+			`TableLocator.waitForStable() timed out after ${timeout}ms: ${describeUnstable(state, quiet)}.\n` +
+				(state.rows === undefined ? "" : `Body rows: ${state.rows}\n`) +
+				(loading === undefined ? "" : `Loading locator: ${loading.toString()}\n`) +
+				describeLastError(error) +
+				`Table locator: ${this.root.toString()}`
+		);
 	}
 
 	/**
@@ -420,20 +533,100 @@ export class TableLocator<const H extends string = string> {
 		}
 	}
 
-	private readTexts(raw: boolean, options?: { timeout?: number }): Promise<EngineTexts> {
-		const request: EngineTextsRequest = raw
-			? { op: "texts", cfg: this._config, raw: true }
-			: { op: "texts", cfg: this._config };
+	/** The texts for `toJson()`: read once, or after waiting for `minRows` and `stable`. */
+	private async readJsonTexts(
+		options: TableJsonOptions<string, unknown>,
+		columns: readonly string[] | undefined
+	): Promise<EngineTexts> {
+		const minRows = options.minRows ?? 0;
+		if (minRows < 0 || !Number.isInteger(minRows)) {
+			throw new Error(`minRows must be a non-negative integer, got: ${minRows}`);
+		}
+		const raw = options.raw === true;
+		const timeout = options.timeout ?? 5_000;
+		const deadline = Date.now() + timeout;
+		const stable = options.stable === undefined || options.stable === false ? undefined : options.stable;
+		let texts: EngineTexts | undefined;
+		if (minRows > 0) {
+			texts = await this.readTextsWithRows(minRows, timeout, raw, columns);
+		}
+		if (stable !== undefined) {
+			await this.waitForStable({
+				timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()),
+				...(stable === true ? {} : stable),
+			});
+		}
+		if (texts === undefined || stable !== undefined) {
+			texts = await this.readTexts(raw, columns, {
+				timeout: stable === undefined ? options.timeout : MIN_READ_TIMEOUT,
+			});
+		}
+		if (texts.keys.length === 0) {
+			const selector = this._config.headerRow;
+			throw new Error(
+				`TableLocator.toJson() needs a header row, but the table has none.\n` +
+					(selector === undefined ? "" : `Header row selector: "${selector}"\n`) +
+					`Table locator: ${this.root.toString()}`
+			);
+		}
+		return texts;
+	}
+
+	/**
+	 * Checks the `columns` and `parse` options of `toJson()` against the header keys of the table.
+	 * @throws Error with the available headers if a key is not a header key, or a `parse` key is not in `columns`.
+	 */
+	private checkJsonColumns(
+		keys: readonly string[],
+		outputKeys: readonly string[],
+		columns: readonly string[],
+		parsers: readonly [string, unknown][]
+	): void {
+		const parseKeys = parsers.map(([key]) => key);
+		const unknown = [
+			...columns.filter(key => !keys.includes(normalizeLine(key))),
+			...parseKeys.filter(key => !outputKeys.includes(key) && !keys.includes(key)),
+		];
+		if (unknown.length > 0) {
+			throw new Error(
+				`TableLocator.toJson(): ${unknown.map(key => `Header "${key}" not found.`).join(" ")}\n` +
+					`Available headers: [${keys.join(", ")}]\n` +
+					`Table locator: ${this.root.toString()}`
+			);
+		}
+		const notSelected = parseKeys.filter(key => !outputKeys.includes(key));
+		if (notSelected.length > 0) {
+			throw new Error(
+				`TableLocator.toJson(): parse has headers that are not in columns: [${notSelected.join(", ")}]\n` +
+					`Columns: [${outputKeys.join(", ")}]\n` +
+					`Table locator: ${this.root.toString()}`
+			);
+		}
+	}
+
+	private readTexts(
+		raw: boolean,
+		columns: readonly string[] | undefined,
+		options?: { timeout?: number }
+	): Promise<EngineTexts> {
+		const request: EngineTextsRequest = { op: "texts", cfg: this._config };
+		if (raw) request.raw = true;
+		if (columns !== undefined) request.columns = [...columns];
 		return this.root.evaluate(readTableTexts, request, options);
 	}
 
 	/** Reads the table once it has a header row and at least `minRows` body rows with content. */
-	private async readTextsWithRows(minRows: number, timeout: number, raw: boolean): Promise<EngineTexts> {
+	private async readTextsWithRows(
+		minRows: number,
+		timeout: number,
+		raw: boolean,
+		columns: readonly string[] | undefined
+	): Promise<EngineTexts> {
 		// Raw texts are normalized to decide, so a cell with only a non-breaking space or a glyph is empty.
 		const withContent = (texts: EngineTexts): number =>
 			texts.rows.filter(row => row.some(text => normalizeCell(text) !== "")).length;
 		const poll = await pollUntil(
-			readTimeout => this.readTexts(raw, { timeout: readTimeout }),
+			readTimeout => this.readTexts(raw, columns, { timeout: readTimeout }),
 			texts => texts.keys.length > 0 && withContent(texts) >= minRows,
 			{ keys: [], rows: [] },
 			Date.now() + timeout
@@ -497,6 +690,74 @@ function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineC
 	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
 	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
 	return cfg;
+}
+
+/** What `waitForStable()` has seen so far. */
+type StableState = {
+	/** The last fingerprint, or `undefined` while the table is loading or could not be read. */
+	last: string | undefined;
+	/** When the last fingerprint was first seen. */
+	since: number;
+	/** How often the fingerprint changed. */
+	changes: number;
+	/** The number of body rows of the last read, or `undefined` if no read succeeded. */
+	rows: number | undefined;
+	/** Whether the loading indicator was visible at the last read. */
+	busy: boolean;
+};
+
+/** Records a read in `state`. Returns whether the table has stayed the same for `quiet` milliseconds. */
+function observe(state: StableState, print: EngineFingerprint, busy: boolean, quiet: number): boolean {
+	state.rows = print.rows;
+	state.busy = busy;
+	const current = busy ? undefined : `${print.rows}|${print.hash}`;
+	if (current !== undefined && current === state.last) return Date.now() - state.since >= quiet;
+	if (state.last !== undefined) state.changes++;
+	state.last = current;
+	state.since = Date.now();
+	return false;
+}
+
+/** Why `waitForStable()` timed out. */
+function describeUnstable(state: StableState, quiet: number): string {
+	if (state.rows === undefined) return "the table could not be read";
+	if (state.busy) return "the loading indicator is still visible";
+	if (state.changes > 0) return `the table kept changing (${state.changes} changes seen)`;
+	return `it did not stay the same for ${quiet}ms`;
+}
+
+/** Whether any element of `locator` is visible. Doesn't wait, and works when it matches several elements. */
+async function isShown(locator: Locator): Promise<boolean> {
+	const count = await locator.count();
+	for (let i = 0; i < count; i++) {
+		if (await locator.nth(i).isVisible()) return true;
+	}
+	return false;
+}
+
+/**
+ * The value of a cell of a `parse` column of `toJson()`.
+ * @throws Error with the row, the column and the text if the cell cannot be parsed.
+ */
+function parseCell(parser: ColumnParser, text: string, decimal: DecimalSeparator, row: number, key: string): unknown {
+	const fail = (problem: string): Error =>
+		new Error(`TableLocator.toJson(): row ${row} "${key}" (${JSON.stringify(text)}) ${problem}`);
+	if (typeof parser === "function") {
+		try {
+			return parser(text);
+		} catch (error) {
+			throw fail(`could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	if (text.trim() === "") return null;
+	if (parser === "number") {
+		const value = parseNumber(text, decimal);
+		if (isNaN(value)) throw fail(`is not a number (decimal separator "${decimal}")`);
+		return value;
+	}
+	const time = Date.parse(text);
+	if (isNaN(time)) throw fail("is not a date (parsed with Date.parse)");
+	return new Date(time);
 }
 
 /** A column for the engine: a header name normalized like header text, or a checked column index. */

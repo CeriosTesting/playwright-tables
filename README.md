@@ -134,6 +134,8 @@ users.cell(anyRowLocator, "Email"); // Locator: the cell under a header for any 
 users.column("Status"); // Locator: every body cell under a header
 users.header("Name"); // Locator: the header cell
 await users.toJson(); // Snapshot: every body row as an object keyed by header
+await users.columnValues("Status"); // Snapshot: the text of every body cell in a column
+await users.waitForStable(); // Waits until the table stops changing
 
 const row = users.row({ Name: "John" });
 row.locator; // Locator for the row element(s)
@@ -346,6 +348,15 @@ Cell text is compared as described in [How text is read](#how-text-is-read): eac
 | `{ not: "Deleted" }`                                             | does not match the nested matcher           |
 | `{ anyOf: ["Active", /^pend/i] }`                                | matches at least one nested matcher         |
 | `{ allOf: [{ startsWith: "J" }, { not: { contains: "Doe" } }] }` | matches every nested matcher                |
+| `{ gt: 18 }`, `{ gte: 18 }`, `{ lt: 65 }`, `{ lte: 65 }`         | holds a number that compares as asked       |
+| `{ between: [10, 20] }`                                          | holds a number from 10 to 20 (inclusive)    |
+
+The numeric conditions read the one number in the cell, so `"€ 1,200.50"` is 1200.5, `"-3 %"` is -3 and `"1 234"` is 1234. Digits may be grouped in threes by `,`, `'` or a (non-breaking) space. A cell with no number, or with more than one (`"12:30"`, `"5 of 10"`, a date), never matches. For tables with a decimal comma, add `decimal: ","`: `{ gt: 1000, decimal: "," }` matches `"€ 1.234,50"`.
+
+```ts
+await expect(orders.row({ Total: { gt: 1000 } }).cell("Customer")).toHaveText("John");
+await expect(orders).toHaveRow({ Total: { between: [10, 20], decimal: "," }, Status: "Active" });
+```
 
 A `predicate` gets two arguments: the normalized `text` that the other conditions compare, and the `raw` text exactly as the browser reads it (`innerText`, or `textContent`), for example `{ predicate: (text, raw) => raw.includes("\u00a0") }`.
 
@@ -399,6 +410,42 @@ const data = await users.toJson();
 
 To check the whole table, prefer `toHaveRows` (below), which retries until the rows match.
 
+#### Some columns and typed values
+
+`columns` picks columns, in that order. `parse` turns the text of a column into a typed value: `"number"` (read like the [numeric conditions](#cell-conditions), with `decimal` for a decimal comma), `"date"` (`Date.parse`), or your own function, which runs in Node. Empty cells become `null` for `"number"` and `"date"`. The result is typed from both options:
+
+```ts
+const totals = await orders.toJson({
+	columns: ["Customer", "Total", "Placed"],
+	parse: { Total: "number", Placed: "date" },
+	decimal: ",",
+});
+// { Customer: string; Total: number | null; Placed: Date | null }[]
+// [{ Customer: "John", Total: 1200.5, Placed: 2026-01-15T00:00:00.000Z }, ...]
+
+const sum = totals.reduce((total, order) => total + (order.Total ?? 0), 0);
+const statuses = new Set(await orders.columnValues("Status")); // distinct values
+```
+
+A key that is not a header fails with the available headers. A cell that `"number"` or `"date"` cannot parse, or a function that throws, fails with the row, the column and the text, such as `row 2 "Total" ("n/a") is not a number`.
+
+#### Waiting for a table to settle
+
+After a search, filter, page change or sort, a table often refreshes in steps: a spinner, an empty body, then rows coming in. Reading it too early gives stale or partial data. `waitForStable()` waits until the header keys and every body cell text stay the same for `quiet` milliseconds (500 by default), and the `loading` indicator, if you pass one, is hidden:
+
+```ts
+await page.getByLabel("Search").fill("Jo");
+await orders.waitForStable({ loading: page.getByRole("progressbar") });
+const rows = await orders.toJson();
+
+// Or in one go: waits for minRows first (if set), then for the table to settle
+const settled = await orders.toJson({ stable: { loading: page.locator(".spinner") } });
+const loaded = await orders.toJson({ minRows: 1, stable: true });
+// On timeout: TableLocator.waitForStable() timed out after 5000ms: the table kept changing (12 changes seen).
+```
+
+A table that hasn't started to refresh yet looks stable, so pass `loading` when the table shows a loading indicator, or assert on the content you expect first. Locators and the matchers below retry on their own and don't need `waitForStable()`.
+
 ### Matchers
 
 The exported `expect` includes table matchers and a row matcher. They retry until the `expect` timeout and support `.not`:
@@ -417,11 +464,41 @@ await expect(users).toHaveRows([
 	{ Name: "Joe" },
 ]);
 await expect(users).toHaveRows([]); // the body is empty
+// The same rows, in any order
+await expect(users).toHaveRows([{ Name: "Joe" }, { Name: "John" }, { Name: "Jane" }], { anyOrder: true });
+
+// These rows somewhere in the table, in any order; other rows are allowed
+await expect(users).toContainRows([{ Name: "Joe", Status: "Active" }, { Name: "John" }]);
+
+// Every body row matches, for example after filtering. A table without body rows fails.
+await expect(users).toHaveEveryRow({ Status: "Active" });
+await expect(orders).toHaveEveryRow({ Total: { gt: 0 } });
+
+// One value per body row, in order (or with anyOrder). Values take any cell condition.
+await expect(users).toHaveColumnValues("Status", ["Active", "Inactive", "Active"]);
+await expect(orders).toHaveColumnValues("Total", [{ gt: 1000 }, /€ 80/, { lt: 20 }]);
 
 // Row matcher: the row locator must resolve to exactly one row, whose cells match every condition
 await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active", Email: /@example\.com$/ });
 await expect(users.rowAt(0)).not.toHaveCells({ Status: "Deleted" }); // the row exists, but doesn't match
 ```
+
+`toContainRows` and `toHaveRows` with `anyOrder` give each entry a different body row, and find the best fit, so overlapping entries such as `{ Status: "Active" }` and `{ Name: "John" }` both pass when John is active and another row is too. When they fail, the message shows the entries left without a row and the body rows, as a table of the columns the entries mention:
+
+```
+Expected: body rows matching, in any order (other rows allowed)
+  [0] { "Name": "Joe" }
+  [1] { "Name": "Ghost", "Status": "Active" }
+Received: 3 body rows
+No body row left for [1] { "Name": "Ghost", "Status": "Active" }
+Body rows:
+  # | Name | Status
+  0 | John | Active
+  1 | Jane | Inactive
+  2 | Joe  | Active
+```
+
+`toHaveEveryRow` lists the rows that don't match the same way, and `toHaveColumnValues` shows the column values and every row that doesn't match its value.
 
 #### Sorting
 
@@ -432,20 +509,22 @@ await users.header("Name").click();
 await expect(users).toBeSortedBy("Name"); // ascending, as text
 await expect(users).toBeSortedBy("Name", { order: "desc", ariaSort: true });
 await expect(users).toBeSortedBy("Salary", { type: "number" }); // "€ 1,200" is 1200
+await expect(users).toBeSortedBy("Salary", { type: "number", decimal: "," }); // "€ 1.200,50" is 1200.5
 await expect(users).toBeSortedBy("Joined", { type: "date" });
 await expect(users).toBeSortedBy("Priority", { compare: (a, b) => priorities.indexOf(a) - priorities.indexOf(b) });
 await expect(users).toBeSortedBy(2); // by column index, also in a table without header rows
 ```
 
-| Option     | Default  | Description                                                                                                                                                                                  |
-| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `order`    | `"asc"`  | `"asc"` or `"desc"`. Equal neighbours are fine in both.                                                                                                                                      |
-| `type`     | `"text"` | `"text"` compares case-insensitively, with digit runs as numbers (`"item 9"` before `"item 10"`). `"number"` takes the digits, `.` and `-` from the text. `"date"` parses with `Date.parse`. |
-| `compare`  |          | A custom comparison like `Array.sort` takes. It runs in Node, so it can use variables from your test. Overrides `type`.                                                                      |
-| `ariaSort` | `false`  | Also require `aria-sort="ascending"` or `"descending"` on the header cell.                                                                                                                   |
-| `timeout`  |          | Defaults to the `expect` timeout.                                                                                                                                                            |
+| Option     | Default  | Description                                                                                                                                                                                                                        |
+| ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `order`    | `"asc"`  | `"asc"` or `"desc"`. Equal neighbours are fine in both.                                                                                                                                                                            |
+| `type`     | `"text"` | `"text"` compares case-insensitively, with digit runs as numbers (`"item 9"` before `"item 10"`). `"number"` reads the one number in the text, like the [numeric conditions](#cell-conditions). `"date"` parses with `Date.parse`. |
+| `decimal`  | `"."`    | The decimal separator for `type: "number"`: `"."` or `","`.                                                                                                                                                                        |
+| `compare`  |          | A custom comparison like `Array.sort` takes. It runs in Node, so it can use variables from your test. Overrides `type`.                                                                                                            |
+| `ariaSort` | `false`  | Also require `aria-sort="ascending"` or `"descending"` on the header cell.                                                                                                                                                         |
+| `timeout`  |          | Defaults to the `expect` timeout.                                                                                                                                                                                                  |
 
-`type: "number"` only knows `.` as decimal separator. For numbers like `1.234,56`, pass a `compare`. An empty body, an unknown column or a value that is not a number or date fails the assertion, also with `.not`, so a table that hasn't loaded yet doesn't count as sorted. The failure message lists the column values and the first pair that is out of order.
+For numbers like `1.234,56`, pass `decimal: ","`. For other formats, pass a `compare`. An empty body, an unknown column or a value that is not a number or date fails the assertion, also with `.not`, so a table that hasn't loaded yet doesn't count as sorted. The failure message lists the column values and the first pair that is out of order.
 
 When `toHaveRow`, `toHaveRows` or `toHaveCells` fails because of an unknown header, the message says `Header "Stauts" not found.` and lists the available headers. A condition on an unknown header can never be checked, so it fails with `.not` too: `.not` first waits for the headers, then asserts that no row matches. A typo in a negated assertion never passes silently. When `toHaveCells` fails on a known header, the message shows the cells the row actually has. When `toHaveRows` fails, the message shows the number of rows received and, for each row that doesn't match, the cells it actually has.
 
@@ -496,6 +575,9 @@ Both can be used on the same table.
 | Hard-coded row or column numbers break when columns move or rows reorder.         | Find rows by content with `row({...})` and cells by header name. Use `rowAt()` only when the position is what you test.                                                            |
 | Reading the table, then asserting on the snapshot, is flaky.                      | Assert with retrying matchers (`toHaveRow`, `toHaveRows`, `toHaveCells`, `toBeSortedBy`, `expect(cell).toHaveText()`). Use `toJson()` only after one of them has passed.           |
 | Skeleton or "Loading…" rows make a table look loaded.                             | Assert on content you expect (`toHaveRow`), or use `toJson({ minRows })`. `toBeSortedBy` fails on an empty body.                                                                   |
+| Reading the table right after a search or filter returns stale or partial rows.   | `await table.waitForStable({ loading })` first, or `toJson({ stable: { loading } })` (see [Waiting for a table to settle](#waiting-for-a-table-to-settle)).                        |
+| A filter test only checks the first row, or passes when nothing is left.          | `toHaveEveryRow({ Status: "Active" })` checks every row, and fails on an empty body.                                                                                               |
+| Numbers with a decimal comma (`1.234,56`) don't compare.                          | Add `decimal: ","` to numeric conditions, `toJson({ parse })` and `toBeSortedBy`.                                                                                                  |
 | A sort test only checks the arrow icon or `aria-sort`.                            | `toBeSortedBy` checks the data; add `ariaSort: true` to check the header too.                                                                                                      |
 | Numbers or dates sort as text (`"10"` before `"9"`, `"€ 950"` after `"€ 1,200"`). | Pass `type: "number"` or `type: "date"` to `toBeSortedBy`, or a `compare` for other formats.                                                                                       |
 | A row header (`<th scope="row">`) or a nested table shifts the columns.           | `TableLocator` handles both by default (see [Row headers and nested tables](#row-headers-and-nested-tables)).                                                                      |

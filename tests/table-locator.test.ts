@@ -84,6 +84,7 @@ const demoCases: Record<Route, DemoCase> = {
 	[Route.SortableTable]: { root: "#SortableTable" },
 	// The table is inside the shadow root of #Host; getJson() reaches it through Playwright CSS
 	[Route.ShadowDomTable]: { root: "#Host" },
+	[Route.RefreshingTable]: { root: "#Orders" },
 };
 
 async function errorMessage(action: () => Promise<unknown>): Promise<string> {

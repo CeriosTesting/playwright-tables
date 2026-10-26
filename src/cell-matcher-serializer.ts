@@ -1,4 +1,11 @@
-import { CellMatcher, RowWhere, SerializedMatcher, SerializedWhere } from "./table-locator.types";
+import {
+	CellCondition,
+	CellMatcher,
+	DecimalSeparator,
+	RowWhere,
+	SerializedMatcher,
+	SerializedWhere,
+} from "./table-locator.types";
 import { normalizeLine } from "./table-selector-engine";
 
 /**
@@ -31,7 +38,12 @@ export function describeWhere(where: RowWhere<string>): string {
 	return `{ ${parts.join(", ")} }`;
 }
 
-function describeMatcher(matcher: CellMatcher): string {
+/**
+ * Describes one cell matcher for messages, such as `"John"`, `/^J/` or `{ "gt": 5 }`.
+ *
+ * @internal
+ */
+export function describeMatcher(matcher: CellMatcher): string {
 	if (typeof matcher === "string") return JSON.stringify(matcher);
 	if (matcher instanceof RegExp) return String(matcher);
 	if (matcher.predicate !== undefined) return `{ predicate: ${matcher.predicate.toString()} }`;
@@ -55,19 +67,7 @@ export function serializeMatcher(header: string, matcher: CellMatcher): Serializ
 	}
 	const ignoreCase = matcher.ignoreCase === true;
 	if (matcher.predicate !== undefined) {
-		// Typed as a function, but JavaScript callers can pass anything.
-		const predicate: unknown = matcher.predicate;
-		if (typeof predicate !== "function") {
-			throw new TypeError(`Condition for header "${header}": predicate must be a function.`);
-		}
-		const src = predicate.toString();
-		// Bound and built-in functions have no source to send to the browser.
-		if (src.includes("[native code]")) {
-			throw new TypeError(
-				`Condition for header "${header}": predicate must be a plain function, not a bound or built-in one.`
-			);
-		}
-		return { t: "f", src };
+		return serializePredicate(header, matcher.predicate);
 	}
 	if (matcher.oneOf !== undefined) {
 		return { t: "o", v: [...matcher.oneOf] };
@@ -87,18 +87,70 @@ export function serializeMatcher(header: string, matcher: CellMatcher): Serializ
 	if (matcher.endsWith !== undefined) {
 		return { t: "c", op: "endsWith", v: matcher.endsWith, i: ignoreCase };
 	}
+	const number = serializeNumberCondition(header, matcher);
+	if (number !== undefined) return number;
 	if (matcher.not !== undefined) {
 		return { t: "n", m: serializeMatcher(header, matcher.not) };
 	}
 	if (matcher.anyOf !== undefined) {
 		return { t: "a", m: serializeMatchers(header, "anyOf", matcher.anyOf) };
 	}
-	// The type says this is the last kind of condition left, but JavaScript callers can pass any object.
-	const allOf: unknown = matcher.allOf;
-	if (allOf !== undefined) {
+	if (matcher.allOf !== undefined) {
 		return { t: "l", m: serializeMatchers(header, "allOf", matcher.allOf) };
 	}
+	// The type covers every kind of condition, but JavaScript callers can pass any object.
 	throw new TypeError(`Condition for header "${header}" is not a supported cell matcher.`);
+}
+
+function serializePredicate(header: string, predicate: unknown): SerializedMatcher {
+	// Typed as a function, but JavaScript callers can pass anything.
+	if (typeof predicate !== "function") {
+		throw new TypeError(`Condition for header "${header}": predicate must be a function.`);
+	}
+	const src = predicate.toString();
+	// Bound and built-in functions have no source to send to the browser.
+	if (src.includes("[native code]")) {
+		throw new TypeError(
+			`Condition for header "${header}": predicate must be a plain function, not a bound or built-in one.`
+		);
+	}
+	return { t: "f", src };
+}
+
+/** The wire format of a {@link NumberCondition}, or `undefined` if `matcher` is another kind of condition. */
+function serializeNumberCondition(header: string, matcher: CellCondition): SerializedMatcher | undefined {
+	const { decimal } = matcher;
+	if (matcher.gt !== undefined) return serializeNumber(header, "gt", matcher.gt, matcher.gt, decimal);
+	if (matcher.gte !== undefined) return serializeNumber(header, "gte", matcher.gte, matcher.gte, decimal);
+	if (matcher.lt !== undefined) return serializeNumber(header, "lt", matcher.lt, matcher.lt, decimal);
+	if (matcher.lte !== undefined) return serializeNumber(header, "lte", matcher.lte, matcher.lte, decimal);
+	if (matcher.between === undefined) return undefined;
+	// Typed as a pair, but JavaScript callers can pass anything.
+	const range: unknown = matcher.between;
+	if (!Array.isArray(range) || range.length !== 2) {
+		throw new TypeError(`Condition for header "${header}": between must be a [min, max] pair.`);
+	}
+	const [min, max] = matcher.between;
+	return serializeNumber(header, "between", min, max, decimal);
+}
+
+function serializeNumber(
+	header: string,
+	op: "gt" | "gte" | "lt" | "lte" | "between",
+	value: number,
+	upper: number,
+	decimal: DecimalSeparator | undefined
+): SerializedMatcher {
+	// JSON turns NaN and Infinity into null, so they could never match as the caller meant.
+	if (!Number.isFinite(value) || !Number.isFinite(upper)) {
+		throw new TypeError(`Condition for header "${header}": ${op} needs finite numbers.`);
+	}
+	// Typed as a separator, but JavaScript callers can pass anything.
+	const separator: unknown = decimal ?? ".";
+	if (separator !== "." && separator !== ",") {
+		throw new TypeError(`Condition for header "${header}": decimal must be "." or ",".`);
+	}
+	return { t: "g", op, v: value, w: upper, d: separator };
 }
 
 function serializeMatchers(header: string, kind: string, matchers: readonly CellMatcher[]): SerializedMatcher[] {
