@@ -6,6 +6,7 @@ import type {
 	EngineMatchRequest,
 	EngineMatchResult,
 	EngineQuery,
+	EngineTextRequest,
 	EngineTexts,
 	EngineTextsRequest,
 	EngineValues,
@@ -38,7 +39,11 @@ export const TABLE_SELECTOR_ENGINE_NAME = "pw-table-v1";
  *   resolves it: `{ op: "keys" }` returns the header keys, `{ op: "texts" }` the header keys and body cell
  *   texts, `{ op: "values" }` the body cell texts of one column, and `{ op: "match" }` matches every body
  *   row against its own conditions. `{ op: "find" }` counts the body rows that match one set of conditions;
- *   it and "match" also report problems with `predicate` conditions.
+ *   it and "match" also report problems with `predicate` conditions. `{ op: "text" }` reads one body cell.
+ *
+ * Header text is read on one line (`normalizeLine`); body cell text keeps its line breaks (`normalizeCell`).
+ * Both leave out what the user doesn't see: icon glyphs, invisible characters and the text of the elements
+ * matching the `ignore` option (screen reader only text and ligature icons by default).
  *
  * The engine never throws: invalid input or an unknown header simply yields no elements, so the
  * locator keeps waiting.
@@ -51,19 +56,37 @@ export function tableSelectorEngine(root: Element, request: EngineTextsRequest):
 export function tableSelectorEngine(root: Element, request: EngineMatchRequest): EngineMatchResult;
 export function tableSelectorEngine(root: Element, request: EngineValuesRequest): EngineValues;
 export function tableSelectorEngine(root: Element, request: EngineFindRequest): EngineFindResult;
+export function tableSelectorEngine(root: Element, request: EngineTextRequest): string;
 export function tableSelectorEngine(
 	root?: Element,
-	request?: EngineKeysRequest | EngineTextsRequest | EngineMatchRequest | EngineValuesRequest | EngineFindRequest
-): SelectorEngine | string[] | EngineTexts | EngineMatchResult | EngineValues | EngineFindResult {
+	request?:
+		| EngineKeysRequest
+		| EngineTextsRequest
+		| EngineMatchRequest
+		| EngineValuesRequest
+		| EngineFindRequest
+		| EngineTextRequest
+): SelectorEngine | string[] | string | EngineTexts | EngineMatchResult | EngineValues | EngineFindResult {
 	type GridCell = { el: Element; rowOffset: number; colOffset: number };
 	/** One row of the visual grid. Positions without a cell are holes. */
 	type GridLine = (GridCell | undefined)[];
 	/** The elements of one logical row: one element, or several for a row split over several containers. */
 	type RowGroup = [Element, ...Element[]];
-	/** A compiled cell condition. */
-	type TextTest = (text: string) => boolean;
+	/** A compiled cell condition. `raw` returns the unnormalized cell text, read on first use. */
+	type TextTest = (text: string, raw: () => string) => boolean;
 	/** A row condition with the grid column of its header. */
 	type ColumnCondition = { column: number; test: TextTest };
+	/** An {@link EngineConfig} with the defaults filled in. */
+	type Config = {
+		headerRow: string;
+		headerCell: string;
+		bodyRow: string;
+		bodyCell: string;
+		mainHeaderRow: number | null;
+		textContent: boolean;
+		/** Selector of the elements inside a cell whose text is left out, or `""` for none. */
+		ignore: string;
+	};
 	type TableBody = {
 		/** One element per logical body row: the first element of a row split over several containers. */
 		rows: Element[];
@@ -78,8 +101,11 @@ export function tableSelectorEngine(
 		headerCells: (Element | undefined)[];
 		/** The body rows, read on first use: header-only reads don't need them. */
 		body: () => TableBody;
+		/** Normalized body cell texts, by cell. */
 		texts: Map<Element, string>;
-		contentType: EngineConfig["contentType"];
+		/** Raw body cell texts, by cell. */
+		raws: Map<Element, string>;
+		cfg: Config;
 	};
 
 	const EMPTY_HEADER = "{{Empty}}";
@@ -87,6 +113,53 @@ export function tableSelectorEngine(
 	const DUPLICATE_SUFFIX = "__D";
 	// Unicode private use areas, where icon fonts put their glyphs.
 	const ICON_GLYPHS = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
+	// Characters that take no space on screen: soft hyphen, zero width space, word joiner, byte order mark,
+	// and bidi marks, embeddings and isolates. Zero width (non-)joiners stay: emoji sequences and some
+	// scripts need them.
+	const INVISIBLE = /[\u00AD\u061C\u180E\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+	// Whitespace that CSS `white-space: normal` collapses. Unlike `\s`, it leaves non-breaking spaces alone.
+	const CSS_WHITESPACE = /[ \t\n\r\f]+/g;
+	// Elements that start on a new line, for reading text without layout.
+	const BLOCK_TAGS =
+		/^(address|article|aside|blockquote|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)$/;
+	const SKIPPED_TAGS = /^(script|style|template|noscript)$/;
+	// Elements inside a cell whose text the user doesn't read: screen reader only text (Bootstrap, Tailwind),
+	// ligature icons (Material Icons and Material Symbols draw a word such as `arrow_upward` as an icon), and
+	// content hidden from assistive technology, which is how decorative icons are marked.
+	const DEFAULT_IGNORE = [
+		".sr-only",
+		".visually-hidden",
+		".material-icons",
+		".material-icons-outlined",
+		".material-icons-round",
+		".material-icons-sharp",
+		".material-icons-two-tone",
+		".material-symbols-outlined",
+		".material-symbols-rounded",
+		".material-symbols-sharp",
+		"[aria-hidden=true]",
+	];
+
+	/**
+	 * Header rows of a table without a `<thead>`: the leading rows of its first `<tbody>` that have `<th>`
+	 * cells and no `<td>`. A row with both (a row header and data) stays a body row.
+	 */
+	const TBODY_HEADER_ROW =
+		"table:not(:has(> thead)) > tbody:first-of-type > tr:has(> th):not(:has(> td)):not(tr:has(> td) ~ tr)";
+	// Default selectors for HTML tables. Row header cells (`<th>` in a body row) are body cells too.
+	const HTML_SELECTORS = {
+		headerRow: "thead>tr, " + TBODY_HEADER_ROW,
+		headerCell: "th, td",
+		bodyRow: "tbody>tr:not(" + TBODY_HEADER_ROW + ")",
+		bodyCell: "td, th",
+	};
+	// Default selectors for ARIA grids (`role="grid"`, `"treegrid"` or `"table"` built from other elements).
+	const ARIA_SELECTORS = {
+		headerRow: "[role=row]:has([role=columnheader])",
+		headerCell: "[role=columnheader]",
+		bodyRow: "[role=row]:not(:has([role=columnheader]))",
+		bodyCell: "[role=gridcell], [role=cell], [role=rowheader]",
+	};
 
 	// Models are cached for the duration of one synchronous selector evaluation. The DOM cannot change
 	// while an evaluation runs, and the cache is dropped on the next microtask, so retries always see
@@ -97,7 +170,7 @@ export function tableSelectorEngine(
 	// Whether a node has a shadow host inside it. Cached and dropped like the models: a cell lookup asks
 	// it of every ancestor, and each answer scans the whole subtree.
 	let shadowHostCache: Map<Node, boolean> | null = null;
-	const predicateCache = new Map<string, ((text: string) => unknown) | null>();
+	const predicateCache = new Map<string, ((text: string, raw: string) => unknown) | null>();
 	// Problems with `predicate` conditions, collected while the engine function is evaluated directly, so
 	// the matchers can report them. `null` while the engine runs as a selector engine.
 	let predicateErrors: string[] | null = null;
@@ -116,22 +189,186 @@ export function tableSelectorEngine(
 		return modelCache;
 	}
 
-	function normalize(value: string | null | undefined): string {
-		return (value ?? "").replace(/\s+/g, " ").trim();
+	function resolveConfig(cfg: EngineConfig): Config {
+		const defaults = cfg.aria === 1 ? ARIA_SELECTORS : HTML_SELECTORS;
+		return {
+			headerRow: cfg.headerRow ?? defaults.headerRow,
+			headerCell: cfg.headerCell ?? defaults.headerCell,
+			bodyRow: cfg.bodyRow ?? defaults.bodyRow,
+			bodyCell: cfg.bodyCell ?? defaults.bodyCell,
+			mainHeaderRow: cfg.mainHeaderRow ?? null,
+			textContent: cfg.textContent === 1,
+			ignore: (cfg.ignore ?? DEFAULT_IGNORE).join(", "),
+		};
 	}
 
-	function readText(el: Element, contentType: EngineConfig["contentType"]): string {
-		if (contentType === "innerText" && "innerText" in el) {
-			return normalize((el as HTMLElement).innerText);
+	/** Removes what takes no space on screen (icon glyphs and invisible characters), and composes accents (NFC). */
+	function clean(value: string | null | undefined): string {
+		return (value ?? "").replace(ICON_GLYPHS, "").replace(INVISIBLE, "").normalize("NFC");
+	}
+
+	/** Text on one line: every run of whitespace, line breaks included, becomes one space. For header text. */
+	function normalizeLine(value: string | null | undefined): string {
+		return clean(value).replace(/\s+/g, " ").trim();
+	}
+
+	/**
+	 * Text that keeps its line breaks: one `\n` between lines, each line collapsed and trimmed, and no
+	 * empty lines. For body cell text.
+	 */
+	function normalizeCell(value: string | null | undefined): string {
+		const lines: string[] = [];
+		for (const line of clean(value).split(/\r\n|[\r\n\u2028\u2029]/)) {
+			const text = line.replace(/\s+/g, " ").trim();
+			if (text !== "") lines.push(text);
 		}
-		return normalize(el.textContent);
+		return lines.join("\n");
 	}
 
+	/** The text of `el` as the browser reads it (`innerText` or `textContent`), without any changes. */
+	function rawText(el: Element, textContent: boolean): string {
+		if (!textContent && "innerText" in el) return (el as HTMLElement).innerText;
+		return el.textContent;
+	}
+
+	/**
+	 * The text of `el` as it is shown, before normalization: `innerText` without the text of the elements
+	 * matching `cfg.ignore`, and with the selected option of a `<select>`. With `textContent`, all text in
+	 * the DOM except the ignored elements, with line breaks for `<br>` and block elements.
+	 */
+	function readText(el: Element, cfg: Config): string {
+		// An element that is not rendered has no layout, and its innerText is its textContent.
+		if (cfg.textContent || !("innerText" in el) || el.getClientRects().length === 0) {
+			const parts: string[] = [];
+			readDomText(el, cfg.ignore, false, parts);
+			return parts.join("");
+		}
+		const special = specialElements(el, cfg.ignore);
+		if (special.length === 0) return (el as HTMLElement).innerText;
+		const parts: string[] = [];
+		readShownText(el, special, parts);
+		return parts.join("");
+	}
+
+	/** Whether `el` matches the `ignore` selector. */
+	function isIgnored(el: Element, ignore: string): boolean {
+		return ignore !== "" && el.matches(ignore);
+	}
+
+	/** Reads the text of the children of `node` without layout, leaving out `ignore`d elements, into `parts`. */
+	function readDomText(node: Node, ignore: string, pre: boolean, parts: string[]): void {
+		for (const child of Array.from(node.childNodes)) {
+			if (child.nodeType === 3) {
+				const value = child.nodeValue ?? "";
+				parts.push(pre ? value : value.replace(CSS_WHITESPACE, " "));
+				continue;
+			}
+			if (!isElement(child)) continue;
+			const name = child.localName;
+			if (name === "br") {
+				parts.push("\n");
+				continue;
+			}
+			if (SKIPPED_TAGS.test(name) || isIgnored(child, ignore)) continue;
+			const block = BLOCK_TAGS.test(name);
+			if (block) parts.push("\n");
+			readDomText(child, ignore, pre || name === "pre" || name === "textarea", parts);
+			if (block) parts.push("\n");
+		}
+	}
+
+	/**
+	 * The descendants of `cell` whose text is not read with `innerText`: the elements matching `ignore`
+	 * (left out), and `<select>`s (read as their selected options). Not their descendants.
+	 */
+	function specialElements(cell: Element, ignore: string): Element[] {
+		const found: Element[] = [];
+		if (cell.firstElementChild === null) return found;
+		for (const el of Array.from(cell.querySelectorAll(ignore === "" ? "select" : ignore + ", select"))) {
+			const inFound = found.some(function (outer) {
+				return outer.contains(el);
+			});
+			if (!inFound) found.push(el);
+		}
+		return found;
+	}
+
+	/** Reads the shown text of the children of `node`, leaving out `special` elements, into `parts`. */
+	function readShownText(node: Element, special: Element[], parts: string[]): void {
+		const style = getComputedStyle(node);
+		const pre = style.whiteSpace.slice(0, 3) === "pre";
+		const shown = style.visibility === "visible";
+		for (const child of Array.from(node.childNodes)) {
+			if (child.nodeType === 3) {
+				const value = child.nodeValue ?? "";
+				if (shown) parts.push(transformText(pre ? value : value.replace(CSS_WHITESPACE, " "), style.textTransform));
+				continue;
+			}
+			if (isElement(child)) readShownElement(child, special, parts);
+		}
+	}
+
+	/** Reads the shown text of `el`, a child of an element with `special` descendants, into `parts`. */
+	function readShownElement(el: Element, special: Element[], parts: string[]): void {
+		if (el.localName === "br") {
+			parts.push("\n");
+			return;
+		}
+		const style = getComputedStyle(el);
+		if (style.display === "none") return;
+		if (el.localName === "select" && "selectedOptions" in el) {
+			parts.push(selectedText(el as HTMLSelectElement));
+			return;
+		}
+		if (special.indexOf(el) !== -1) return;
+		const block = style.display.slice(0, 6) !== "inline" && style.display !== "contents";
+		if (block) parts.push("\n");
+		const mixed = special.some(function (inner) {
+			return el.contains(inner);
+		});
+		if (mixed) {
+			readShownText(el, special, parts);
+		} else {
+			parts.push(rawText(el, false));
+		}
+		if (block) parts.push("\n");
+	}
+
+	function selectedText(select: HTMLSelectElement): string {
+		return Array.from(select.selectedOptions)
+			.map(function (option) {
+				return option.text;
+			})
+			.join("\n");
+	}
+
+	/** Applies a computed `text-transform`, like `innerText` does. */
+	function transformText(text: string, transform: string): string {
+		if (transform === "uppercase") return text.toUpperCase();
+		if (transform === "lowercase") return text.toLowerCase();
+		if (transform === "capitalize") {
+			return text.replace(/(^|\s)(\S)/g, function (_match, space: string, letter: string) {
+				return space + letter.toUpperCase();
+			});
+		}
+		return text;
+	}
+
+	/** The normalized text of a body cell. */
 	function textOf(model: TableModel, el: Element): string {
 		const cached = model.texts.get(el);
 		if (cached !== undefined) return cached;
-		const text = readText(el, model.contentType);
+		const text = normalizeCell(readText(el, model.cfg));
 		model.texts.set(el, text);
+		return text;
+	}
+
+	/** The raw text of a body cell. */
+	function rawOf(model: TableModel, el: Element): string {
+		const cached = model.raws.get(el);
+		if (cached !== undefined) return cached;
+		const text = rawText(el, model.cfg.textContent);
+		model.raws.set(el, text);
 		return text;
 	}
 
@@ -328,7 +565,7 @@ export function tableSelectorEngine(
 	}
 
 	/** Header keys of one header row, with the same rules as `PlaywrightTable.getJson()`. */
-	function headerKeys(line: GridLine, cfg: EngineConfig): string[] {
+	function headerKeys(line: GridLine, cfg: Config): string[] {
 		const keys: string[] = [];
 		// A `for...of` loop visits holes too, as `undefined`.
 		for (const cell of line) {
@@ -336,9 +573,7 @@ export function tableSelectorEngine(
 				keys.push(EMPTY_HEADER);
 				continue;
 			}
-			let text = readText(cell.el, cfg.contentType);
-			if (cfg.stripIconGlyphs) text = normalize(text.replace(ICON_GLYPHS, ""));
-			const base = text || EMPTY_HEADER;
+			const base = normalizeLine(readText(cell.el, cfg)) || EMPTY_HEADER;
 			// Headers carried down by rowspan keep their plain text; colspan continuations get a suffix.
 			keys.push(cell.rowOffset === 0 && cell.colOffset > 0 ? base + COLSPAN_SUFFIX + cell.colOffset : base);
 		}
@@ -354,7 +589,7 @@ export function tableSelectorEngine(
 	 * Builds the model of a table. A table without header rows (or with an out of range main header row)
 	 * has no header keys: only column indexes resolve in it.
 	 */
-	function buildModel(scope: Node, cfg: EngineConfig): TableModel | null {
+	function buildModel(scope: Node, cfg: Config): TableModel | null {
 		if (!isParentNode(scope)) return null;
 		const deep = hasShadowHost(scope);
 		const anyCell = cfg.headerCell + "," + cfg.bodyCell;
@@ -382,16 +617,12 @@ export function tableSelectorEngine(
 				return (body ??= buildBody(scope, cfg, headerIndexes, deep));
 			},
 			texts: new Map(),
-			contentType: cfg.contentType,
+			raws: new Map(),
+			cfg: cfg,
 		};
 	}
 
-	function buildBody(
-		scope: Node & ParentNode,
-		cfg: EngineConfig,
-		headerIndexes: Set<string>,
-		deep: boolean
-	): TableBody {
+	function buildBody(scope: Node & ParentNode, cfg: Config, headerIndexes: Set<string>, deep: boolean): TableBody {
 		const anyCell = cfg.headerCell + "," + cfg.bodyCell;
 		const groups = groupRows(ownRows(scope, cfg.bodyRow, anyCell, deep)).filter(function (group) {
 			const key = group[0].getAttribute("aria-rowindex");
@@ -418,21 +649,21 @@ export function tableSelectorEngine(
 		const cfgKey = JSON.stringify(cfg);
 		let model = byConfig.get(cfgKey);
 		if (model === undefined) {
-			model = buildModel(table, cfg);
+			model = buildModel(table, resolveConfig(cfg));
 			byConfig.set(cfgKey, model);
 		}
 		return model;
 	}
 
-	function compilePredicate(src: string): ((text: string) => unknown) | null {
+	function compilePredicate(src: string): ((text: string, raw: string) => unknown) | null {
 		if (predicateCache.has(src)) return predicateCache.get(src) ?? null;
-		let fn: ((text: string) => unknown) | null = null;
+		let fn: ((text: string, raw: string) => unknown) | null = null;
 		// `predicate` conditions are serialized functions, so compiling them is the feature. The engine is
 		// registered in an isolated world, where a strict page CSP does not block this.
 		try {
 			// oxlint-disable-next-line typescript/no-implied-eval -- compiles a `predicate` condition, see above
 			const value: unknown = new Function("return (" + src + ");")();
-			if (typeof value === "function") fn = value as (text: string) => unknown;
+			if (typeof value === "function") fn = value as (text: string, raw: string) => unknown;
 		} catch {
 			// Method shorthand (`predicate(t) { ... }`) is not a valid expression on its own.
 			try {
@@ -442,7 +673,7 @@ export function tableSelectorEngine(
 					const values = Object.keys(holder).map(function (key) {
 						return (holder as Record<string, unknown>)[key];
 					});
-					if (typeof values[0] === "function") fn = values[0] as (text: string) => unknown;
+					if (typeof values[0] === "function") fn = values[0] as (text: string, raw: string) => unknown;
 				}
 			} catch {
 				fn = null;
@@ -459,7 +690,7 @@ export function tableSelectorEngine(
 	function compileMatcher(matcher: SerializedMatcher, header: string): TextTest {
 		switch (matcher.t) {
 			case "s": {
-				const expected = normalize(matcher.v);
+				const expected = normalizeCell(matcher.v);
 				return function (text) {
 					return text === expected;
 				};
@@ -475,7 +706,9 @@ export function tableSelectorEngine(
 			case "c":
 				return compileTextMatcher(matcher);
 			case "o": {
-				const values = matcher.v.map(normalize);
+				const values = matcher.v.map(function (value) {
+					return normalizeCell(value);
+				});
 				return function (text) {
 					return values.indexOf(text) !== -1;
 				};
@@ -488,26 +721,26 @@ export function tableSelectorEngine(
 				return compilePredicateMatcher(matcher.src, header);
 			case "n": {
 				const inner = compileMatcher(matcher.m, header);
-				return function (text) {
-					return !inner(text);
+				return function (text, raw) {
+					return !inner(text, raw);
 				};
 			}
 			case "a": {
 				const tests = compileAll(matcher.m, header);
-				return function (text) {
+				return function (text, raw) {
 					return tests.some(function (test) {
-						return test(text);
+						return test(text, raw);
 					});
 				};
 			}
 			case "l": {
 				const tests = compileAll(matcher.m, header);
 				// An empty list never matches.
-				return function (text) {
+				return function (text, raw) {
 					return (
 						tests.length > 0 &&
 						tests.every(function (test) {
-							return test(text);
+							return test(text, raw);
 						})
 					);
 				};
@@ -520,7 +753,7 @@ export function tableSelectorEngine(
 	}
 
 	function compileTextMatcher(matcher: Extract<SerializedMatcher, { t: "c" }>): TextTest {
-		const expected = matcher.i ? normalize(matcher.v).toLowerCase() : normalize(matcher.v);
+		const expected = matcher.i ? normalizeCell(matcher.v).toLowerCase() : normalizeCell(matcher.v);
 		const op = matcher.op;
 		return function (text) {
 			const actual = matcher.i ? text.toLowerCase() : text;
@@ -545,11 +778,11 @@ export function tableSelectorEngine(
 	function compilePredicateMatcher(src: string, header: string): TextTest {
 		const predicate = compilePredicate(src);
 		if (predicate === null) reportPredicate(header, "is not a function expression: " + src.slice(0, 80));
-		return function (text) {
+		return function (text, raw) {
 			if (predicate === null) throw PREDICATE_FAILED;
 			let result: unknown;
 			try {
-				result = predicate(text);
+				result = predicate(text, raw());
 			} catch (error) {
 				reportPredicate(header, "threw " + describeError(error));
 				throw PREDICATE_FAILED;
@@ -594,7 +827,7 @@ export function tableSelectorEngine(
 	/** The grid column of a header key or column index, or -1 if there is none. */
 	function columnOf(model: TableModel, column: string | number): number {
 		if (typeof column === "number") return column >= 0 && column % 1 === 0 ? column : -1;
-		return model.keys.indexOf(column);
+		return model.keys.indexOf(normalizeLine(column));
 	}
 
 	/** The text of body row `r` in grid column `c`. Positions without a cell read as an empty string. */
@@ -603,11 +836,17 @@ export function tableSelectorEngine(
 		return cell === undefined ? "" : textOf(model, cell.el);
 	}
 
+	/** The raw text of body row `r` in grid column `c`. Positions without a cell read as an empty string. */
+	function cellRaw(model: TableModel, r: number, c: number): string {
+		const cell = model.body().grid[r]?.[c];
+		return cell === undefined ? "" : rawOf(model, cell.el);
+	}
+
 	/** The conditions of `where` with the grid columns of their headers, or `null` if a header is unknown. */
 	function whereColumns(model: TableModel, where: SerializedWhere): ColumnCondition[] | null {
 		const conditions: ColumnCondition[] = [];
 		for (const condition of where) {
-			const column = model.keys.indexOf(condition.h);
+			const column = model.keys.indexOf(normalizeLine(condition.h));
 			if (column === -1) return null;
 			conditions.push({ column: column, test: compileMatcher(condition.m, condition.h) });
 		}
@@ -618,7 +857,9 @@ export function tableSelectorEngine(
 	function rowMatches(model: TableModel, r: number, conditions: ColumnCondition[]): boolean {
 		try {
 			return conditions.every(function (condition) {
-				return condition.test(cellText(model, r, condition.column));
+				return condition.test(cellText(model, r, condition.column), function () {
+					return cellRaw(model, r, condition.column);
+				});
 			});
 		} catch (error) {
 			if (error === PREDICATE_FAILED) return false;
@@ -648,10 +889,11 @@ export function tableSelectorEngine(
 		// has it: further up, the header rows of other tables would mix in.
 		const byIndex = typeof query.header === "number";
 		const splittable = row.hasAttribute("aria-rowindex");
+		const headerRow = resolveConfig(query.cfg).headerRow;
 		let fallback: Element[] | null = null;
 		let ancestor = parentOf(row);
 		while (ancestor !== null) {
-			if ((byIndex && fallback === null) || hasHeaderRow(ancestor, query.cfg.headerRow)) {
+			if ((byIndex && fallback === null) || hasHeaderRow(ancestor, headerRow)) {
 				const model = getModel(ancestor, query.cfg);
 				if (model !== null && model.body().rowOf.has(row)) {
 					const cell = cellAt(model, row, query.header);
@@ -698,13 +940,13 @@ export function tableSelectorEngine(
 		return cell === undefined ? [] : [cell];
 	}
 
-	/** Header keys and the text of every body cell under them. */
-	function readTexts(model: TableModel): EngineTexts {
+	/** Header keys and the text of every body cell under them: normalized, or with `raw`, as the browser reads it. */
+	function readTexts(model: TableModel, raw: boolean): EngineTexts {
 		const rows: string[][] = [];
 		for (let r = 0; r < model.body().rows.length; r++) {
 			const texts: string[] = [];
 			for (let c = 0; c < model.keys.length; c++) {
-				texts.push(cellText(model, r, c));
+				texts.push(raw ? cellRaw(model, r, c) : cellText(model, r, c));
 			}
 			rows.push(texts);
 		}
@@ -735,7 +977,7 @@ export function tableSelectorEngine(
 		for (const where of expected) {
 			for (const condition of where) {
 				const header = condition.h;
-				if (model.keys.indexOf(header) === -1 && unknown.indexOf(header) === -1) unknown.push(header);
+				if (model.keys.indexOf(normalizeLine(header)) === -1 && unknown.indexOf(header) === -1) unknown.push(header);
 			}
 		}
 		const count = model.body().rows.length;
@@ -751,7 +993,7 @@ export function tableSelectorEngine(
 				return ok;
 			});
 		// The texts are only needed to describe a mismatch, so a match doesn't send the whole table.
-		const rows = pass ? [] : readTexts(model).rows;
+		const rows = pass ? [] : readTexts(model, false).rows;
 		return {
 			keys: model.keys,
 			rows: rows,
@@ -797,9 +1039,11 @@ export function tableSelectorEngine(
 	}
 
 	if (root !== undefined && request !== undefined) {
-		const model = buildModel(root, request.cfg);
+		const cfg = resolveConfig(request.cfg);
+		if (request.op === "text") return normalizeCell(readText(root, cfg));
+		const model = buildModel(root, cfg);
 		if (request.op === "keys") return model === null ? [] : model.keys;
-		if (request.op === "texts") return model === null ? { keys: [], rows: [] } : readTexts(model);
+		if (request.op === "texts") return model === null ? { keys: [], rows: [] } : readTexts(model, request.raw === true);
 		if (request.op === "values") return model === null ? { keys: [], values: null } : readValues(model, request.column);
 		predicateErrors = [];
 		if (request.op === "find") return model === null ? { matches: 0, errors: [] } : findRows(model, request.where);
@@ -813,6 +1057,9 @@ export function tableSelectorEngine(
 			return queryAll(root, body)[0] ?? null;
 		},
 		queryAll: queryAll,
+		normalizeLine: normalizeLine,
+		normalizeCell: normalizeCell,
+		defaultIgnore: DEFAULT_IGNORE.slice(),
 	};
 }
 
@@ -855,3 +1102,40 @@ export const readColumnValues: (root: Element, request: EngineValuesRequest) => 
  * @internal
  */
 export const findTableRows: (root: Element, request: EngineFindRequest) => EngineFindResult = tableSelectorEngine;
+
+/**
+ * The engine function typed for its "text" mode, for use with `locator.evaluate` on a body cell.
+ * Same function object as {@link tableSelectorEngine}.
+ *
+ * @internal
+ */
+export const readCellText: (root: Element, request: EngineTextRequest) => string = tableSelectorEngine;
+
+const engine = tableSelectorEngine();
+
+/**
+ * Normalizes text to one line, exactly as the engine normalizes header text: icon glyphs and invisible
+ * characters are removed, accents are composed (NFC), and every run of whitespace (line breaks included)
+ * becomes one space. Header names passed to {@link TableLocator} are normalized with it.
+ *
+ * @internal
+ */
+export const normalizeLine: (text: string) => string = engine.normalizeLine;
+
+/**
+ * Normalizes text exactly as the engine normalizes body cell text: like {@link normalizeLine}, but line
+ * breaks stay, as one `\n` between trimmed, non-empty lines.
+ *
+ * @internal
+ */
+export const normalizeCell: (text: string) => string = engine.normalizeCell;
+
+/**
+ * The default `ignore` option of {@link TableLocator}: CSS selectors of the elements inside a cell whose
+ * text is left out. They cover screen reader only text (`.sr-only`, `.visually-hidden`), ligature icons
+ * (Material Icons and Material Symbols, whose text such as `arrow_upward` is drawn as an icon) and
+ * decorative content (`[aria-hidden=true]`).
+ *
+ * Spread it to add your own selectors: `ignore: [...DEFAULT_IGNORE, ".sort-icon"]`.
+ */
+export const DEFAULT_IGNORE: readonly string[] = Object.freeze(engine.defaultIgnore);

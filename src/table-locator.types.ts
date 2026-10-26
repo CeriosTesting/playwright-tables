@@ -25,7 +25,9 @@ export type ColumnKey<H extends string> = HeaderKey<H> | number;
 /**
  * A declarative cell condition. Exactly one key per condition.
  *
- * Cell text is always whitespace-collapsed and trimmed before it is compared.
+ * Cell text is compared as the user sees it: each line whitespace-collapsed and trimmed, lines joined
+ * with one `\n`, without icon glyphs, invisible characters or visually hidden text. Expected values are
+ * normalized the same way, so `"Street 1\r\nAmsterdam"` matches a cell showing two lines.
  *
  * @example
  * table.row({ Name: { contains: "john", ignoreCase: true } });
@@ -33,6 +35,8 @@ export type ColumnKey<H extends string> = HeaderKey<H> | number;
  * table.row({ Remarks: { empty: true } });
  * // Runs in the browser, so it must not use variables from the test scope.
  * table.row({ Age: { predicate: text => Number(text) >= 18 } });
+ * // The second argument is the raw cell text (`innerText` or `textContent`, unnormalized).
+ * table.row({ Name: { predicate: (text, raw) => raw.includes("\u00a0") } });
  * // Combinators
  * table.row({ Status: { not: "Deleted" } });
  * table.row({ Email: { anyOf: [{ endsWith: "@example.com" }, /@test\./] } });
@@ -49,8 +53,11 @@ export type CellCondition =
 			/**
 			 * Serialized with `toString()` and executed in the page, like a `page.evaluate` function.
 			 * It must be self-contained: it cannot use variables from the test scope.
+			 *
+			 * `text` is the normalized cell text that the other conditions compare; `raw` is the cell text
+			 * exactly as the browser reads it (`innerText`, or `textContent`), without any normalization.
 			 */
-			predicate: (text: string) => boolean;
+			predicate: (text: string, raw: string) => boolean;
 	  }>
 	| ExclusiveCondition<{ not: CellMatcher }>
 	| ExclusiveCondition<{ anyOf: readonly [CellMatcher, ...CellMatcher[]] }>
@@ -130,11 +137,6 @@ export type TableLocatorOptions<H extends string> = {
 		rowSelector?: string;
 		/** CSS selector for header cells. Defaults to `"th, td"`. */
 		columnSelector?: string;
-		/**
-		 * Removes icon font glyphs (Unicode private use characters, such as sort arrows) from header
-		 * text before it is used as a header key. Defaults to `false`.
-		 */
-		stripIconGlyphs?: boolean;
 	};
 	row?: {
 		/** CSS selector for body rows. Defaults to `"tbody>tr"`, without the header rows of a table without a `<thead>`. */
@@ -142,8 +144,22 @@ export type TableLocatorOptions<H extends string> = {
 		/** CSS selector for body cells. Defaults to `"td, th"`, so row header cells are columns too. */
 		columnSelector?: string;
 	};
-	/** How cell text is read, for both header and body cells. Defaults to `InnerText`. */
+	/**
+	 * How cell text is read, for both header and body cells. Defaults to `InnerText`: the text as it is
+	 * shown, without hidden text and with CSS `text-transform`. `TextContent` reads all text in the DOM,
+	 * hidden text included. Either way, the text is normalized (see {@link CellCondition}).
+	 */
 	cellContentType?: CellContentType;
+	/**
+	 * CSS selectors of elements inside header and body cells whose text is left out, such as screen reader
+	 * only text and icons. Defaults to {@link DEFAULT_IGNORE}: `.sr-only`, `.visually-hidden`, the Material
+	 * Icons and Material Symbols classes, and `[aria-hidden=true]`.
+	 *
+	 * Setting it replaces the defaults. Spread them to add your own (`[...DEFAULT_IGNORE, ".sort-icon"]`),
+	 * or pass `[]` to read all text. Raw values (`toJson({ raw: true })`, a predicate's `raw`) are never
+	 * filtered.
+	 */
+	ignore?: readonly string[];
 };
 
 /**
@@ -163,6 +179,12 @@ export type TableJsonOptions = {
 	 * Without it, the time to wait for the table element to be attached.
 	 */
 	timeout?: number;
+	/**
+	 * Return every body cell as the browser reads it (`innerText`, or `textContent`), without any
+	 * normalization: line breaks, tabs, non-breaking spaces, icon glyphs and visually hidden text stay.
+	 * Header keys are normalized either way. Defaults to `false`.
+	 */
+	raw?: boolean;
 };
 
 /**
@@ -181,17 +203,23 @@ export type SerializedMatcher =
 	| { t: "l"; m: SerializedMatcher[] };
 
 /**
- * Table configuration shared by every `pw-table-v1` query.
+ * Table configuration shared by every `pw-table-v1` query. Only what differs from the defaults is set,
+ * so selectors stay short; the engine fills in the rest.
  * @internal
  */
 export type EngineConfig = {
-	headerRow: string;
-	headerCell: string;
-	bodyRow: string;
-	bodyCell: string;
-	mainHeaderRow: number | null;
-	contentType: "innerText" | "textContent";
-	stripIconGlyphs: boolean;
+	/** Use the ARIA default selectors instead of the HTML ones. */
+	aria?: 1;
+	headerRow?: string;
+	headerCell?: string;
+	bodyRow?: string;
+	bodyCell?: string;
+	/** Index of the main header row. Defaults to the last header row. */
+	mainHeaderRow?: number;
+	/** Read text with `textContent` instead of `innerText`. */
+	textContent?: 1;
+	/** Selectors of the elements inside a cell whose text is left out. Defaults to `DEFAULT_IGNORE`. */
+	ignore?: string[];
 };
 
 /**
@@ -218,10 +246,17 @@ export type EngineQuery =
 export type EngineKeysRequest = { op: "keys"; cfg: EngineConfig };
 
 /**
- * Argument for evaluating the engine function directly to read the text of every body cell.
+ * Argument for evaluating the engine function directly to read the text of every body cell, normalized
+ * or with `raw`, as the browser reads it.
  * @internal
  */
-export type EngineTextsRequest = { op: "texts"; cfg: EngineConfig };
+export type EngineTextsRequest = { op: "texts"; cfg: EngineConfig; raw?: true };
+
+/**
+ * Argument for evaluating the engine function directly on a body cell, to read its normalized text.
+ * @internal
+ */
+export type EngineTextRequest = { op: "text"; cfg: EngineConfig };
 
 /**
  * Argument for evaluating the engine function directly to match every body row against its own conditions.
@@ -277,10 +312,14 @@ export type EngineMatchResult = EngineTexts & {
 export type EngineValues = { keys: string[]; values: string[] | null };
 
 /**
- * The object a Playwright custom selector engine must return.
+ * The object a Playwright custom selector engine must return, plus the engine's text normalization
+ * (Playwright ignores the extra members), so Node normalizes exactly like the browser.
  * @internal
  */
 export type SelectorEngine = {
 	query(root: Node, body: string): Element | null;
 	queryAll(root: Node, body: string): Element[];
+	normalizeLine: (text: string) => string;
+	normalizeCell: (text: string) => string;
+	defaultIgnore: string[];
 };

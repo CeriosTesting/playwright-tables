@@ -15,4 +15,5 @@ export type {
 	ValidRowWhere,
 } from "./table-locator.types";
 export { registerTableSelectors, test } from "./table-selectors";
+export { DEFAULT_IGNORE } from "./table-selector-engine";
 export { expect, tableMatchers, type TableMatcherOptions, type TableSortOptions } from "./table-matchers";

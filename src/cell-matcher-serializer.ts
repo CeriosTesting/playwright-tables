@@ -1,7 +1,9 @@
 import { CellMatcher, RowWhere, SerializedMatcher, SerializedWhere } from "./table-locator.types";
+import { normalizeLine } from "./table-selector-engine";
 
 /**
- * Converts row conditions to the wire format of the `pw-table-v1` engine. Headers without a value are skipped.
+ * Converts row conditions to the wire format of the `pw-table-v1` engine. Headers without a value are
+ * skipped. Header names are normalized like header text, so `"First\nname"` finds `First name`.
  *
  * @internal
  */
@@ -10,10 +12,33 @@ export function serializeWhere(where: RowWhere<string>): SerializedWhere {
 	const entries: [string, CellMatcher | undefined][] = Object.entries(where);
 	for (const [header, matcher] of entries) {
 		if (matcher !== undefined) {
-			conditions.push({ h: header, m: serializeMatcher(header, matcher) });
+			conditions.push({ h: normalizeLine(header), m: serializeMatcher(header, matcher) });
 		}
 	}
 	return conditions;
+}
+
+/**
+ * Describes row conditions for messages and locator descriptions, such as `{ "Name": "John" }`.
+ *
+ * @internal
+ */
+export function describeWhere(where: RowWhere<string>): string {
+	const entries: [string, CellMatcher | undefined][] = Object.entries(where);
+	const parts = entries
+		.filter((entry): entry is [string, CellMatcher] => entry[1] !== undefined)
+		.map(([header, matcher]) => `${JSON.stringify(header)}: ${describeMatcher(matcher)}`);
+	return `{ ${parts.join(", ")} }`;
+}
+
+function describeMatcher(matcher: CellMatcher): string {
+	if (typeof matcher === "string") return JSON.stringify(matcher);
+	if (matcher instanceof RegExp) return String(matcher);
+	if (matcher.predicate !== undefined) return `{ predicate: ${matcher.predicate.toString()} }`;
+	if (matcher.not !== undefined) return `{ not: ${describeMatcher(matcher.not)} }`;
+	if (matcher.anyOf !== undefined) return `{ anyOf: [${matcher.anyOf.map(describeMatcher).join(", ")}] }`;
+	if (matcher.allOf !== undefined) return `{ allOf: [${matcher.allOf.map(describeMatcher).join(", ")}] }`;
+	return JSON.stringify(matcher);
 }
 
 /**

@@ -142,7 +142,7 @@ row.filter({ hasText: "x" }); // TableRow narrowed with Locator.filter()
 row.first(); // TableRow: the first of these rows (also last() and nth(i))
 ```
 
-Without `headers`, any string is accepted as a header. The other options are the same as for `PlaywrightTable`: `header.rowSelector`, `header.columnSelector`, `header.setMainHeaderRow`, `row.rowSelector` and `row.columnSelector`. Only the defaults differ: `TableLocator` takes both `th` and `td` in header and body rows (see [Row headers and nested tables](#row-headers-and-nested-tables)), and in a table without a `<thead>`, the leading rows of `<th>` cells (without `<td>`) in the first `<tbody>` are header rows, not body rows. To turn that off, set `header.rowSelector` to `"thead>tr"` and `row.rowSelector` to `"tbody>tr"`. `cellContentType` sets how text is read for both header and body cells (`InnerText` by default). `header.stripIconGlyphs` removes icon font glyphs from header text (see [Header keys](#header-keys)). `aria: true` switches the defaults to ARIA roles (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)).
+Without `headers`, any string is accepted as a header. The other options are the same as for `PlaywrightTable`: `header.rowSelector`, `header.columnSelector`, `header.setMainHeaderRow`, `row.rowSelector` and `row.columnSelector`. Only the defaults differ: `TableLocator` takes both `th` and `td` in header and body rows (see [Row headers and nested tables](#row-headers-and-nested-tables)), and in a table without a `<thead>`, the leading rows of `<th>` cells (without `<td>`) in the first `<tbody>` are header rows, not body rows. To turn that off, set `header.rowSelector` to `"thead>tr"` and `row.rowSelector` to `"tbody>tr"`. `cellContentType` sets how text is read for both header and body cells (`InnerText` by default, see [How text is read](#how-text-is-read)). `aria: true` switches the defaults to ARIA roles (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)).
 
 `row()` follows Playwright's strict mode: acting on it throws when several rows match. Use `first()`, `last()`, `nth(i)`, `rows.filter(...)`, `rowAt(n)` or `table.cell(anyRowLocator, header)` to compose. All of them keep typed cell access.
 
@@ -242,24 +242,95 @@ await expect(users.row({ Name: "Jane" }).cell("Status")).toHaveText("Active");
 - Cell text is read with `innerText` (or `textContent`), so text inside the shadow root of an element _in_ a cell depends on the browser, as with `PlaywrightTable`.
 - With `aria: true`, the `:has()` in the default row selectors does not look into a row's own shadow root. Set `header.rowSelector` and `row.rowSelector` for grids whose rows render their cells in a shadow root.
 
+### How text is read
+
+`TableLocator` reads headers and cells the way a person reads them on screen, so what you see in the browser is what you write in your test.
+
+**Header text is always one line.** Line breaks (`<br>`, block elements, newlines in the HTML), tabs and non-breaking spaces become one space.
+
+**Body cells keep their line breaks**, as one `\n` between trimmed lines. Empty lines are dropped.
+
+| In the page                                                         | Header key             | Body cell text          |
+| ------------------------------------------------------------------- | ---------------------- | ----------------------- |
+| `First<br>name`, `<div>First</div><div>name</div>`                  | `"First name"`         | `"First\nname"`         |
+| `Street 1<br><br>&nbsp; Amsterdam`                                  | `"Street 1 Amsterdam"` | `"Street 1\nAmsterdam"` |
+| `John⏎        Doe` (indentation in the HTML)                        | `"John Doe"`           | `"John Doe"`            |
+| `Verzekerings&shy;nummer`, zero-width spaces, bidi marks            | `"Verzekeringsnummer"` | `"Verzekeringsnummer"`  |
+| `Name <span class="material-icons">arrow_upward</span>`, `&#xE5CF;` | `"Name"`               | `"Name"`                |
+| `Name<span class="sr-only">, sortable</span>`                       | `"Name"`               | `"Name"`                |
+| `Name` in a cell with `text-transform: uppercase`                   | `"NAME"`               | `"NAME"`                |
+| `Cafe&#x301;` (decomposed accent)                                   | `"Café"`               | `"Café"`                |
+| `<select>` with `High` selected                                     | —                      | `"High"`                |
+
+In short:
+
+- **Invisible characters are removed**: soft hyphens, zero-width spaces, word joiners, byte order marks and bidi marks. Zero-width joiners stay, so emoji like 👨‍👩‍👧 are kept whole.
+- **Icon glyphs are removed**: Unicode private use characters, where icon fonts such as Font Awesome put their icons. Real symbols such as `€`, `°C` and `✓` stay. A header that is only an icon becomes `{{Empty}}`.
+- **Ignored elements are left out**: the text of every element inside a cell that matches one of the `ignore` selectors (see below).
+- **Hidden elements are left out**: `display: none` and `visibility: hidden`, as `innerText` does. CSS `text-transform` is kept.
+- **Accents are composed** (Unicode NFC), so `é` matches however the page encodes it.
+
+With `cellContentType: CellContentType.TextContent`, all text in the DOM is read, hidden elements included, and `text-transform` is ignored. The other rules, `ignore` included, still apply.
+
+#### Ignored elements
+
+Some text in a cell isn't meant to be read: screen reader only text such as `, sorted ascending`, or icon fonts that draw a word such as `arrow_upward` as an icon. The browser has no way to tell these apart from other text, so `TableLocator` leaves out the elements that match a list of CSS selectors. By default, that list is `DEFAULT_IGNORE`:
+
+| Selector                                                                                                                    | What it covers                                      |
+| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `.sr-only`, `.visually-hidden`                                                                                              | Screen reader only text (Tailwind, Bootstrap)       |
+| `.material-icons`, `.material-icons-outlined`, `.material-icons-round`, `.material-icons-sharp`, `.material-icons-two-tone` | Material Icons ligatures                            |
+| `.material-symbols-outlined`, `.material-symbols-rounded`, `.material-symbols-sharp`                                        | Material Symbols ligatures                          |
+| `[aria-hidden=true]`                                                                                                        | Decorative content hidden from assistive technology |
+
+Set `ignore` to change the list. It replaces the defaults, so spread them to add your own:
+
+```ts
+import { DEFAULT_IGNORE, defineTable } from "@cerios/playwright-table";
+
+const users = defineTable(page.locator("#users"), { ignore: [...DEFAULT_IGNORE, ".sort-icon", ".badge-count"] });
+const everything = defineTable(page.locator("#users"), { ignore: [] }); // read all text
+```
+
+The selectors apply to elements inside header and body cells, not to the cells themselves. Raw values (`toJson({ raw: true })` and a predicate's `raw` argument) are never filtered.
+
+The header names you pass are normalized the same way, so `"First\nname"`, `"First  name"` and `"First\u00a0name"` all find the header `First name`. That goes for `row()`, `cell()`, `column()`, `header()`, `validateHeaders()` and the matchers.
+
+Values in conditions are normalized like body cells, so `"Street 1\r\nAmsterdam"` matches a cell that shows two lines. A string condition must include the line break. To match one line of a cell, use `contains` or a RegExp:
+
+```ts
+await expect(users.row({ Address: "Street 1\nAmsterdam" }).cell("Name")).toHaveText("John");
+await expect(users.row({ Address: { contains: "Amsterdam" } }).cell("Name")).toHaveText("John");
+await expect(users.row({ Address: /^Amsterdam$/m }).cell("Name")).toHaveText("John");
+```
+
+For the text exactly as the browser reads it, use `toJson({ raw: true })`, the second argument of a [`predicate`](#cell-conditions), or the cell locator itself (`await row.cell("Address").innerText()`).
+
 ### Header keys
 
-Header keys are the same keys that `getJson()` produces:
+Header keys are the same keys that `getJson()` produces, with the header text read as described in [How text is read](#how-text-is-read):
 
 - Colspan continuations get `__C<n>`. For example, a `Name` header spanning two columns gives the keys `Name` and `Name__C1`.
 - Duplicate names get `__D<n>`: the second `Name` becomes `Name__D1`, the third `Name__D2`.
 - Empty headers become `{{Empty}}`.
 - Headers carried down by `rowspan` keep their text.
 - The main header row is the last header row, unless `header.setMainHeaderRow` is set.
-- With `header: { stripIconGlyphs: true }`, icon font glyphs (Unicode private use characters, like the sort arrows of Material Icons or Font Awesome) are removed from header text first. A header that is only a glyph becomes `{{Empty}}`.
 
 Header arguments accept ``H | `${H}__C${number}` | `${H}__D${number}` ``, so `users.row({ Name__C1: "Doe" })` type-checks.
 
-If a header is unknown, the locator matches nothing and keeps waiting until the assertion times out. The error mentions the `pw-table-v1` selector. For a clear failure up front, use `validateHeaders()` or the matchers below.
+If a header is unknown, the locator matches nothing and keeps waiting until the assertion times out. Locators read like the code that built them in error messages and traces (Playwright 1.53 and later):
+
+```
+Error: expect(locator).toHaveText(expected) failed
+
+Locator: locator('#users').row({ "Name": "Jhon" }).cell("Status")
+```
+
+For a clear failure up front that names the unknown header and lists the available ones, use `validateHeaders()` or the matchers below.
 
 ### Cell conditions
 
-Cell text is whitespace-collapsed and trimmed before it is compared. A condition is one of:
+Cell text is compared as described in [How text is read](#how-text-is-read): each line collapsed and trimmed, with one `\n` between lines. A condition is one of:
 
 | Condition                                                        | Matches when the cell text...               |
 | ---------------------------------------------------------------- | ------------------------------------------- |
@@ -275,6 +346,8 @@ Cell text is whitespace-collapsed and trimmed before it is compared. A condition
 | `{ not: "Deleted" }`                                             | does not match the nested matcher           |
 | `{ anyOf: ["Active", /^pend/i] }`                                | matches at least one nested matcher         |
 | `{ allOf: [{ startsWith: "J" }, { not: { contains: "Doe" } }] }` | matches every nested matcher                |
+
+A `predicate` gets two arguments: the normalized `text` that the other conditions compare, and the `raw` text exactly as the browser reads it (`innerText`, or `textContent`), for example `{ predicate: (text, raw) => raw.includes("\u00a0") }`.
 
 `predicate` runs **in the browser**, like a `page.evaluate` function. It is serialized with `toString()`, so it cannot use variables from your test. A predicate that throws (for example on a variable from your test), returns a promise or cannot be compiled fails the row, also inside `not`, `anyOf` or `allOf`, so a broken predicate never turns into a match. When `toHaveRow`, `toHaveCells` or `toHaveRows` fail, they report the predicate's error. Bound and built-in functions (`fn.bind(...)`, `Boolean`) have no source to send, so `row()` rejects them right away.
 
@@ -297,12 +370,17 @@ const keys = await users.headerKeys(); // ["Name", "State", "Email"]
 
 ### Reading the whole table
 
-`toJson()` reads every body row as an object keyed by header key, like `PlaywrightTable.getJson()`. A cell spanning rows or columns is repeated in every position it covers, and cell text is whitespace-collapsed and trimmed, as in row conditions.
+`toJson()` reads every body row as an object keyed by header key, like `PlaywrightTable.getJson()`. A cell spanning rows or columns is repeated in every position it covers, and cell text is read as in row conditions: line breaks stay as one `\n` (see [How text is read](#how-text-is-read)).
 
 ```ts
 const data = await users.toJson();
-// [{ Name: "John", Status: "Active", Email: "john@example.com" }, ...]
+// [{ Name: "John", Status: "Active", Address: "Street 1\nAmsterdam" }, ...]
+
+const raw = await users.toJson({ raw: true });
+// [{ Name: "John", Status: "\uE5CA Active", Address: "Street 1\nAmsterdam " }, ...]
 ```
+
+`raw: true` returns every body cell exactly as the browser reads it (`innerText`, or `textContent`): tabs, non-breaking spaces, icon glyphs and the text of ignored elements stay. Header keys are normalized either way.
 
 By default `toJson()` is a snapshot: it doesn't wait for rows to load, and it throws if the table has no header row. Set `minRows` to wait first for a header row and at least that many body rows with content:
 
@@ -413,17 +491,17 @@ Both can be used on the same table.
 
 ### Common pitfalls
 
-| Pitfall                                                                           | Fix                                                                                                                                                                          |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hard-coded row or column numbers break when columns move or rows reorder.         | Find rows by content with `row({...})` and cells by header name. Use `rowAt()` only when the position is what you test.                                                      |
-| Reading the table, then asserting on the snapshot, is flaky.                      | Assert with retrying matchers (`toHaveRow`, `toHaveRows`, `toHaveCells`, `toBeSortedBy`, `expect(cell).toHaveText()`). Use `toJson()` only after one of them has passed.     |
-| Skeleton or "Loading…" rows make a table look loaded.                             | Assert on content you expect (`toHaveRow`), or use `toJson({ minRows })`. `toBeSortedBy` fails on an empty body.                                                             |
-| A sort test only checks the arrow icon or `aria-sort`.                            | `toBeSortedBy` checks the data; add `ariaSort: true` to check the header too.                                                                                                |
-| Numbers or dates sort as text (`"10"` before `"9"`, `"€ 950"` after `"€ 1,200"`). | Pass `type: "number"` or `type: "date"` to `toBeSortedBy`, or a `compare` for other formats.                                                                                 |
-| A row header (`<th scope="row">`) or a nested table shifts the columns.           | `TableLocator` handles both by default (see [Row headers and nested tables](#row-headers-and-nested-tables)).                                                                |
-| Data grids only render the rows and columns in view.                              | Use `aria: true`, scroll the row or column into view before asserting, and don't count rendered rows to get the total (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)). |
-| Icon fonts put invisible characters in header text.                               | Set `header: { stripIconGlyphs: true }`.                                                                                                                                     |
-| `row()` throws a strict mode violation.                                           | Several rows match. Add a condition, or pick one with `first()`, `last()` or `nth()`.                                                                                        |
+| Pitfall                                                                           | Fix                                                                                                                                                                                |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hard-coded row or column numbers break when columns move or rows reorder.         | Find rows by content with `row({...})` and cells by header name. Use `rowAt()` only when the position is what you test.                                                            |
+| Reading the table, then asserting on the snapshot, is flaky.                      | Assert with retrying matchers (`toHaveRow`, `toHaveRows`, `toHaveCells`, `toBeSortedBy`, `expect(cell).toHaveText()`). Use `toJson()` only after one of them has passed.           |
+| Skeleton or "Loading…" rows make a table look loaded.                             | Assert on content you expect (`toHaveRow`), or use `toJson({ minRows })`. `toBeSortedBy` fails on an empty body.                                                                   |
+| A sort test only checks the arrow icon or `aria-sort`.                            | `toBeSortedBy` checks the data; add `ariaSort: true` to check the header too.                                                                                                      |
+| Numbers or dates sort as text (`"10"` before `"9"`, `"€ 950"` after `"€ 1,200"`). | Pass `type: "number"` or `type: "date"` to `toBeSortedBy`, or a `compare` for other formats.                                                                                       |
+| A row header (`<th scope="row">`) or a nested table shifts the columns.           | `TableLocator` handles both by default (see [Row headers and nested tables](#row-headers-and-nested-tables)).                                                                      |
+| Data grids only render the rows and columns in view.                              | Use `aria: true`, scroll the row or column into view before asserting, and don't count rendered rows to get the total (see [ARIA grids](#aria-grids-ag-grid-mui-data-grid)).       |
+| `expect(cell).toHaveText()` fails on a cell with an icon or screen reader text.   | `toHaveText` uses Playwright's own text rules. Compare as the table reads text with `toHaveCells`, `toHaveRow` or a `row()` condition (see [How text is read](#how-text-is-read)). |
+| `row()` throws a strict mode violation.                                           | Several rows match. Add a condition, or pick one with `first()`, `last()` or `nth()`.                                                                                              |
 
 ---
 

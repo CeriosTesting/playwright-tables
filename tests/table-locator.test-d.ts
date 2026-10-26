@@ -3,7 +3,7 @@
  * Every `@ts-expect-error` line must produce a type error, otherwise compilation fails.
  */
 import { Locator } from "@playwright/test";
-import { defineTable, expect, HeaderKey, TableLocator, TableRow } from "src";
+import { DEFAULT_IGNORE, defineTable, expect, HeaderKey, TableLocator, TableRow } from "src";
 
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 function assertType<T extends true>(value?: T): T | undefined {
@@ -33,6 +33,15 @@ export function typeTests(root: Locator): void {
 	users.row({ Status: { oneOf: ["Active", "Pending"] } });
 	users.row({ Email: { empty: true } });
 	users.row({ Name: { predicate: text => text.length > 3 } });
+	// The second predicate argument is the raw cell text
+	users.row({
+		Name: {
+			predicate: (text, raw) => {
+				assertType<Equals<typeof raw, string>>();
+				return raw.length > text.length;
+			},
+		},
+	});
 	users.row({ Name__C1: "Doe", Status__D2: "x" });
 
 	// @ts-expect-error unknown header
@@ -109,10 +118,16 @@ export function typeTests(root: Locator): void {
 	// @ts-expect-error unknown header
 	users.rows.first().cell("Mail");
 
-	// stripIconGlyphs is a header option
+	// Icon glyphs are always stripped, so there is no stripIconGlyphs option
+	// @ts-expect-error stripIconGlyphs was removed
 	defineTable(root, { header: { stripIconGlyphs: true } });
-	// @ts-expect-error stripIconGlyphs is a boolean
-	defineTable(root, { header: { stripIconGlyphs: "yes" } });
+	// ignore takes CSS selectors, and the defaults can be extended
+	defineTable(root, { ignore: [...DEFAULT_IGNORE, ".sort-icon"] });
+	defineTable(root, { ignore: [] });
+	// @ts-expect-error ignore is a list of selectors
+	defineTable(root, { ignore: ".sort-icon" });
+	// @ts-expect-error DEFAULT_IGNORE is read-only
+	DEFAULT_IGNORE.push(".x");
 
 	// HeaderKey covers plain names and both suffix kinds
 	const keys: HeaderKey<"Name">[] = ["Name", "Name__C1", "Name__D12"];
@@ -173,6 +188,9 @@ export async function matcherTypeTests(root: Locator): Promise<void> {
 	await users.toJson({ minRows: 1, timeout: 10_000 });
 	// @ts-expect-error minRows is a number
 	await users.toJson({ minRows: true });
+	await users.toJson({ raw: true });
+	// @ts-expect-error raw is a boolean
+	await users.toJson({ raw: "yes" });
 	// Locator matchers keep working
 	await expect(users.rows.locator).toHaveCount(2);
 }

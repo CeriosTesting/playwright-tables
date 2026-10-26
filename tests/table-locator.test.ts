@@ -10,6 +10,7 @@ import {
 	TableLocatorOptions,
 	test,
 } from "src";
+import { normalizeCell } from "src/table-selector-engine";
 
 import { Route } from "./demo-html/routes";
 
@@ -67,7 +68,7 @@ const demoCases: Record<Route, DemoCase> = {
 	[Route.RowHeaderTable]: {
 		root: "#RowHeaderTable",
 		expected: [
-			{ "{{Empty}}": "North", Q1: "100", Q2: "200", Details: "Item Count Bikes 3 Cars 4" },
+			{ "{{Empty}}": "North", Q1: "100", Q2: "200", Details: "Item Count\nBikes 3\nCars 4" },
 			{ "{{Empty}}": "South", Q1: "300", Q2: "400", Details: "None" },
 		],
 	},
@@ -240,12 +241,48 @@ test.describe("TableLocator", () => {
 		expect(message).toContain("strict mode violation");
 	});
 
-	test("an unknown header matches nothing and times out mentioning pw-table", async ({ page }) => {
+	test("an unknown header matches nothing and times out with a readable locator", async ({ page }) => {
 		await page.goto(Route.SimpleTable);
 		const table = defineTable(page.locator("table"));
 
 		const message = await errorMessage(() => expect(table.row({ Nope: "x" }).locator).toBeVisible({ timeout: 500 }));
-		expect(message).toContain("pw-table");
+		expect(message).toContain(`Locator: locator('table').row({ "Nope": "x" })`);
+		// The call log shows the selector itself; default options are left out of it
+		expect(message).toContain(`"cfg":{}`);
+		expect(message).not.toContain("tbody:first-of-type");
+	});
+
+	test("locators read like the code that built them", async ({ page }) => {
+		const users = await openUsers(page);
+		const root = "locator('#users')";
+
+		expect(users.rows.locator.toString()).toBe(`${root}.rows`);
+		expect(users.rowAt(1).cell("Email").toString()).toBe(`${root}.rowAt(1).cell("Email")`);
+		expect(users.row({ Name: /^jo/i, Age: { oneOf: ["42"] } }).locator.toString()).toBe(
+			`${root}.row({ "Name": /^jo/i, "Age": {"oneOf":["42"]} })`
+		);
+		expect(users.row({ Status: "Active" }).nth(1).cell(0).toString()).toBe(
+			`${root}.row({ "Status": "Active" }).nth(1).cell(0)`
+		);
+		expect(users.rows.filter({ hasText: "Jane" }).first().cell("Age").toString()).toBe(
+			`${root}.rows.filter({ hasText: "Jane" }).first().cell("Age")`
+		);
+		expect(users.rows.last().locator.toString()).toBe(`${root}.rows.last()`);
+		expect(users.column("Status").toString()).toBe(`${root}.column("Status")`);
+		expect(users.header("Name").toString()).toBe(`${root}.header("Name")`);
+		expect(users.cell(page.locator("#users tbody tr").first(), "Email").toString()).toBe(
+			`locator('#users tbody tr').first().cell("Email")`
+		);
+
+		// The descriptions don't change what the locators resolve to
+		await expect(users.rows.filter({ hasText: "Jane" }).first().cell("Age")).toHaveText("17");
+		await expect(users.row({ Status: "Active" }).nth(1).cell(0)).toHaveText("Joe Bloggs");
+		await expect(users.rows.last().locator.filter({ hasText: "Joe" })).toHaveCount(1);
+
+		const message = await errorMessage(() =>
+			expect(users.row({ Name: "Ghost" }).cell("Status")).toHaveText("x", { timeout: 500 })
+		);
+		expect(message).toContain(`Locator: ${root}.row({ "Name": "Ghost" }).cell("Status")`);
 	});
 
 	test("reads innerText by default and textContent on request", async ({ page }) => {
@@ -698,25 +735,19 @@ test.describe("TableRow first, last and nth", () => {
 	});
 });
 
-test.describe("TableLocator stripIconGlyphs", () => {
-	test("removes icon font glyphs from header keys", async ({ page }) => {
+test.describe("TableLocator icon glyphs", () => {
+	test("icon font glyphs are always removed from header keys", async ({ page }) => {
 		await page.setContent(`
 			<table>
 				<thead><tr><th>Name <span class="icon">&#xE5CF;</span></th><th>&#xF0DC;Status</th></tr></thead>
 				<tbody><tr><td>John</td><td>Active</td></tr></tbody>
 			</table>
 		`);
+		const table = defineTable(page.locator("table"), { headers: ["Name", "Status"] });
 
-		const raw = defineTable(page.locator("table"));
-		expect(await raw.headerKeys()).toEqual(["Name ", "Status"]);
-
-		const stripped = defineTable(page.locator("table"), {
-			headers: ["Name", "Status"],
-			header: { stripIconGlyphs: true },
-		});
-		expect(await stripped.headerKeys()).toEqual(["Name", "Status"]);
-		await expect(stripped.row({ Name: "John" }).cell("Status")).toHaveText("Active");
-		await expect(stripped.header("Status")).toContainText("Status");
+		expect(await table.headerKeys()).toEqual(["Name", "Status"]);
+		await expect(table.row({ Name: "John" }).cell("Status")).toHaveText("Active");
+		await expect(table.header("Status")).toContainText("Status");
 	});
 
 	test("a header that is only a glyph becomes {{Empty}}", async ({ page }) => {
@@ -726,7 +757,7 @@ test.describe("TableLocator stripIconGlyphs", () => {
 				<tbody><tr><td>John</td><td>x</td></tr></tbody>
 			</table>
 		`);
-		const table = defineTable(page.locator("table"), { header: { stripIconGlyphs: true } });
+		const table = defineTable(page.locator("table"));
 
 		expect(await table.headerKeys()).toEqual(["Name", "{{Empty}}"]);
 	});
@@ -757,7 +788,7 @@ test.describe("TableLocator toJson", () => {
 			const expected =
 				demo.expected ??
 				(await new PlaywrightTable(root, { header: demo.options?.header, row: demo.options?.row }).getJson()).map(row =>
-					Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value.replace(/\s+/g, " ").trim()]))
+					Object.fromEntries(Object.entries(row).map(([key, value]) => [key, normalizeCell(value)]))
 				);
 
 			expect(await table.toJson()).toEqual(expected);

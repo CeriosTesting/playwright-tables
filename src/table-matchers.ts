@@ -1,6 +1,6 @@
 import { expect as baseExpect, Expect, ExpectMatcherState, Locator } from "@playwright/test";
 
-import { serializeWhere } from "./cell-matcher-serializer";
+import { describeWhere, serializeWhere } from "./cell-matcher-serializer";
 import { describeLastError, MIN_READ_TIMEOUT, pollUntil } from "./polling";
 import { TableLocator, TableRow } from "./table-locator";
 import {
@@ -8,13 +8,21 @@ import {
 	EngineFindRequest,
 	EngineMatchRequest,
 	EngineMatchResult,
+	EngineTextRequest,
 	EngineTextsRequest,
 	EngineValues,
 	EngineValuesRequest,
 	RowWhere,
 	SerializedMatcher,
 } from "./table-locator.types";
-import { findTableRows, matchTableRows, readColumnValues, readTableTexts } from "./table-selector-engine";
+import {
+	findTableRows,
+	matchTableRows,
+	normalizeLine,
+	readCellText,
+	readColumnValues,
+	readTableTexts,
+} from "./table-selector-engine";
 
 /** Maximum number of mismatching rows listed in a `toHaveRows` failure message. */
 const MAX_REPORTED_ROWS = 10;
@@ -191,10 +199,12 @@ async function toHaveHeaders(
 	const exact = options?.exact === true;
 	const deadline = Date.now() + timeout;
 
+	// Header names are normalized like header text, so "First\nname" finds the header "First name".
+	const expected = headers.map(normalizeLine);
 	const matches = (keys: string[]): boolean =>
 		exact
-			? keys.length === headers.length && headers.every((header, index) => keys[index] === header)
-			: headers.every(header => keys.includes(header));
+			? keys.length === expected.length && expected.every((header, index) => keys[index] === header)
+			: expected.every(header => keys.includes(header));
 
 	const poll = await pollUntil(
 		readTimeout => table.headerKeys({ timeout: readTimeout }),
@@ -204,7 +214,7 @@ async function toHaveHeaders(
 	);
 	const keys = poll.value;
 	const matched = matches(keys);
-	const missing = headers.filter(header => !keys.includes(header));
+	const missing = headers.filter(header => !keys.includes(normalizeLine(header)));
 
 	return {
 		name: matcherName,
@@ -431,7 +441,11 @@ async function pollSorted(
 ): Promise<SortPoll> {
 	const expectedAriaSort = sort.order === "asc" ? "ascending" : "descending";
 	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
-	const request: EngineValuesRequest = { op: "values", cfg: table["_config"], column };
+	const request: EngineValuesRequest = {
+		op: "values",
+		cfg: table["_config"],
+		column: typeof column === "string" ? normalizeLine(column) : column,
+	};
 	const evaluate = (read: SortRead): { check: SortCheck; sorted: boolean } => {
 		const check = checkSorted(read.column, column, sort.order, sort.type, sort.compare);
 		const sorted =
@@ -558,16 +572,16 @@ export const expect: Expect<typeof tableMatchers> = baseExpect.extend(tableMatch
 async function readCells(row: TableRow, headers: readonly string[]): Promise<string> {
 	// Read the cells the way the table compares them. `_config` is private to TableLocator; the matchers
 	// of this package read it.
-	const textContent = row.table["_config"].contentType === "textContent";
+	const request: EngineTextRequest = { op: "text", cfg: row.table["_config"] };
 	const parts = await Promise.all(
 		headers.map(async header => {
-			const cell = row.cell(header);
-			const text = await (
-				textContent ? cell.textContent({ timeout: 500 }).then(value => value ?? "") : cell.innerText({ timeout: 500 })
-			).then(
-				value => JSON.stringify(value.replace(/\s+/g, " ").trim()),
-				() => "<no cell>"
-			);
+			const text = await row
+				.cell(header)
+				.evaluate(readCellText, request, { timeout: 1_000 })
+				.then(
+					value => JSON.stringify(value),
+					() => "<no cell>"
+				);
 			return `${JSON.stringify(header)}: ${text}`;
 		})
 	);
@@ -588,7 +602,7 @@ async function headerDiagnostics(table: TableLocator, headers: readonly string[]
 	} catch (error) {
 		return describeLastError(error);
 	}
-	const unknown = headers.filter(header => !available.includes(header));
+	const unknown = headers.filter(header => !available.includes(normalizeLine(header)));
 	return unknown.length === 0 ? "" : describeUnknown(unknown, available);
 }
 
@@ -625,7 +639,8 @@ function describePredicateErrors(errors: readonly string[]): string {
  * headers that are still unknown at the deadline, or `""` once they are all known.
  */
 async function waitForHeaders(table: TableLocator, headers: readonly string[], deadline: number): Promise<string> {
-	const missing = (keys: readonly string[]): string[] => headers.filter(header => !keys.includes(header));
+	const missing = (keys: readonly string[]): string[] =>
+		headers.filter(header => !keys.includes(normalizeLine(header)));
 	const poll = await pollUntil(
 		readTimeout => table.headerKeys({ timeout: readTimeout }),
 		keys => missing(keys).length === 0,
@@ -714,8 +729,10 @@ function describeRowMismatches(
 		if (!ok) mismatches.push(index);
 	});
 	for (const index of mismatches.slice(0, MAX_REPORTED_ROWS)) {
-		const headers = Object.keys(rows[index] ?? {}).filter(header => result.keys.includes(header));
-		const cells = headers.map(header => `${JSON.stringify(header)}: ${JSON.stringify(received[index]?.[header])}`);
+		const headers = Object.keys(rows[index] ?? {}).filter(header => result.keys.includes(normalizeLine(header)));
+		const cells = headers.map(
+			header => `${JSON.stringify(header)}: ${JSON.stringify(received[index]?.[normalizeLine(header)])}`
+		);
 		message += `Row ${index} does not match, received { ${cells.join(", ")} }\n`;
 	}
 	if (mismatches.length > MAX_REPORTED_ROWS) {
@@ -789,22 +806,4 @@ function toRecord(keys: readonly string[], texts: readonly string[]): Record<str
 		record[key] = texts[index] ?? "";
 	});
 	return record;
-}
-
-function describeWhere(where: RowWhere<string>): string {
-	const entries: [string, CellMatcher | undefined][] = Object.entries(where);
-	const parts = entries
-		.filter((entry): entry is [string, CellMatcher] => entry[1] !== undefined)
-		.map(([header, matcher]) => `${JSON.stringify(header)}: ${describeMatcher(matcher)}`);
-	return `{ ${parts.join(", ")} }`;
-}
-
-function describeMatcher(matcher: CellMatcher): string {
-	if (typeof matcher === "string") return JSON.stringify(matcher);
-	if (matcher instanceof RegExp) return String(matcher);
-	if (matcher.predicate !== undefined) return `{ predicate: ${matcher.predicate.toString()} }`;
-	if (matcher.not !== undefined) return `{ not: ${describeMatcher(matcher.not)} }`;
-	if (matcher.anyOf !== undefined) return `{ anyOf: [${matcher.anyOf.map(describeMatcher).join(", ")}] }`;
-	if (matcher.allOf !== undefined) return `{ allOf: [${matcher.allOf.map(describeMatcher).join(", ")}] }`;
-	return JSON.stringify(matcher);
 }

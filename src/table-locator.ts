@@ -1,7 +1,7 @@
 import { Locator } from "@playwright/test";
 
 import { CellContentType } from "./cell-content-type";
-import { serializeWhere } from "./cell-matcher-serializer";
+import { describeWhere, serializeWhere } from "./cell-matcher-serializer";
 import { describeLastError, pollUntil } from "./polling";
 import {
 	ColumnKey,
@@ -16,41 +16,24 @@ import {
 	TableLocatorOptions,
 	ValidRowWhere,
 } from "./table-locator.types";
-import { readTableHeaderKeys, readTableTexts, TABLE_SELECTOR_ENGINE_NAME } from "./table-selector-engine";
+import {
+	normalizeCell,
+	normalizeLine,
+	readTableHeaderKeys,
+	readTableTexts,
+	TABLE_SELECTOR_ENGINE_NAME,
+} from "./table-selector-engine";
 import { TableUtils } from "./table-utils";
 
 /** Filter options accepted by `Locator.filter()`. */
 export type RowFilterOptions = Parameters<Locator["filter"]>[0];
 
-type DefaultSelectors = Pick<EngineConfig, "headerRow" | "headerCell" | "bodyRow" | "bodyCell">;
-
-/**
- * Header rows of a table without a `<thead>`: the leading rows of its first `<tbody>` that have `<th>`
- * cells and no `<td>`. A row with both (a row header and data) stays a body row.
- */
-const TBODY_HEADER_ROW =
-	"table:not(:has(> thead)) > tbody:first-of-type > tr:has(> th):not(:has(> td)):not(tr:has(> td) ~ tr)";
-
-/** Default selectors for HTML tables. Row header cells (`<th>` in a body row) are body cells too. */
-const HTML_SELECTORS: DefaultSelectors = {
-	headerRow: `thead>tr, ${TBODY_HEADER_ROW}`,
-	headerCell: "th, td",
-	bodyRow: `tbody>tr:not(${TBODY_HEADER_ROW})`,
-	bodyCell: "td, th",
-};
-
-/** Default selectors for ARIA grids (`role="grid"`, `"treegrid"` or `"table"` built from other elements). */
-const ARIA_SELECTORS: DefaultSelectors = {
-	headerRow: "[role=row]:has([role=columnheader])",
-	headerCell: "[role=columnheader]",
-	bodyRow: "[role=row]:not(:has([role=columnheader]))",
-	bodyCell: "[role=gridcell], [role=cell], [role=rowheader]",
-};
-
 /**
  * One or more body rows of a {@link TableLocator}, with typed access to their cells.
  *
  * Instances are created by {@link TableLocator.row}, {@link TableLocator.rowAt} and {@link TableLocator.rows}.
+ * Their locators read like your code in error messages and traces, such as
+ * `locator('#users').row({ "Name": "John" }).cell("Status")` (Playwright 1.53 and later).
  *
  * @example
  * const row = table.row({ Name: "John" });
@@ -60,7 +43,8 @@ const ARIA_SELECTORS: DefaultSelectors = {
 export class TableRow<H extends string = string> {
 	/**
 	 * @param table - The table this row belongs to.
-	 * @param locator - The Playwright `Locator` for the row element(s).
+	 * @param locator - The Playwright `Locator` for the row element(s). Its `toString()` is used to describe
+	 *   the locators built from this row.
 	 */
 	constructor(
 		readonly table: TableLocator<H>,
@@ -92,7 +76,7 @@ export class TableRow<H extends string = string> {
 	 * await table.row({ Status: "Active" }).first().cell("Edit").click();
 	 */
 	first(): TableRow<H> {
-		return new TableRow(this.table, this.locator.first());
+		return new TableRow(this.table, described(this.locator.first(), `${this.locator.toString()}.first()`));
 	}
 
 	/**
@@ -102,7 +86,7 @@ export class TableRow<H extends string = string> {
 	 * await expect(table.rows.last().cell("Name")).toHaveText("Jane");
 	 */
 	last(): TableRow<H> {
-		return new TableRow(this.table, this.locator.last());
+		return new TableRow(this.table, described(this.locator.last(), `${this.locator.toString()}.last()`));
 	}
 
 	/**
@@ -120,7 +104,7 @@ export class TableRow<H extends string = string> {
 		if (!Number.isInteger(index)) {
 			throw new Error(`Row index must be an integer, got: ${index}`);
 		}
-		return new TableRow(this.table, this.locator.nth(index));
+		return new TableRow(this.table, described(this.locator.nth(index), `${this.locator.toString()}.nth(${index})`));
 	}
 
 	/**
@@ -133,7 +117,8 @@ export class TableRow<H extends string = string> {
 	 * await expect(table.rows.filter({ hasText: "Jane" }).cell("Status")).toHaveText("Active");
 	 */
 	filter(options?: RowFilterOptions): TableRow<H> {
-		return new TableRow(this.table, this.locator.filter(options));
+		const description = `${this.locator.toString()}.filter(${describeFilter(options)})`;
+		return new TableRow(this.table, described(this.locator.filter(options), description));
 	}
 }
 
@@ -143,6 +128,11 @@ export class TableRow<H extends string = string> {
  * Header names are resolved to columns inside the browser by the `pw-table-v1` selector engine on every
  * evaluation, so every locator auto-waits for late headers and rows, and keeps working when columns are
  * reordered at runtime. Building locators is synchronous.
+ *
+ * Text is read as the user sees it. Header text is one line: `First<br>name` is the header `"First name"`.
+ * Body cells keep their line breaks as one `\n`. Icon glyphs, invisible characters and the text of the elements
+ * matching the `ignore` option (screen reader only text and icons by default) are left out. Header names
+ * you pass are normalized the same way.
  *
  * The `pw-table-v1` selector engine must be registered first: import `test` from this package, or call
  * {@link registerTableSelectors} before the page is created.
@@ -175,10 +165,10 @@ export class TableLocator<const H extends string = string> {
 	 * @param options.header.setMainHeaderRow - (Optional) Index of the main header row. Defaults to the last header row.
 	 * @param options.header.rowSelector - (Optional) CSS selector for header rows. Defaults to `"thead>tr"`, plus the leading `<th>`-only rows of a table without `<thead>`.
 	 * @param options.header.columnSelector - (Optional) CSS selector for header cells. Defaults to `"th, td"`.
-	 * @param options.header.stripIconGlyphs - (Optional) Remove icon font glyphs from header text. Defaults to `false`.
 	 * @param options.row.rowSelector - (Optional) CSS selector for body rows. Defaults to `"tbody>tr"`, without those header rows.
 	 * @param options.row.columnSelector - (Optional) CSS selector for body cells. Defaults to `"td, th"`.
 	 * @param options.cellContentType - (Optional) How cell text is read. Defaults to `InnerText`.
+	 * @param options.ignore - (Optional) CSS selectors of elements inside cells whose text is left out. Defaults to {@link DEFAULT_IGNORE}.
 	 *
 	 * @example
 	 * // Typed headers: header arguments are checked at compile time
@@ -212,12 +202,14 @@ export class TableLocator<const H extends string = string> {
 	 * await expect(table.rows.filter({ hasText: "Jane" }).cell("Status")).toHaveText("Active");
 	 */
 	get rows(): TableRow<H> {
-		return new TableRow(this, this.root.locator(this.selector({ op: "rows", cfg: this._config })));
+		const rows = this.root.locator(this.selector({ op: "rows", cfg: this._config }));
+		return new TableRow(this, described(rows, `${this.root.toString()}.rows`));
 	}
 
 	/**
 	 * Body rows where every condition matches. Conditions are keyed by header; values are an exact
-	 * string, a RegExp, or a {@link CellCondition}. Cell text is whitespace-collapsed and trimmed.
+	 * string, a RegExp, or a {@link CellCondition}. Cell text is compared as the user sees it (see
+	 * {@link CellCondition}), and header names are normalized like header text.
 	 *
 	 * The returned locator follows Playwright's strict mode: acting on it when several rows match throws.
 	 *
@@ -237,7 +229,8 @@ export class TableLocator<const H extends string = string> {
 		if (conditions.length === 0) {
 			throw new Error(`TableLocator.row() requires at least one condition.\nTable locator: ${this.root.toString()}`);
 		}
-		return new TableRow(this, this.root.locator(this.selector({ op: "row", cfg: this._config, where: conditions })));
+		const rows = this.root.locator(this.selector({ op: "row", cfg: this._config, where: conditions }));
+		return new TableRow(this, described(rows, `${this.root.toString()}.row(${describeWhere(where)})`));
 	}
 
 	/**
@@ -254,7 +247,8 @@ export class TableLocator<const H extends string = string> {
 		if (index < 0 || !Number.isInteger(index)) {
 			throw new Error(`Row index must be a non-negative integer, got: ${index}`);
 		}
-		return new TableRow(this, this.rows.locator.nth(index));
+		const row = this.root.locator(this.selector({ op: "rows", cfg: this._config })).nth(index);
+		return new TableRow(this, described(row, `${this.root.toString()}.rowAt(${index})`));
 	}
 
 	/**
@@ -270,12 +264,13 @@ export class TableLocator<const H extends string = string> {
 	 * await expect(table.cell(lastRow, "Name")).toHaveText("Jane");
 	 */
 	cell(row: Locator, column: ColumnKey<H>): Locator {
-		const header = checkColumn(column);
+		const header = resolveColumn(column);
 		// The engine finds the cell from the row alone, so it can't tell which table the row was meant to
 		// be in. Intersecting with this table's column keeps it from resolving through another table.
-		return row
+		const cell = row
 			.locator(this.selector({ op: "cell", cfg: this._config, header }))
 			.and(this.root.locator(this.selector({ op: "column", cfg: this._config, header })));
+		return described(cell, `${row.toString()}.cell(${JSON.stringify(column)})`);
 	}
 
 	/**
@@ -290,7 +285,8 @@ export class TableLocator<const H extends string = string> {
 	 * await expect(table.column(1)).toHaveText(["Active", "Inactive", "Active"]);
 	 */
 	column(column: ColumnKey<H>): Locator {
-		return this.root.locator(this.selector({ op: "column", cfg: this._config, header: checkColumn(column) }));
+		const cells = this.root.locator(this.selector({ op: "column", cfg: this._config, header: resolveColumn(column) }));
+		return described(cells, `${this.root.toString()}.column(${JSON.stringify(column)})`);
 	}
 
 	/**
@@ -304,7 +300,8 @@ export class TableLocator<const H extends string = string> {
 	 * await table.header("Name").click(); // sort by name
 	 */
 	header(column: ColumnKey<H>): Locator {
-		return this.root.locator(this.selector({ op: "header", cfg: this._config, header: checkColumn(column) }));
+		const cell = this.root.locator(this.selector({ op: "header", cfg: this._config, header: resolveColumn(column) }));
+		return described(cell, `${this.root.toString()}.header(${JSON.stringify(column)})`);
 	}
 
 	/**
@@ -325,7 +322,8 @@ export class TableLocator<const H extends string = string> {
 	/**
 	 * Reads every body row as an object keyed by header key, like `PlaywrightTable.getJson()`. Cells that
 	 * span rows or columns are repeated in every position they cover; positions without a cell are `""`.
-	 * Cell text is whitespace-collapsed and trimmed, as in row conditions.
+	 * Cell text is normalized as in row conditions: line breaks stay as one `\n` between trimmed lines.
+	 * With `raw: true`, cells are returned exactly as the browser reads them.
 	 *
 	 * This is a snapshot, not a locator: without `minRows` it reads the table once and does not wait for
 	 * rows. With `minRows`, it first waits for a header row and at least that many body rows with content
@@ -336,6 +334,7 @@ export class TableLocator<const H extends string = string> {
 	 * @param options.minRows - (Optional) Wait for at least this many body rows with content. Defaults to `0` (no waiting).
 	 * @param options.timeout - (Optional) With `minRows`, the time to wait in milliseconds (default 5000).
 	 *   Without it, the time to wait for the table element to be attached.
+	 * @param options.raw - (Optional) Return the cell texts without normalization. Defaults to `false`.
 	 * @returns A promise that resolves to one object per body row, or an empty array if there are no body rows.
 	 * @throws Error if the table has no header row (without `minRows`).
 	 * @throws Error if `minRows` is not reached within the timeout, with the rows that were found.
@@ -356,12 +355,16 @@ export class TableLocator<const H extends string = string> {
 		if (minRows < 0 || !Number.isInteger(minRows)) {
 			throw new Error(`minRows must be a non-negative integer, got: ${minRows}`);
 		}
+		const raw = options?.raw === true;
 		const { keys, rows } =
-			minRows > 0 ? await this.readTextsWithRows(minRows, options?.timeout ?? 5_000) : await this.readTexts(options);
+			minRows > 0
+				? await this.readTextsWithRows(minRows, options?.timeout ?? 5_000, raw)
+				: await this.readTexts(raw, { timeout: options?.timeout });
 		if (keys.length === 0) {
+			const selector = this._config.headerRow;
 			throw new Error(
 				`TableLocator.toJson() needs a header row, but the table has none.\n` +
-					`Header row selector: "${this._config.headerRow}"\n` +
+					(selector === undefined ? "" : `Header row selector: "${selector}"\n`) +
 					`Table locator: ${this.root.toString()}`
 			);
 		}
@@ -398,7 +401,8 @@ export class TableLocator<const H extends string = string> {
 		}
 
 		const timeout = options?.timeout ?? 5_000;
-		const missingFrom = (keys: readonly string[]): string[] => required.filter(header => !keys.includes(header));
+		const missingFrom = (keys: readonly string[]): string[] =>
+			required.filter(header => !keys.includes(normalizeLine(header)));
 		const poll = await pollUntil(
 			readTimeout => this.headerKeys({ timeout: readTimeout }),
 			keys => missingFrom(keys).length === 0,
@@ -416,16 +420,20 @@ export class TableLocator<const H extends string = string> {
 		}
 	}
 
-	private readTexts(options?: { timeout?: number }): Promise<EngineTexts> {
-		const request: EngineTextsRequest = { op: "texts", cfg: this._config };
+	private readTexts(raw: boolean, options?: { timeout?: number }): Promise<EngineTexts> {
+		const request: EngineTextsRequest = raw
+			? { op: "texts", cfg: this._config, raw: true }
+			: { op: "texts", cfg: this._config };
 		return this.root.evaluate(readTableTexts, request, options);
 	}
 
 	/** Reads the table once it has a header row and at least `minRows` body rows with content. */
-	private async readTextsWithRows(minRows: number, timeout: number): Promise<EngineTexts> {
-		const withContent = (texts: EngineTexts): number => texts.rows.filter(row => row.some(text => text !== "")).length;
+	private async readTextsWithRows(minRows: number, timeout: number, raw: boolean): Promise<EngineTexts> {
+		// Raw texts are normalized to decide, so a cell with only a non-breaking space or a glyph is empty.
+		const withContent = (texts: EngineTexts): number =>
+			texts.rows.filter(row => row.some(text => normalizeCell(text) !== "")).length;
 		const poll = await pollUntil(
-			readTimeout => this.readTexts({ timeout: readTimeout }),
+			readTimeout => this.readTexts(raw, { timeout: readTimeout }),
 			texts => texts.keys.length > 0 && withContent(texts) >= minRows,
 			{ keys: [], rows: [] },
 			Date.now() + timeout
@@ -472,25 +480,48 @@ export function defineTable<const H extends string = string>(
 	return new TableLocator<H>(root, options);
 }
 
-/** The engine configuration for `options`, with the default selectors filled in. */
+/**
+ * The engine configuration for `options`. Only what differs from the defaults is set, so selectors stay
+ * short; the engine fills in the default selectors.
+ */
 function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineConfig {
 	const { header = {}, row = {} } = options;
 	TableUtils.warnOnIdenticalRowSelectors("TableLocator", header.rowSelector, row.rowSelector);
-	const defaults = options.aria === true ? ARIA_SELECTORS : HTML_SELECTORS;
-	return {
-		headerRow: header.rowSelector ?? defaults.headerRow,
-		headerCell: header.columnSelector ?? defaults.headerCell,
-		bodyRow: row.rowSelector ?? defaults.bodyRow,
-		bodyCell: row.columnSelector ?? defaults.bodyCell,
-		mainHeaderRow: header.setMainHeaderRow ?? null,
-		contentType: options.cellContentType === CellContentType.TextContent ? "textContent" : "innerText",
-		stripIconGlyphs: header.stripIconGlyphs === true,
-	};
+	const cfg: EngineConfig = {};
+	if (options.aria === true) cfg.aria = 1;
+	if (header.rowSelector !== undefined) cfg.headerRow = header.rowSelector;
+	if (header.columnSelector !== undefined) cfg.headerCell = header.columnSelector;
+	if (row.rowSelector !== undefined) cfg.bodyRow = row.rowSelector;
+	if (row.columnSelector !== undefined) cfg.bodyCell = row.columnSelector;
+	if (header.setMainHeaderRow !== undefined) cfg.mainHeaderRow = header.setMainHeaderRow;
+	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
+	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
+	return cfg;
 }
 
-function checkColumn(column: string | number): string | number {
-	if (typeof column === "number" && (column < 0 || !Number.isInteger(column))) {
+/** A column for the engine: a header name normalized like header text, or a checked column index. */
+function resolveColumn(column: string | number): string | number {
+	if (typeof column === "string") return normalizeLine(column);
+	if (column < 0 || !Number.isInteger(column)) {
 		throw new Error(`Column index must be a non-negative integer, got: ${column}`);
 	}
 	return column;
+}
+
+/**
+ * `locator`, described as `description` in error messages, the call log and traces. `describe()` exists
+ * since Playwright 1.53; on older versions the locator is returned as it is.
+ */
+function described(locator: Locator, description: string): Locator {
+	const describe = (locator as Partial<Pick<Locator, "describe">>).describe;
+	return typeof describe === "function" ? describe.call(locator, description) : locator;
+}
+
+/** Describes `Locator.filter()` options, such as `{ hasText: "Jane" }`. Locators show their own description. */
+function describeFilter(options?: RowFilterOptions): string {
+	const entries: [string, unknown][] = Object.entries(options ?? {});
+	const parts = entries
+		.filter(entry => entry[1] !== undefined)
+		.map(([key, value]) => `${key}: ${typeof value === "string" ? JSON.stringify(value) : String(value)}`);
+	return parts.length === 0 ? "" : `{ ${parts.join(", ")} }`;
 }
