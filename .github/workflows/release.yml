@@ -10,6 +10,8 @@ concurrency:
 jobs:
   release:
     name: Release Package
+    # Only main is released, also when the workflow is started from another branch
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -38,8 +40,20 @@ jobs:
           npm ci
           npx playwright install --with-deps
 
+      # The same checks as CI, so a release never skips one
+      - name: Lint and format check
+        run: |
+          npm run lint
+          npm run format:check
+
+      - name: Type check
+        run: npm run compile
+
       - name: Build
         run: npm run build
+
+      - name: Check package exports
+        run: npm run check-exports
 
       - name: Test
         run: npm test

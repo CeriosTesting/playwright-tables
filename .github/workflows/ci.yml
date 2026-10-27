@@ -80,6 +80,16 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      - name: Upload the report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-node-${{ matrix.node-version }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
   test-min-playwright:
     name: Test (minimum supported Playwright)
     runs-on: ubuntu-latest
@@ -118,3 +128,51 @@ jobs:
 
       - name: Run tests
         run: npm run test
+
+      - name: Upload the report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-min-playwright
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # Development happens on Windows, so the engine and the bundles are also tested there
+  test-windows:
+    name: Test (Windows, Chromium)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        # Stops at the first failing command, unlike a multi-line PowerShell step
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build package
+        run: npm run build
+
+      - name: Run tests
+        run: npx playwright test --project=chromium --project=dist-cjs --project=dist-esm
+
+      - name: Upload the report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-windows
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

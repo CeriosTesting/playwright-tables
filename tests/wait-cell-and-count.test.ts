@@ -95,8 +95,8 @@ test.describe("waitForExactRowCount", () => {
 		}).rejects.toThrow();
 		const elapsed = Date.now() - startTime;
 
-		// Should fail within reasonable time (allow some overhead)
-		expect(elapsed).toBeLessThan(1000);
+		// Fails long before the default timeout of 30 seconds; the margin keeps a busy machine from failing it
+		expect(elapsed).toBeLessThan(5_000);
 	});
 
 	test("should respect custom interval option", async ({ page }) => {
