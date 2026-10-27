@@ -391,9 +391,10 @@ export class PlaywrightTable {
 	 * });
 	 */
 	async getJson(options?: TableOptions): Promise<Record<string, string>[]> {
+		const tableOptions = this.normalizeGetBodyRowsOptions(options);
 		const table = await this.getTable({
-			bodyRowOptions: options?.bodyRowOptions,
-			headerRowOptions: this.resolveHeaderRowOptionsForJsonKeys(options?.headerRowOptions),
+			bodyRowOptions: tableOptions.bodyRowOptions,
+			headerRowOptions: this.resolveHeaderRowOptionsForJsonKeys(tableOptions.headerRowOptions),
 		});
 
 		const headers = this.mainHeaderRow(table.headerRows);
@@ -679,19 +680,16 @@ export class PlaywrightTable {
 			return {};
 		}
 
-		if (options.bodyRowOptions || options.headerRowOptions) {
-			return options;
-		}
-
 		// oxlint-disable-next-line typescript/no-deprecated -- still supported for backwards compatibility
 		const { cellContentType } = options;
-		if (cellContentType !== undefined) {
-			return {
-				bodyRowOptions: { cellContentType },
-			};
+		// The deprecated option applies to the body cells, unless `bodyRowOptions` sets its own.
+		if (cellContentType === undefined || options.bodyRowOptions?.cellContentType !== undefined) {
+			return options;
 		}
-
-		return options;
+		return {
+			...options,
+			bodyRowOptions: { ...options.bodyRowOptions, cellContentType },
+		};
 	}
 
 	private resolveHeaderRowOptionsForJsonKeys(headerOptions?: HeaderRowOptions): HeaderRowOptions {

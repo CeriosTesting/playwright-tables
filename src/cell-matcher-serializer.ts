@@ -59,34 +59,25 @@ export function describeMatcher(matcher: CellMatcher): string {
  * @internal
  */
 export function serializeMatcher(header: string, matcher: CellMatcher): SerializedMatcher {
+	// Typed as a matcher, but JavaScript callers can pass anything, such as `null` from a missing value.
+	const value: unknown = matcher;
+	if (value === null || (typeof value !== "string" && typeof value !== "object")) {
+		throw new TypeError(`Condition for header "${header}" is not a supported cell matcher: ${String(value)}.`);
+	}
 	if (typeof matcher === "string") {
 		return { t: "s", v: matcher };
 	}
 	if (matcher instanceof RegExp) {
 		return { t: "r", s: matcher.source, f: matcher.flags };
 	}
-	const ignoreCase = matcher.ignoreCase === true;
 	if (matcher.predicate !== undefined) {
 		return serializePredicate(header, matcher.predicate);
 	}
-	if (matcher.oneOf !== undefined) {
-		return { t: "o", v: [...matcher.oneOf] };
+	if (matcher.empty !== undefined) {
+		return matcher.empty ? { t: "e" } : { t: "n", m: { t: "e" } };
 	}
-	if (matcher.empty === true) {
-		return { t: "e" };
-	}
-	if (matcher.equals !== undefined) {
-		return { t: "c", op: "equals", v: matcher.equals, i: ignoreCase };
-	}
-	if (matcher.contains !== undefined) {
-		return { t: "c", op: "contains", v: matcher.contains, i: ignoreCase };
-	}
-	if (matcher.startsWith !== undefined) {
-		return { t: "c", op: "startsWith", v: matcher.startsWith, i: ignoreCase };
-	}
-	if (matcher.endsWith !== undefined) {
-		return { t: "c", op: "endsWith", v: matcher.endsWith, i: ignoreCase };
-	}
+	const text = serializeTextCondition(header, matcher);
+	if (text !== undefined) return text;
 	const number = serializeNumberCondition(header, matcher);
 	if (number !== undefined) return number;
 	if (matcher.not !== undefined) {
@@ -107,6 +98,11 @@ function serializePredicate(header: string, predicate: unknown): SerializedMatch
 	if (typeof predicate !== "function") {
 		throw new TypeError(`Condition for header "${header}": predicate must be a function.`);
 	}
+	// A generator or async function returns an object, which would match every row.
+	const kind = (predicate as { constructor?: { name?: string } }).constructor?.name;
+	if (kind === "GeneratorFunction" || kind === "AsyncFunction" || kind === "AsyncGeneratorFunction") {
+		throw new TypeError(`Condition for header "${header}": predicate must be a synchronous function, not a ${kind}.`);
+	}
 	const src = predicate.toString();
 	// Bound and built-in functions have no source to send to the browser.
 	if (src.includes("[native code]")) {
@@ -115,6 +111,25 @@ function serializePredicate(header: string, predicate: unknown): SerializedMatch
 		);
 	}
 	return { t: "f", src };
+}
+
+/**
+ * The wire format of a text condition (`equals`, `contains`, `startsWith`, `endsWith` or `oneOf`, each
+ * with `ignoreCase`), or `undefined` if `matcher` is another kind of condition.
+ */
+function serializeTextCondition(header: string, matcher: CellCondition): SerializedMatcher | undefined {
+	const i = matcher.ignoreCase === true;
+	if (matcher.oneOf !== undefined) {
+		if (matcher.oneOf.length === 0) {
+			throw new TypeError(`Condition for header "${header}": oneOf needs at least one value.`);
+		}
+		return i ? { t: "o", v: [...matcher.oneOf], i } : { t: "o", v: [...matcher.oneOf] };
+	}
+	if (matcher.equals !== undefined) return { t: "c", op: "equals", v: matcher.equals, i };
+	if (matcher.contains !== undefined) return { t: "c", op: "contains", v: matcher.contains, i };
+	if (matcher.startsWith !== undefined) return { t: "c", op: "startsWith", v: matcher.startsWith, i };
+	if (matcher.endsWith !== undefined) return { t: "c", op: "endsWith", v: matcher.endsWith, i };
+	return undefined;
 }
 
 /** The wire format of a {@link NumberCondition}, or `undefined` if `matcher` is another kind of condition. */

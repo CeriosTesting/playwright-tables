@@ -17,7 +17,8 @@ Add `TableLocator`: a type-safe table API that only returns Playwright locators,
 **Cell conditions**
 
 - A string, a RegExp, `equals`, `contains`, `startsWith`, `endsWith`, `oneOf`, `empty` and `predicate`, and the `not`, `anyOf` and `allOf` combinators.
-- A `predicate` gets the raw cell text as its second argument. A `predicate` that throws fails the row (also inside `not`, `anyOf` and `allOf`), and the matchers report its error.
+- A `predicate` gets the raw cell text as its second argument. A `predicate` that throws fails the row (also inside `not`, `anyOf` and `allOf`), and the matchers report its error. A generator or async function is rejected.
+- `oneOf` takes `ignoreCase`, and `{ empty: false }` matches a cell with text. An empty `oneOf` or a `null` condition is an error that names the header.
 
 **Matchers**
 
@@ -33,7 +34,8 @@ Add `TableLocator`: a type-safe table API that only returns Playwright locators,
 
 - `th` and `td` cells are read in both header and body rows, so row headers don't shift columns.
 - Rows and cells of nested tables are ignored.
-- In a table without a `<thead>`, leading rows of `<th>` cells in the first `<tbody>` are header rows.
+- In a table without a `<thead>`, leading rows of `<th>` cells in the first `<tbody>` are header rows. A table built with DOM methods, with its rows right inside the `<table>` (no `<tbody>`), works too.
+- Like in HTML, a `rowspan` stops at the end of its `<tbody>`, `rowspan="0"` spans to it, and huge spans are capped (1000 columns, 65534 rows).
 - The `aria` option uses ARIA roles for ARIA grids. Cells are placed by `aria-colindex`, rows split over pinned containers are joined by `aria-rowindex`, and `aria-colspan`/`aria-rowspan` are supported.
 - Like Playwright locators, rows and cells are found inside open shadow roots, so a web component that renders its table in a shadow root can be the table root.
 

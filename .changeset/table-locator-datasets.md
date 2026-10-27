@@ -17,6 +17,7 @@
   - `decimal` sets the decimal separator for `"number"` columns.
   - `stable` waits until the table settles before reading.
   - `timeout` is the time for the whole read, `minRows` and `stable` included.
+  - `parse` keys are normalized like header names, as `columns` keys are.
 - `columnValues(column)` reads the text of every body cell in a column.
 - `waitForStable({ quiet, timeout, loading })` waits until the header keys and body cell texts stop changing and the loading indicator is hidden. It also sees changes in a table without header rows, and in body columns wider than the header. Header keys of a hidden table get the CSS `text-transform` of the header, like a shown one.
 - `format()` shows the columns of a table without header rows by index.

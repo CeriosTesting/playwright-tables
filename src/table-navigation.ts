@@ -49,6 +49,13 @@ export class TableNavigator {
 	) {
 		checkLimit("paginate.maxPages", paginate?.maxPages);
 		checkLimit("scroll.maxSteps", scroll?.maxSteps);
+		// A step of 0 or less would be silently replaced by the default step.
+		if (scroll?.step !== undefined && !(scroll.step > 0 && Number.isFinite(scroll.step))) {
+			throw new Error(`scroll.step must be a positive number of pixels, got: ${scroll.step}`);
+		}
+		if (scroll?.settle !== undefined && !(scroll.settle >= 0 && Number.isFinite(scroll.settle))) {
+			throw new Error(`scroll.settle must be a non-negative number of milliseconds, got: ${scroll.settle}`);
+		}
 	}
 
 	/** Whether the table has pages or scrolls, so the rows in view may not be all rows. */

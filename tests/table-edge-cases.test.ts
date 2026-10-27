@@ -1,5 +1,5 @@
 import { Page } from "@playwright/test";
-import { defineTable, expect, test } from "src";
+import { CellContentType, defineTable, expect, PlaywrightTable, test } from "src";
 
 async function errorMessage(action: () => Promise<unknown>): Promise<string> {
 	try {
@@ -446,5 +446,178 @@ test.describe("timeouts and arguments", () => {
 			"waitForStable() timed out"
 		);
 		expect(Date.now() - started).toBeLessThan(2_500);
+	});
+});
+
+test.describe("table structure", () => {
+	test("a rowspan stops at the end of its tbody, and rowspan 0 spans to it", async ({ page }) => {
+		await page.setContent(`
+			<table id="t">
+				<thead><tr><th>Group</th><th>Item</th></tr></thead>
+				<tbody>
+					<tr><td rowspan="5">A</td><td>a1</td></tr>
+					<tr><td>a2</td></tr>
+				</tbody>
+				<tbody>
+					<tr><td rowspan="0">B</td><td>b1</td></tr>
+					<tr><td>b2</td></tr>
+					<tr><td>b3</td></tr>
+				</tbody>
+			</table>
+		`);
+		const table = defineTable(page.locator("#t"));
+
+		expect(await table.toJson()).toEqual([
+			{ Group: "A", Item: "a1" },
+			{ Group: "A", Item: "a2" },
+			{ Group: "B", Item: "b1" },
+			{ Group: "B", Item: "b2" },
+			{ Group: "B", Item: "b3" },
+		]);
+	});
+
+	test("a table built without a tbody has body rows", async ({ page }) => {
+		await page.setContent(`<div id="host"></div>`);
+		await page.locator("#host").evaluate(host => {
+			const table = document.createElement("table");
+			for (const cells of [
+				["Name", "Age"],
+				["John", "30"],
+			]) {
+				const row = table.appendChild(document.createElement("tr"));
+				for (const text of cells)
+					row.appendChild(document.createElement(cells[0] === "Name" ? "th" : "td")).textContent = text;
+			}
+			host.appendChild(table);
+		});
+		const table = defineTable(page.locator("table"));
+
+		expect(await table.headerKeys()).toEqual(["Name", "Age"]);
+		await expect(table.row({ Name: "John" }).cell("Age")).toHaveText("30");
+	});
+
+	test("a cell never comes from another table", async ({ page }) => {
+		await page.setContent(`
+			<table id="a"><thead><tr><th>Name</th><th>Age</th></tr></thead><tbody><tr><td>John</td><td>30</td></tr></tbody></table>
+			<table id="b"><tbody><tr><td>x</td><td>y</td></tr></tbody></table>
+		`);
+		const b = defineTable(page.locator("#b"));
+
+		await expect(b.rowAt(0).cell("Age")).toHaveCount(0);
+		await expect(b.rowAt(0).cell(1)).toHaveText("y");
+	});
+
+	test("totalRowCount ignores the aria-rowcount of a grid nested in a cell", async ({ page }) => {
+		// The root is inside the grid, so its aria-rowcount is around it, and the nested one inside it
+		await page.setContent(`
+			<div role="grid" aria-rowcount="3">
+				<div id="rows">
+					<div role="row"><span role="columnheader">Name</span></div>
+					<div role="row"><span role="gridcell">One<div role="grid" aria-rowcount="99"></div></span></div>
+					<div role="row"><span role="gridcell">Two</span></div>
+				</div>
+			</div>
+		`);
+		const rows = defineTable(page.locator("#rows"), { aria: true });
+
+		expect(await rows.totalRowCount()).toBe(2);
+	});
+});
+
+test.describe("conditions and options", () => {
+	test("conditions: null, empty false, oneOf with ignoreCase, and invalid ones", async ({ page }) => {
+		await page.setContent(usersTable.replace("<td>Inactive</td>", "<td></td>"));
+		const users = defineTable(page.locator("#users"));
+
+		await expect(users.row({ Status: { empty: false } }).cell("Name")).toHaveText("John");
+		await expect(users.row({ Status: { oneOf: ["ACTIVE"], ignoreCase: true } }).cell("Name")).toHaveText("John");
+		// JavaScript callers can pass anything
+		const loose = (where: unknown): unknown => users.row(where as { Name: string });
+		expect(() => loose({ Name: null })).toThrow('Condition for header "Name" is not a supported cell matcher: null.');
+		expect(() => loose({ Name: { oneOf: [] } })).toThrow(
+			'Condition for header "Name": oneOf needs at least one value.'
+		);
+		expect(() =>
+			loose({
+				Name: {
+					*predicate() {
+						yield true;
+					},
+				},
+			})
+		).toThrow("predicate must be a synchronous function, not a GeneratorFunction");
+	});
+
+	test("parse keys are normalized like header names, and options are checked", async ({ page }) => {
+		await page.setContent(usersTable);
+		const users = defineTable(page.locator("#users"));
+
+		expect(await users.toJson({ parse: { "Name ": text => text.length } })).toEqual([
+			{ Name: 4, Status: "Active" },
+			{ Name: 4, Status: "Inactive" },
+		]);
+		await expect(users.format({ maxRows: -1 })).rejects.toThrow("maxRows must be a non-negative integer, got: -1");
+		expect(() => defineTable(page.locator("#users"), { scroll: { step: 0 } })).toThrow(
+			"scroll.step must be a positive number of pixels, got: 0"
+		);
+	});
+
+	test("fill says what is wrong with a value for a control", async ({ page }) => {
+		await page.setContent(`
+			<table id="t">
+				<thead><tr><th>Name</th><th>Active</th><th>File</th></tr></thead>
+				<tbody><tr><td><input aria-label="Name" /></td><td><input type="checkbox" /></td><td><input type="file" /></td></tr></tbody>
+			</table>
+		`);
+		const table = defineTable(page.locator("#t"), { headers: ["Name", "Active", "File"] });
+		const row = table.rowAt(0);
+
+		await expect(row.fill({ Active: "yes" }, { timeout: 1_000 })).rejects.toThrow(
+			'TableRow.fill(): the cell under "Active" has a checkbox, which takes true or false, not "yes".'
+		);
+		await expect(row.fill({ Name: true }, { timeout: 1_000 })).rejects.toThrow(
+			'TableRow.fill(): the cell under "Name" has a text control, which takes a string, not true.'
+		);
+		await expect(row.fill({ File: "a.txt" }, { timeout: 1_000 })).rejects.toThrow(
+			'TableRow.fill(): the cell under "File" could not be filled with "a.txt".'
+		);
+	});
+});
+
+test.describe("PlaywrightTable", () => {
+	test("a header rowspan of 3 covers all three header rows, and rowspan 0 the whole body", async ({ page }) => {
+		await page.setContent(`
+			<table>
+				<thead>
+					<tr><th rowspan="3">Id</th><th colspan="2">Name</th></tr>
+					<tr><th colspan="2">Full</th></tr>
+					<tr><th>First</th><th>Last</th></tr>
+				</thead>
+				<tbody>
+					<tr><td rowspan="0">1</td><td>John</td><td>Doe</td></tr>
+					<tr><td>Jane</td><td>Roe</td></tr>
+				</tbody>
+			</table>
+		`);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		expect(await table.getJson()).toEqual([
+			{ Id: "1", First: "John", Last: "Doe" },
+			{ Id: "1", First: "Jane", Last: "Roe" },
+		]);
+	});
+
+	test("getJson takes the deprecated top-level cellContentType", async ({ page }) => {
+		await page.setContent(`
+			<table>
+				<thead><tr><th>Name</th></tr></thead>
+				<tbody><tr><td>John<span style="display: none"> (hidden)</span></td></tr></tbody>
+			</table>
+		`);
+		const table = new PlaywrightTable(page.locator("table"));
+
+		// oxlint-disable-next-line typescript/no-deprecated -- the deprecated option is what this test is about
+		expect(await table.getJson({ cellContentType: CellContentType.TextContent })).toEqual([{ Name: "John (hidden)" }]);
+		expect(await table.getJson()).toEqual([{ Name: "John" }]);
 	});
 });

@@ -180,11 +180,16 @@ export function tableSelectorEngine(
 	 */
 	const TBODY_HEADER_ROW =
 		"table:not(:has(> thead)) > tbody:first-of-type > tr:has(> th):not(:has(> td)):not(tr:has(> td) ~ tr)";
+	/**
+	 * The same for rows right inside a `<table>`, without a `<tbody>`. The HTML parser always adds one, but a
+	 * table built with DOM methods (`table.appendChild(tr)`) has none.
+	 */
+	const TABLE_HEADER_ROW = "table:not(:has(> thead)) > tr:has(> th):not(:has(> td)):not(tr:has(> td) ~ tr)";
 	// Default selectors for HTML tables. Row header cells (`<th>` in a body row) are body cells too.
 	const HTML_SELECTORS = {
-		headerRow: "thead>tr, " + TBODY_HEADER_ROW,
+		headerRow: "thead>tr, " + TBODY_HEADER_ROW + ", " + TABLE_HEADER_ROW,
 		headerCell: "th, td",
-		bodyRow: "tbody>tr:not(" + TBODY_HEADER_ROW + ")",
+		bodyRow: "tbody>tr:not(" + TBODY_HEADER_ROW + "), table>tr:not(" + TABLE_HEADER_ROW + ")",
 		bodyCell: "td, th",
 		footerRow: "tfoot>tr",
 	};
@@ -459,10 +464,16 @@ export function tableSelectorEngine(
 		return value === "" ? null : value;
 	}
 
-	/** A `rowspan`/`colspan` attribute, or its `aria-rowspan`/`aria-colspan` counterpart. */
-	function span(el: Element, name: string): number {
+	/**
+	 * A `rowspan`/`colspan` attribute, or its `aria-rowspan`/`aria-colspan` counterpart, capped like the
+	 * browser caps it (1000 columns, 65534 rows). A `rowspan` of 0 is 0: the cell spans to the end of its row
+	 * group. Anything else invalid is 1.
+	 */
+	function span(el: Element, name: "rowspan" | "colspan"): number {
 		const value = parseInt(nonEmpty(el.getAttribute(name)) ?? nonEmpty(el.getAttribute("aria-" + name)) ?? "1", 10);
-		return isNaN(value) || value < 1 ? 1 : value;
+		if (isNaN(value) || value < 0) return 1;
+		if (name === "colspan") return value === 0 ? 1 : Math.min(value, 1000);
+		return Math.min(value, 65534);
 	}
 
 	/** The parent element of `node` in the composed tree: the host stands in for a shadow root. */
@@ -611,8 +622,11 @@ export function tableSelectorEngine(
 		const grid = rows.map(function (): GridLine {
 			return [];
 		});
+		const ends = rowGroupEnds(rows);
 		rows.forEach(function (group, r) {
 			let c = 0;
+			// Like in HTML, a rowspan stops at the end of its row group (`<tbody>`), and 0 spans to it.
+			const end = ends[r] ?? rows.length;
 			for (const el of ownCells(group, cellSelector, ownCellSelector, deep)) {
 				const colindex = parseInt(el.getAttribute("aria-colindex") ?? "", 10);
 				if (colindex >= 1) {
@@ -620,7 +634,8 @@ export function tableSelectorEngine(
 				} else {
 					while (grid[r]?.[c] !== undefined) c++;
 				}
-				const rowspan = Math.min(span(el, "rowspan"), rows.length - r);
+				const spanned = span(el, "rowspan");
+				const rowspan = spanned === 0 ? end - r : Math.min(spanned, end - r);
 				const colspan = span(el, "colspan");
 				for (let dr = 0; dr < rowspan; dr++) {
 					const line = grid[r + dr];
@@ -633,6 +648,23 @@ export function tableSelectorEngine(
 			}
 		});
 		return grid;
+	}
+
+	/**
+	 * For each logical row, the index after the last row of its HTML row group: the rows that follow it in
+	 * the same `<thead>`, `<tbody>` or `<tfoot>`. Rows outside one (such as ARIA rows) are one group.
+	 */
+	function rowGroupEnds(rows: RowGroup[]): number[] {
+		const sections = rows.map(function (group) {
+			const parent = group[0].parentElement;
+			return parent !== null && /^(thead|tbody|tfoot)$/.test(parent.localName) ? parent : null;
+		});
+		const ends: number[] = [];
+		for (let r = rows.length - 1; r >= 0; r--) {
+			const next = ends[r + 1];
+			ends[r] = next !== undefined && sections[r] === sections[r + 1] ? next : r + 1;
+		}
+		return ends;
 	}
 
 	/** The cells of a logical row that match `cellSelector` and are not inside a nested cell. */
@@ -800,11 +832,12 @@ export function tableSelectorEngine(
 			case "c":
 				return compileTextMatcher(matcher);
 			case "o": {
+				const ignoreCase = matcher.i === true;
 				const values = matcher.v.map(function (value) {
-					return normalizeCell(value);
+					return ignoreCase ? normalizeCell(value).toLowerCase() : normalizeCell(value);
 				});
 				return function (text) {
-					return values.indexOf(text) !== -1;
+					return values.indexOf(ignoreCase ? text.toLowerCase() : text) !== -1;
 				};
 			}
 			case "e":
@@ -1185,12 +1218,14 @@ export function tableSelectorEngine(
 	 */
 	function readTotal(root: Element, model: TableModel): EngineTotal {
 		const body = model.body();
-		const holder = root.hasAttribute("aria-rowcount")
-			? root
-			: (root.querySelector("[aria-rowcount]") ?? root.closest("[aria-rowcount]"));
+		const anyCell = model.cfg.headerCell + "," + model.cfg.bodyCell;
+		// Not the aria-rowcount of a grid nested in a cell of this one
+		const inside = Array.from(root.querySelectorAll("[aria-rowcount]")).find(function (el) {
+			return owned(el, root, anyCell) && !el.matches(anyCell);
+		});
+		const holder = root.hasAttribute("aria-rowcount") ? root : (inside ?? root.closest("[aria-rowcount]"));
 		const count = holder === null ? NaN : parseInt(holder.getAttribute("aria-rowcount") ?? "", 10);
 		const scope = holder !== null && holder.contains(root) ? holder : root;
-		const anyCell = model.cfg.headerCell + "," + model.cfg.bodyCell;
 		const others = new Set<string>();
 		ownRows(scope, "[role=row], tr", anyCell, hasShadowHost(scope)).forEach(function (row, i) {
 			if (body.rowOf.has(row)) return;

@@ -114,11 +114,13 @@ export class TableUtils {
 		rowspanAttr: string | null,
 		colspanAttr: string | null
 	): { rowspan: number; colspan: number } {
-		const rowspan = this.parseSpan(rowspanAttr);
+		const parsed = this.parseSpan(rowspanAttr);
+		// `rowspan="0"` spans to the end of the row group; HTML caps a rowspan at 65534.
+		const rowspan = parsed === 0 ? 65_534 : parsed;
 		const colspan = this.parseSpan(colspanAttr);
 
 		if (isNaN(rowspan) || rowspan < 1) {
-			throw new Error(`Invalid rowspan attribute: "${rowspanAttr}". Expected positive integer.`);
+			throw new Error(`Invalid rowspan attribute: "${rowspanAttr}". Expected a non-negative integer.`);
 		}
 		if (isNaN(colspan) || colspan < 1) {
 			throw new Error(`Invalid colspan attribute: "${colspanAttr}". Expected positive integer.`);

@@ -25,6 +25,9 @@ export type HeaderRowOptions = {
 	stripIconGlyphs?: boolean;
 };
 
+/** The cells of earlier header rows that span into the next rows, by column, with the rows they still cover. */
+type RowSpans = Map<number, { text: string; rows: number }>;
+
 /**
  * Utility class for extracting and processing table header rows.
  * Handles complex scenarios including colspan, rowspan, empty cells, and duplicate header names.
@@ -99,7 +102,7 @@ export class TableHeader {
 		);
 
 		const headerRows: HeaderRow[] = [];
-		const rowSpans: Map<number, string> = new Map();
+		const rowSpans: RowSpans = new Map();
 		for (const cells of cellData) {
 			headerRows.push(this.processRow(cells, rowSpans, options));
 		}
@@ -127,12 +130,14 @@ export class TableHeader {
 
 	private static processRow(
 		cellDataArray: { text: string; rowspan: number; colspan: number }[],
-		rowSpans: Map<number, string>,
+		rowSpans: RowSpans,
 		options: Required<HeaderRowOptions>
 	): HeaderRow {
 		const headerRow: HeaderRow = [];
 
 		if (cellDataArray.length === 0) {
+			// An empty row is still a row: the cells spanning into it end one row sooner.
+			for (const column of [...rowSpans.keys()]) this.takeRowSpan(rowSpans, column);
 			return headerRow;
 		}
 
@@ -172,13 +177,12 @@ export class TableHeader {
 	private static processHeaderCellData(
 		cellData: { text: string; rowspan: number; colspan: number },
 		headerRow: HeaderRow,
-		rowSpans: Map<number, string>,
+		rowSpans: RowSpans,
 		columnIndex: number,
 		emptyCellReplacement: boolean
 	): number {
 		while (rowSpans.has(columnIndex)) {
-			headerRow.push(rowSpans.get(columnIndex)!);
-			rowSpans.delete(columnIndex);
+			headerRow.push(this.takeRowSpan(rowSpans, columnIndex));
 			columnIndex++;
 		}
 
@@ -203,7 +207,7 @@ export class TableHeader {
 	}
 
 	private static handleRowspan(
-		rowSpans: Map<number, string>,
+		rowSpans: RowSpans,
 		text: string,
 		columnIndex: number,
 		colspan: number,
@@ -211,15 +215,23 @@ export class TableHeader {
 	): void {
 		if (rowspan > 1) {
 			for (let i = 0; i < colspan; i++) {
-				rowSpans.set(columnIndex + i, text);
+				rowSpans.set(columnIndex + i, { text, rows: rowspan - 1 });
 			}
 		}
 	}
 
-	private static addRemainingRowSpans(headerRow: HeaderRow, rowSpans: Map<number, string>, columnIndex: number): void {
+	/** The text of the cell spanning into `column` of this row; the span ends after its last row. */
+	private static takeRowSpan(rowSpans: RowSpans, column: number): string {
+		const span = rowSpans.get(column);
+		if (span === undefined) return "";
+		span.rows--;
+		if (span.rows <= 0) rowSpans.delete(column);
+		return span.text;
+	}
+
+	private static addRemainingRowSpans(headerRow: HeaderRow, rowSpans: RowSpans, columnIndex: number): void {
 		while (rowSpans.has(columnIndex)) {
-			headerRow.push(rowSpans.get(columnIndex)!);
-			rowSpans.delete(columnIndex);
+			headerRow.push(this.takeRowSpan(rowSpans, columnIndex));
 			columnIndex++;
 		}
 	}

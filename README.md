@@ -356,7 +356,7 @@ Row matchers take a row locator:
 await expect(users.row({ Name: "John" })).toHaveCells({ Status: "Active", Email: /@example\.com$/ });
 await expect(users.rowAt(0)).not.toHaveCells({ Status: "Deleted" }); // the row exists, but doesn't match
 
-await expect(users.row({ Name: "John" })).toBeSelected(); // aria-selected="true", or the first checkbox in the row is checked
+await expect(users.row({ Name: "John" })).toBeSelected(); // aria-selected="true", or its selection checkbox is checked
 await expect(files.row({ Name: "src" })).not.toBeExpanded(); // tree grids: aria-expanded
 ```
 
@@ -542,7 +542,7 @@ await john.fill({ Email: "john@example.org", Role: "Admin", Active: false });
 // A cell without a control is edited in place, as data grids do: double-click, fill the editor, press Enter
 await grid.row({ Id: "2" }).fill({ Model: "New model" }); // `commit: "Tab"` or `false` to press another key or none
 
-await john.select(); // checks the first checkbox in the row, or clicks the row; waits until selected
+await john.select(); // checks the selection checkbox, or clicks the row; waits until selected
 await expect(john).toBeSelected();
 await john.deselect();
 await john.isSelected(); // true or false
@@ -555,8 +555,8 @@ expect(await files.row({ Name: "index.ts" }).level()).toBe(2); // aria-level
 ```
 
 - **`fill(values, { commit, timeout })`** goes through the columns in order. When the row is found by a column you fill, fill that column last: after it changes, the row no longer matches. Editors that open outside the cell (popups) are not found; fill those with Playwright locators.
-- **`select()` and `deselect()`** check or uncheck the first checkbox in the row, or else click the row, and wait until `isSelected()` agrees. A row is selected when it has `aria-selected="true"`, or when its first checkbox is checked.
-- **`expand()` and `collapse()`** read `aria-expanded` on the row, or else on the first element in it that has one, and throw when there is none. To toggle, they click the `toggle` option (`{ toggle: row => row.locator(".twisty") }`), or else the first element in the row that has `aria-expanded` or is a button, or else focus the row and press `ArrowRight` or `ArrowLeft`. Then they wait for `aria-expanded` to change.
+- **`select()` and `deselect()`** check or uncheck the row's selection checkbox, or else click the row, and wait until `isSelected()` agrees. The selection checkbox is the one in a column without header text (such as one with only a "select all" checkbox), or the control of the `select` table option (`select: row => row.getByRole("checkbox", { name: "Select row" })`). A checkbox in a column with header text, such as "Active", is data and is never ticked to select the row. A row with `aria-selected` is selected when it is `"true"`; otherwise, when its selection checkbox is checked.
+- **`expand()` and `collapse()`** read `aria-expanded` on the row, or else on the first element in it that has one and is not a menu button (`aria-haspopup`), and throw when there is none. To toggle, they click the `toggle` option (`{ toggle: row => row.locator(".twisty") }`; an error if it doesn't show up), or else that element with `aria-expanded`, or else (when the row itself has `aria-expanded`) the button in its first cell, or else focus the row and press `ArrowRight` or `ArrowLeft`. Other buttons in the row, such as Delete, are never clicked. Then they wait for `aria-expanded` to change.
 
 Each action waits up to 5 seconds by default; pass `{ timeout }` to change it.
 
@@ -645,17 +645,17 @@ await expect(orders).toHaveTotalRowCount(312);
 ```
 
 - **`findRow(where)`** checks the rows in view first. Then it starts on the first page (with `paginate.first`) and the top, scrolls each page down step by step, and goes to the next page until a row matches. It returns `row(where)`, which now resolves to the row. Without `paginate` and `scroll`, it waits until a row matches, like a locator. On failure it says how many pages it searched.
-- **`toJson({ allRows: true })`** reads the rows at every position. Rows seen at several scroll positions are read once: they are told apart by `aria-rowindex`, `row-index`, `data-rowindex`, `data-index` or `data-id` (or `scroll.rowKey`), or else by their text. When every row has a numeric key, rows are ordered by it.
+- **`toJson({ allRows: true })`** reads the rows at every position. Rows seen at several scroll positions are read once: they are told apart by `aria-rowindex`, `row-index`, `data-rowindex`, `data-index` or `data-id` (or `scroll.rowKey`), or else by their text and how often that text came before in the view, so identical rows are all kept. When every row has a position key (all of these but `data-id`), rows are ordered by it; otherwise they keep the order they were shown in.
 - **`totalRowCount()`** and **`toHaveTotalRowCount(n)`** use `aria-rowcount` when the grid declares it (minus the header rows it also counts). Without it, they read every row like `toJson({ allRows: true })`, or count the body rows of a table without `paginate` and `scroll`.
 
-`findRow()`, `totalRowCount()` and `toJson({ allRows: true })` take a `timeout` for the whole search, 30 seconds by default.
+`findRow()`, `totalRowCount()` and `toJson({ allRows: true })` take a `timeout` for the whole search, 30 seconds by default. They first wait until the table settles (and `loading` is hidden), so a table that is still loading isn't read as empty. `totalRowCount()` and `toJson({ allRows: true })` leave the table on its last page, scrolled down: without `paginate.first`, the next read starts there.
 
-| `paginate` option | Description                                                                                                 |
-| ----------------- | ----------------------------------------------------------------------------------------------------------- |
-| `next`            | The control that goes to the next page. Required.                                                           |
-| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless it is disabled.           |
-| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled` or `aria-disabled="true"`. |
-| `maxPages`        | Read only the first pages: `3` reads at most 3. Defaults to every page.                                     |
+| `paginate` option | Description                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `next`            | The control that goes to the next page. Required.                                                                                     |
+| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless it is disabled.                                     |
+| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled`, `aria-disabled="true"` or in a `.disabled` element. |
+| `maxPages`        | Read only the first pages: `3` reads at most 3. Defaults to every page.                                                               |
 
 | `scroll` option | Description                                                                                                                                                        |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -665,7 +665,7 @@ await expect(orders).toHaveTotalRowCount(312);
 | `settle`        | After each scroll (and two animation frames), how long the table must stay the same, in milliseconds. Defaults to 50. `0` skips it, but still waits for `loading`. |
 | `maxSteps`      | Scroll at most this many steps per page. Defaults to scrolling to the bottom.                                                                                      |
 
-After each page change, the table must change and then settle; a `next` that doesn't change the table fails with a clear error.
+After each page change, the table must change, have rows again and then settle; a `next` that doesn't change the table fails with a clear error. A `next` or `first` that matches twice (a pager above and below the table) uses the first one.
 
 `maxPages` and `maxSteps` limit what is read on purpose: with `maxPages: 3`, `toJson({ allRows: true })` returns the rows of the first 3 pages and `findRow()` searches them, without an error. `totalRowCount()` counts them too, unless the grid declares `aria-rowcount`: that is the total of the whole grid.
 
@@ -803,14 +803,14 @@ Locators follow Playwright's own timeouts. The rest have these defaults, and eve
 | Call                                                                                | Default timeout                                           |
 | ----------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | Matchers (`expect(table)...`, `expect(row)...`)                                     | the `expect` timeout                                      |
-| `validateHeaders()`, `waitForStable()`, `toJson({ minRows })`, `toJson({ stable })` | 5 seconds                                                 |
+| `validateHeaders()`, `waitForStable()`, `toJson({ minRows })`, `toJson({ stable })` | 5 seconds (for `toJson`, for the whole read)              |
 | `row.fill()` (per action), `select()`, `deselect()`, `expand()`, `collapse()`       | 5 seconds                                                 |
 | `findRow()`, `totalRowCount()`, `toJson({ allRows: true })`                         | 30 seconds for the whole search                           |
 | `toJson()`, `headerKeys()`, `columnValues()`, `format()`                            | Playwright's action timeout, for the table to be attached |
 
 ## Debugging failures
 
-When a table matcher fails inside a test, the body rows are attached to the test report as a Markdown table (once per test and table, at most 1000 rows), so the HTML report and trace viewer show what the table contained. Row matchers such as `toBeSelected` don't attach one.
+When a table matcher fails inside a test, the body rows are attached to the test report as a Markdown table (once per test and table, at most 1000 rows), so the HTML report and trace viewer show what the table contained. `toHaveCells` attaches the table of its row too; `toBeSelected` and `toBeExpanded` don't attach one.
 
 To print a table yourself:
 

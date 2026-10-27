@@ -442,6 +442,8 @@ async function fillCell(
 	const timeout = options?.timeout ?? 5_000;
 	const control = cell.locator(CONTROLS).first();
 	let editing = false;
+	// The control renders with the cell; a cell that is not there yet would look like one without a control.
+	await cell.waitFor({ state: "visible", timeout });
 	if ((await control.count()) === 0) {
 		await cell.dblclick({ timeout });
 		editing = true;
@@ -454,12 +456,36 @@ async function fillCell(
 			);
 		}
 	}
-	if (typeof value === "boolean") {
-		await control.setChecked(value, { timeout });
-	} else if (await control.evaluate(element => element.localName === "select", undefined, { timeout })) {
-		await control.selectOption(value, { timeout });
-	} else {
-		await control.fill(value, { timeout });
+	const kind = await control.evaluate(
+		element =>
+			element.localName === "select"
+				? "select"
+				: element.matches("input[type=checkbox], input[type=radio], [role=checkbox], [role=switch], [role=radio]")
+					? "check"
+					: "text",
+		undefined,
+		{ timeout }
+	);
+	const fail = (problem: string): Error =>
+		new Error(`TableRow.fill(): the cell under "${column}" ${problem}\nCell locator: ${cell.toString()}`);
+	if ((typeof value === "boolean") !== (kind === "check")) {
+		throw fail(
+			typeof value === "boolean"
+				? `has a ${kind === "select" ? "select" : "text control"}, which takes a string, not ${value}.`
+				: `has a checkbox, which takes true or false, not ${JSON.stringify(value)}.`
+		);
+	}
+	try {
+		if (typeof value === "boolean") {
+			await control.setChecked(value, { timeout });
+		} else if (kind === "select") {
+			await control.selectOption(value, { timeout });
+		} else {
+			await control.fill(value, { timeout });
+		}
+	} catch (error) {
+		// Such as a file input, or a combobox that is not an input
+		throw fail(`could not be filled with ${JSON.stringify(value)}.\n${describeLastError(error).trimEnd()}`);
 	}
 	const commit = options?.commit ?? "Enter";
 	if (editing && commit !== false) await control.press(commit, { timeout });
@@ -745,7 +771,15 @@ export class TableLocator<const H extends string = string> {
 		const columns: readonly string[] | undefined = options?.columns;
 		const { keys, rows } = await this.readJsonTexts(options ?? {}, columns);
 		const outputKeys = columns ?? keys;
-		const parsers: [string, ColumnParser | undefined][] = Object.entries(options?.parse ?? {});
+		// A `parse` key is normalized like a header name, as `columns` keys are: it parses the column it names.
+		const parsers = Object.entries<ColumnParser | undefined>(options?.parse ?? {}).map(
+			([key, parser]): [string, ColumnParser | undefined] => [
+				outputKeys.find(output => output === key) ??
+					outputKeys.find(output => normalizeLine(output) === normalizeLine(key)) ??
+					key,
+				parser,
+			]
+		);
 		this.checkJsonColumns(keys, outputKeys, columns ?? [], parsers);
 
 		const decimal = options?.decimal ?? ".";
@@ -950,6 +984,7 @@ export class TableLocator<const H extends string = string> {
 	 * - A grid with `aria-rowcount` (on the root, inside it or around it) declares it: `aria-rowcount` minus
 	 *   the rows it counts that are not body rows, such as header rows.
 	 * - Otherwise, with the `paginate` or `scroll` option, every row is read, as `toJson({ allRows: true })` does.
+	 *   That leaves the table on its last page, scrolled down.
 	 * - Otherwise, the number of body rows.
 	 *
 	 * @param options - Optional timeout, in milliseconds. Defaults to 30000.
@@ -987,8 +1022,12 @@ export class TableLocator<const H extends string = string> {
 	 * //   1 | Jane | Inactive
 	 */
 	async format(options?: { columns?: readonly ColumnKey<H>[]; maxRows?: number; timeout?: number }): Promise<string> {
+		const maxRows = options?.maxRows ?? 50;
+		if (maxRows < 0 || !Number.isInteger(maxRows)) {
+			throw new Error(`maxRows must be a non-negative integer, got: ${maxRows}`);
+		}
 		const texts = await this.readTexts(false, undefined, { timeout: options?.timeout });
-		return formatRows(texts, { columns: options?.columns, maxRows: options?.maxRows ?? 50 });
+		return formatRows(texts, { columns: options?.columns, maxRows });
 	}
 
 	/**

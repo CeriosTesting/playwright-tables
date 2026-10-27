@@ -88,7 +88,7 @@ export class TableBody {
 		const spannedCells: SpannedCells = {};
 		for (const [rowIndex, cells] of cellData.entries()) {
 			try {
-				const row = this.placeCells(cells, rowIndex, spannedCells);
+				const row = this.placeCells(cells, rowIndex, spannedCells, rowsCount);
 				rows.push(row.columns);
 				sources.push(row.sources);
 			} catch (error) {
@@ -117,7 +117,8 @@ export class TableBody {
 	private static placeCells(
 		cells: CellData[],
 		rowIndex: number,
-		spannedCells: SpannedCells
+		spannedCells: SpannedCells,
+		rowsCount: number
 	): { columns: Cell[]; sources: (CellSource | undefined)[] } {
 		const columns: Cell[] = [];
 		const sources: (CellSource | undefined)[] = [];
@@ -144,7 +145,7 @@ export class TableBody {
 				sources[actualColIndex + span] = source;
 			}
 			if (cellData.rowspan > 1) {
-				this.storeSpannedCells(rowIndex, actualColIndex, cellData, source, spannedCells);
+				this.storeSpannedCells(rowIndex, actualColIndex, cellData, source, spannedCells, rowsCount);
 			}
 
 			// Move past this cell and any colspan it creates
@@ -167,9 +168,11 @@ export class TableBody {
 		colIndex: number,
 		cellData: CellData,
 		source: CellSource,
-		spannedCells: SpannedCells
+		spannedCells: SpannedCells,
+		rowsCount: number
 	): void {
-		for (let rowSpan = 1; rowSpan < cellData.rowspan; rowSpan++) {
+		// A rowspan never reaches past the last row (`rowspan="0"` spans to it)
+		for (let rowSpan = 1; rowSpan < cellData.rowspan && rowIndex + rowSpan < rowsCount; rowSpan++) {
 			const spannedRow = spannedCells[rowIndex + rowSpan] ?? [];
 			spannedCells[rowIndex + rowSpan] = spannedRow;
 			// Store the content for each column covered by colspan

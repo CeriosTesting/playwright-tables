@@ -52,8 +52,9 @@ export type CellCondition =
 	| ExclusiveCondition<{ contains: string; ignoreCase?: boolean }>
 	| ExclusiveCondition<{ startsWith: string; ignoreCase?: boolean }>
 	| ExclusiveCondition<{ endsWith: string; ignoreCase?: boolean }>
-	| ExclusiveCondition<{ oneOf: readonly string[] }>
-	| ExclusiveCondition<{ empty: true }>
+	| ExclusiveCondition<{ oneOf: readonly string[]; ignoreCase?: boolean }>
+	/** `true`: the cell has no text. `false`: the cell has text. */
+	| ExclusiveCondition<{ empty: boolean }>
 	| ExclusiveCondition<{
 			/**
 			 * Serialized with `toString()` and executed in the page, like a `page.evaluate` function.
@@ -179,7 +180,10 @@ export type TableLocatorOptions<H extends string> = {
 		columnSelector?: string;
 	};
 	row?: {
-		/** CSS selector for body rows. Defaults to `"tbody>tr"`, without the header rows of a table without a `<thead>`. */
+		/**
+		 * CSS selector for body rows. Defaults to `"tbody>tr"` (and `<tr>` right inside a `<table>` built
+		 * without a `<tbody>`), without the header rows of a table without a `<thead>`.
+		 */
 		rowSelector?: string;
 		/** CSS selector for body cells. Defaults to `"td, th"`, so row header cells are columns too. */
 		columnSelector?: string;
@@ -409,7 +413,8 @@ export type TableJsonOptions<C extends string = string, P = {}> = {
 	 * option of the table. `minRows` and `stable` apply to the first view. Defaults to `false`: the rows the
 	 * table shows now.
 	 *
-	 * It reads up to `paginate.maxPages` and `scroll.maxSteps`, if set. Reaching the `timeout` before that
+	 * It leaves the table on its last page, scrolled down; without `paginate.first`, the next read starts
+	 * there. It reads up to `paginate.maxPages` and `scroll.maxSteps`, if set. Reaching the `timeout` before that
 	 * is an error that says how many rows were read, so part of the rows is never returned as all of them.
 	 */
 	allRows?: boolean;
@@ -440,7 +445,7 @@ export type SerializedMatcher =
 	| { t: "s"; v: string }
 	| { t: "r"; s: string; f: string }
 	| { t: "c"; op: "equals" | "contains" | "startsWith" | "endsWith"; v: string; i: boolean }
-	| { t: "o"; v: string[] }
+	| { t: "o"; v: string[]; i?: boolean }
 	| { t: "e" }
 	| { t: "f"; src: string }
 	| { t: "n"; m: SerializedMatcher }
