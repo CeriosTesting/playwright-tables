@@ -251,7 +251,8 @@ test.describe("waitForStable", () => {
 		await page.goto(Route.DynamicLoadTable);
 		const table = defineTable(page.locator("#DynamicTable"), { headers: ["Header 1", "Header 2", "Header 3"] });
 
-		const rows = await table.toJson({ minRows: 3, stable: true });
+		// One timeout for both waits: the rows load after 2 seconds, then the table must stay the same
+		const rows = await table.toJson({ minRows: 3, stable: true, timeout: 10_000 });
 		expect(rows).toHaveLength(3);
 	});
 

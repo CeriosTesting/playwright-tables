@@ -415,11 +415,16 @@ async function toHaveRows(
 		{ keys: [], rows: [], count: 0, matched: [], unknown: [], errors: [] },
 		deadline
 	);
-	const result = poll.value;
+	let result = poll.value;
 	const matched = matches(result);
 	// A table that was never read, or has an unknown header, cannot be checked: it fails both the
 	// assertion and its negation. With `.not`, so does a broken predicate, which never matches.
 	const uncheckable = !poll.read || result.unknown.length > 0 || (this.isNot && !checkableNot(result));
+	if (!this.isNot && !uncheckable && !matched) {
+		// The reads above leave out the cell texts; read them once, to describe the mismatch.
+		const describe: EngineMatchRequest = { ...request, texts: 1 };
+		result = await table.root.evaluate(matchTableRows, describe, { timeout: FAILURE_READ_TIMEOUT }).catch(() => result);
+	}
 	const received = result.rows.map(texts => toRecord(result.keys, texts));
 
 	return {
@@ -574,7 +579,7 @@ async function toHaveColumnValues(
 	let poll: PollOutcome<EngineMatchResult>;
 	if (anyOrder) {
 		// The matrix lists every body row a value matches; the values match when each gets a row of its own.
-		const matrix = await pollMatrix(table, rows, Date.now() + timeout, read => accept(fromMatrix(read)));
+		const matrix = await pollMatrix(table, rows, Date.now() + timeout, read => accept(fromMatrix(read)), true);
 		poll = { ...matrix, value: fromMatrix(matrix.value) };
 	} else {
 		poll = await pollUntil(
@@ -1170,15 +1175,20 @@ function describePredicateErrors(errors: readonly string[]): string {
 	return errors.map(error => `${error}\n`).join("");
 }
 
-/** Reads the matrix of `rows` until `done` accepts it, or until `deadline`. */
+/**
+ * Reads the matrix of `rows` until `done` accepts it, or until `deadline`. With `assign`, the engine gives
+ * each entry a body row of its own (see {@link fromMatrix}) instead of listing every row it matches.
+ */
 function pollMatrix(
 	table: TableLocator,
 	rows: SerializedWhere[],
 	deadline: number,
-	done: (result: EngineMatrixResult) => boolean
+	done: (result: EngineMatrixResult) => boolean,
+	assign = false
 ): Promise<PollOutcome<EngineMatrixResult>> {
 	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
 	const request: EngineMatrixRequest = { op: "matrix", cfg: table["_config"], rows };
+	if (assign) request.assign = 1;
 	return pollUntil(
 		readTimeout => table.root.evaluate(matchTableMatrix, request, { timeout: readTimeout }),
 		done,
@@ -1188,38 +1198,15 @@ function pollMatrix(
 }
 
 /**
- * Gives each expected row a different body row, as many as possible (a maximum bipartite matching), so
- * overlapping conditions such as `{ Status: "Active" }` and `{ Name: "John" }` don't steal each other's
- * rows. `matches[i]` lists the body rows expected row `i` matches. Returns the body row of every expected
- * row, or -1 for the ones left without.
+ * A matrix result read with `assign` as a match result: entry `i` matches when the engine gave it a body
+ * row of its own (a maximum bipartite matching, so overlapping entries don't take each other's rows).
  */
-function assignRows(matches: readonly (readonly number[])[]): number[] {
-	const assigned = matches.map(() => -1);
-	const owner = new Map<number, number>();
-	const assign = (expected: number, seen: Set<number>): boolean => {
-		for (const row of matches[expected] ?? []) {
-			if (seen.has(row)) continue;
-			seen.add(row);
-			const current = owner.get(row);
-			if (current === undefined || assign(current, seen)) {
-				owner.set(row, expected);
-				assigned[expected] = row;
-				return true;
-			}
-		}
-		return false;
-	};
-	matches.forEach((_rows, expected) => assign(expected, new Set()));
-	return assigned;
-}
-
-/** A matrix result as a match result: entry `i` matches when it has a body row of its own. */
 function fromMatrix(result: EngineMatrixResult): EngineMatchResult {
 	return {
 		keys: result.keys,
 		rows: [],
 		count: result.count,
-		matched: assignRows(result.matches).map(row => row !== -1),
+		matched: (result.assigned ?? []).map(row => row !== -1),
 		unknown: result.unknown,
 		errors: result.errors,
 	};
@@ -1249,7 +1236,8 @@ async function matchUnordered(
 		read => {
 			const result = fromMatrix(read);
 			return matches(result) !== state.isNot && (!state.isNot || checkableNot(result));
-		}
+		},
+		true
 	);
 	const result = fromMatrix(poll.value);
 	const uncheckable = !poll.read || result.unknown.length > 0 || (state.isNot && !checkableNot(result));

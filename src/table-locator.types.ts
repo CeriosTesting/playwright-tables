@@ -566,18 +566,29 @@ export type EngineFingerprint = { rows: number; hash: string };
  * body rows that match it.
  * @internal
  */
-export type EngineMatrixRequest = { op: "matrix"; cfg: EngineConfig; rows: SerializedWhere[] };
+export type EngineMatrixRequest = {
+	op: "matrix";
+	cfg: EngineConfig;
+	rows: SerializedWhere[];
+	/**
+	 * `1` to give each entry of `rows` a different body row in the browser, and return only that
+	 * (`assigned`) instead of every body row an entry matches (`matches` stays empty).
+	 */
+	assign?: 1;
+};
 
 /**
  * Result of an {@link EngineMatrixRequest}. `matches[i]` lists the indexes of the body rows that match
- * `rows[i]` of the request. `count` is the number of body rows; `unknown` lists the headers (or column
- * indexes) the table doesn't have; `errors` lists problems with `predicate` conditions.
+ * `rows[i]` of the request; with `assign`, `assigned[i]` is the body row given to `rows[i]`, or -1. `count`
+ * is the number of body rows; `unknown` lists the headers (or column indexes) the table doesn't have;
+ * `errors` lists problems with `predicate` conditions.
  * @internal
  */
 export type EngineMatrixResult = {
 	keys: string[];
 	count: number;
 	matches: number[][];
+	assigned?: number[];
 	unknown: (string | number)[];
 	errors: string[];
 };
@@ -592,7 +603,13 @@ export type EngineTextRequest = { op: "text"; cfg: EngineConfig };
  * Argument for evaluating the engine function directly to match every body row against its own conditions.
  * @internal
  */
-export type EngineMatchRequest = { op: "match"; cfg: EngineConfig; rows: SerializedWhere[] };
+export type EngineMatchRequest = {
+	op: "match";
+	cfg: EngineConfig;
+	rows: SerializedWhere[];
+	/** `1` to also return the body cell texts when the rows don't match, to describe the mismatch. */
+	texts?: 1;
+};
 
 /**
  * Argument for evaluating the engine function directly to read the text of every body cell in one column.

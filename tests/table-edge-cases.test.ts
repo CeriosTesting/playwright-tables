@@ -292,6 +292,28 @@ test.describe("row interactions", () => {
 	});
 });
 
+test.describe("large tables", () => {
+	test("unordered matching of thousands of overlapping entries", async ({ page }) => {
+		const count = 3_000;
+		await page.setContent(`
+			<table id="big"><thead><tr><th>Id</th><th>Status</th></tr></thead><tbody></tbody></table>
+			<script>
+				let html = "";
+				for (let i = 0; i < ${count}; i++) html += "<tr><td>" + i + "</td><td>Active</td></tr>";
+				document.querySelector("tbody").innerHTML = html;
+			</script>
+		`);
+		const big = defineTable(page.locator("#big"), { headers: ["Id", "Status"] });
+
+		// Every entry matches every row, except the last, which needs row 0: the greedy pass gives row 0
+		// away, so the search has to move an entry to another row.
+		const entries = [...Array.from({ length: count - 1 }, () => ({ Status: "Active" })), { Id: "0" }];
+		await expect(big).toContainRows(entries, { timeout: 10_000 });
+		await expect(big).toHaveRows(entries, { anyOrder: true, timeout: 10_000 });
+		await expect(big).not.toContainRows([...entries, { Status: "Active" }], { timeout: 2_000 });
+	});
+});
+
 test.describe("reading text", () => {
 	test("header keys have the text-transform of the header, also while the table is hidden", async ({ page }) => {
 		await page.setContent(`

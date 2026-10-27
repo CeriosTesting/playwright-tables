@@ -273,18 +273,33 @@ export function tableSelectorEngine(
 	 */
 	function parseNumber(value: string, decimal: DecimalSeparator): number {
 		const text = clean(value);
-		const group = decimal === "," ? "[.'\\u00a0\\u202f ]" : "[,'\\u00a0\\u202f ]";
-		const separator = decimal === "," ? "," : "\\.";
-		const pattern = new RegExp(
-			"(\\d{1,3}(?:" + group + "\\d{3})+|\\d+)(?:" + separator + "(\\d+))?|" + separator + "(\\d+)",
-			"g"
-		);
+		const pattern = numberPattern(decimal);
+		// A global RegExp keeps its position between calls.
+		pattern.lastIndex = 0;
 		const first = pattern.exec(text);
 		if (first === null || pattern.exec(text) !== null) return NaN;
 		const integer = (first[1] ?? "0").replace(/\D/g, "");
 		const fraction = first[2] ?? first[3] ?? "0";
 		const number = Number(integer + "." + fraction);
 		return MINUS_BEFORE.test(text.slice(0, first.index)) ? -number : number;
+	}
+
+	// The patterns of `parseNumber` by decimal separator, built once: numeric conditions parse every cell.
+	const numberPatterns = new Map<string, RegExp>();
+
+	/** The pattern of the numbers in a text with this decimal separator, global so a second number is found. */
+	function numberPattern(decimal: DecimalSeparator): RegExp {
+		let pattern = numberPatterns.get(decimal);
+		if (pattern === undefined) {
+			const group = decimal === "," ? "[.'\\u00a0\\u202f ]" : "[,'\\u00a0\\u202f ]";
+			const separator = decimal === "," ? "," : "\\.";
+			pattern = new RegExp(
+				"(\\d{1,3}(?:" + group + "\\d{3})+|\\d+)(?:" + separator + "(\\d+))?|" + separator + "(\\d+)",
+				"g"
+			);
+			numberPatterns.set(decimal, pattern);
+		}
+		return pattern;
 	}
 
 	/** The text of `el` as the browser reads it (`innerText` or `textContent`), without any changes. */
@@ -1203,7 +1218,7 @@ export function tableSelectorEngine(
 		return { keys: model.keys, values: values };
 	}
 
-	function matchRows(model: TableModel, expected: SerializedWhere[]): EngineMatchResult {
+	function matchRows(model: TableModel, expected: SerializedWhere[], withTexts: boolean): EngineMatchResult {
 		const unknown = unknownHeaders(model, expected);
 		const count = model.body().rows.length;
 		// Only rows that exist both in the table and in `expected` are matched.
@@ -1217,8 +1232,8 @@ export function tableSelectorEngine(
 			matched.every(function (ok) {
 				return ok;
 			});
-		// The texts are only needed to describe a mismatch, so a match doesn't send the whole table.
-		const rows = pass ? [] : readTexts(model, false).rows;
+		// The texts are only needed to describe a mismatch, and only once: on request, and never for a match.
+		const rows = pass || !withTexts ? [] : readTexts(model, false).rows;
 		return {
 			keys: model.keys,
 			rows: rows,
@@ -1241,9 +1256,27 @@ export function tableSelectorEngine(
 		return { matches: matches, errors: predicateErrors ?? [] };
 	}
 
-	/** For each set of conditions in `expected`, the indexes of the body rows that match it. */
-	function matrixRows(model: TableModel, expected: SerializedWhere[]): EngineMatrixResult {
+	/**
+	 * For each set of conditions in `expected`, the indexes of the body rows that match it. With `assign`,
+	 * instead the body row each set gets in {@link assignRows}.
+	 */
+	function matrixRows(model: TableModel, expected: SerializedWhere[], assign: boolean): EngineMatrixResult {
 		const count = model.body().rows.length;
+		if (assign) {
+			return {
+				keys: model.keys,
+				count: count,
+				matches: [],
+				assigned: assignRows(
+					model,
+					expected.map(function (where) {
+						return whereColumns(model, where);
+					})
+				),
+				unknown: unknownHeaders(model, expected),
+				errors: predicateErrors ?? [],
+			};
+		}
 		const matches = expected.map(function (where) {
 			const conditions = whereColumns(model, where);
 			const found: number[] = [];
@@ -1260,6 +1293,81 @@ export function tableSelectorEngine(
 			unknown: unknownHeaders(model, expected),
 			errors: predicateErrors ?? [],
 		};
+	}
+
+	/**
+	 * Gives each entry a different body row it matches, as many as possible (a maximum bipartite matching),
+	 * so overlapping entries such as `{ Status: "Active" }` and `{ Name: "John" }` don't take each other's
+	 * rows. Returns the body row of every entry, or -1 for the ones left without (and for an entry with an
+	 * unknown header, `null` in `entries`).
+	 *
+	 * Rows are tested only when needed, so thousands of entries don't test every row: a greedy pass gives
+	 * each entry the first free row it matches, and only the entries left without one search for a chain
+	 * of rows to swap (an augmenting path), with a stack instead of recursion.
+	 */
+	function assignRows(model: TableModel, entries: (ColumnCondition[] | null)[]): number[] {
+		const count = model.body().rows.length;
+		const assigned: number[] = [];
+		const owner = new Map<number, number>();
+		entries.forEach(function (conditions, entry) {
+			assigned.push(-1);
+			if (conditions === null) return;
+			for (let r = 0; r < count; r++) {
+				if (!owner.has(r) && rowMatches(model, r, conditions)) {
+					owner.set(r, entry);
+					assigned[entry] = r;
+					return;
+				}
+			}
+		});
+		entries.forEach(function (conditions, entry) {
+			if (conditions !== null && assigned[entry] === -1) augment(model, entries, entry, owner, assigned);
+		});
+		return assigned;
+	}
+
+	/**
+	 * Gives entry `start` a row: a free one it matches, or one whose owner moves to another row it matches,
+	 * and so on (searched depth first). Updates `owner` and `assigned`.
+	 */
+	function augment(
+		model: TableModel,
+		entries: (ColumnCondition[] | null)[],
+		start: number,
+		owner: Map<number, number>,
+		assigned: number[]
+	): void {
+		const count = model.body().rows.length;
+		const seen = new Set<number>();
+		// The entries on the path, with the next row each one tries, and the row each one takes
+		const path: { entry: number; next: number }[] = [{ entry: start, next: 0 }];
+		const taken: number[] = [];
+		while (path.length > 0) {
+			const level = path.length - 1;
+			const step = path[level] as { entry: number; next: number };
+			const conditions = entries[step.entry];
+			if (step.next >= count || conditions === null || conditions === undefined) {
+				path.pop();
+				continue;
+			}
+			const r = step.next++;
+			if (seen.has(r) || !rowMatches(model, r, conditions)) continue;
+			seen.add(r);
+			taken[level] = r;
+			const current = owner.get(r);
+			if (current !== undefined) {
+				path.push({ entry: current, next: 0 });
+				continue;
+			}
+			// A free row: every entry on the path takes its row, and the owner of that row moves on.
+			for (let i = 0; i < path.length; i++) {
+				const entry = (path[i] as { entry: number }).entry;
+				const row = taken[i] as number;
+				owner.set(row, entry);
+				assigned[entry] = row;
+			}
+			return;
+		}
 	}
 
 	function queryAll(root: Node, body: string): Element[] {
@@ -1315,11 +1423,11 @@ export function tableSelectorEngine(
 		if (request.op === "matrix") {
 			return model === null
 				? { keys: [], count: 0, matches: [], unknown: [], errors: [] }
-				: matrixRows(model, request.rows);
+				: matrixRows(model, request.rows, request.assign === 1);
 		}
 		return model === null
 			? { keys: [], rows: [], count: 0, matched: [], unknown: [], errors: [] }
-			: matchRows(model, request.rows);
+			: matchRows(model, request.rows, request.texts === 1);
 	}
 
 	if (root !== undefined && request !== undefined) {
