@@ -209,6 +209,16 @@ export type TableLocatorOptions<H extends string> = {
 	 */
 	loading?: LocatorRef;
 	/**
+	 * The control that selects a row, from the row locator, for {@link TableRow.select},
+	 * {@link TableRow.deselect} and {@link TableRow.isSelected}. Defaults to the checkbox in a selection
+	 * column: a column without header text (such as one with only a "select all" checkbox). A checkbox in a
+	 * column with header text, such as "Active", is data and never selects the row.
+	 *
+	 * @example
+	 * select: row => row.getByRole("checkbox", { name: "Select row" })
+	 */
+	select?: (row: Locator) => Locator;
+	/**
 	 * How cell text is read, for both header and body cells. Defaults to `InnerText`: the text as it is
 	 * shown, without hidden text and with CSS `text-transform`. `TextContent` reads all text in the DOM,
 	 * hidden text included. Either way, the text is normalized (see {@link CellCondition}).
@@ -253,7 +263,9 @@ export type PaginateOptions = {
 	first?: LocatorRef;
 	/**
 	 * Whether the table shows the last page. Defaults to: `next` is missing, hidden or disabled (with the
-	 * `disabled` attribute or `aria-disabled="true"`).
+	 * `disabled` attribute, `aria-disabled="true"` or the `disabled` class, on `next` or an element around
+	 * it, such as a Bootstrap `<li class="disabled">`). When `next` matches several elements (a pager above
+	 * and below the table), the first one is used.
 	 */
 	isLastPage?: (next: Locator) => Promise<boolean>;
 	/**
@@ -280,7 +292,12 @@ export type ScrollOptions = {
 	/**
 	 * The attribute of a row element that identifies the row, such as `"data-id"`. Defaults to the first
 	 * of `aria-rowindex`, `row-index`, `data-rowindex`, `data-index` and `data-id` that the row has, or
-	 * else the text of its cells (so two rows with the same text are read once).
+	 * else the text of its cells. Rows with the same text are told apart by their order within one view,
+	 * so a repeated row is not lost, but the overlap between two scroll steps can't tell which of two
+	 * identical rows it shows: give such rows a key.
+	 *
+	 * The position attributes (all of these but `data-id`) also order the rows. Other keys only identify
+	 * a row, and rows are kept in the order they were shown.
 	 */
 	rowKey?: string;
 	/**
@@ -383,7 +400,8 @@ export type TableJsonOptions<C extends string = string, P = {}> = {
 	decimal?: DecimalSeparator;
 	/**
 	 * Wait until the table stops changing before reading it, see {@link TableLocator.waitForStable}.
-	 * `true` uses the default options. The `timeout` of the stable options defaults to `timeout`.
+	 * `true` uses the default options. The `timeout` of the stable options defaults to (and can't exceed)
+	 * the time left of `timeout`.
 	 */
 	stable?: boolean | StableOptions;
 	/**
@@ -401,9 +419,9 @@ export type TableJsonOptions<C extends string = string, P = {}> = {
 	 */
 	minRows?: number;
 	/**
-	 * With `minRows` or `stable`, the time to wait in milliseconds (default 5000). With `allRows`, the time
-	 * for the whole read, pages and scrolling included (default 30000). Without any of them, the time to
-	 * wait for the table element to be attached.
+	 * With `minRows` or `stable`, the time for the whole read, waits included, in milliseconds (default
+	 * 5000). With `allRows`, the time for the whole read, pages and scrolling included (default 30000).
+	 * Without any of them, the time to wait for the table element to be attached.
 	 */
 	timeout?: number;
 	/**

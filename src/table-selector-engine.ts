@@ -299,10 +299,11 @@ export function tableSelectorEngine(
 	 * the DOM except the ignored elements, with line breaks for `<br>` and block elements.
 	 */
 	function readText(el: Element, cfg: Config): string {
-		// An element that is not rendered has no layout, and its innerText is its textContent.
+		// An element that is not rendered has no layout, and its innerText is its textContent. Its CSS
+		// `text-transform` is applied anyway, so a header reads the same whether it is shown or not.
 		if (cfg.textContent || !("innerText" in el) || el.getClientRects().length === 0) {
 			const parts: string[] = [];
-			readDomText(el, cfg.ignore, false, parts);
+			readDomText(el, cfg.ignore, false, parts, !cfg.textContent && "innerText" in el);
 			return parts.join("");
 		}
 		const special = specialElements(el, cfg.ignore);
@@ -317,12 +318,16 @@ export function tableSelectorEngine(
 		return ignore !== "" && el.matches(ignore);
 	}
 
-	/** Reads the text of the children of `node` without layout, leaving out `ignore`d elements, into `parts`. */
-	function readDomText(node: Node, ignore: string, pre: boolean, parts: string[]): void {
+	/**
+	 * Reads the text of the children of `node` without layout, leaving out `ignore`d elements, into `parts`.
+	 * With `transform`, the computed `text-transform` of each text is applied, as `innerText` does.
+	 */
+	function readDomText(node: Node, ignore: string, pre: boolean, parts: string[], transform: boolean): void {
+		const textTransform = transform && isElement(node) ? getComputedStyle(node).textTransform : "none";
 		for (const child of Array.from(node.childNodes)) {
 			if (child.nodeType === 3) {
 				const value = child.nodeValue ?? "";
-				parts.push(pre ? value : value.replace(CSS_WHITESPACE, " "));
+				parts.push(transformText(pre ? value : value.replace(CSS_WHITESPACE, " "), textTransform));
 				continue;
 			}
 			if (!isElement(child)) continue;
@@ -334,7 +339,7 @@ export function tableSelectorEngine(
 			if (SKIPPED_TAGS.test(name) || isIgnored(child, ignore)) continue;
 			const block = BLOCK_TAGS.test(name);
 			if (block) parts.push("\n");
-			readDomText(child, ignore, pre || name === "pre" || name === "textarea", parts);
+			readDomText(child, ignore, pre || name === "pre" || name === "textarea", parts, transform);
 			if (block) parts.push("\n");
 		}
 	}
@@ -1070,18 +1075,18 @@ export function tableSelectorEngine(
 	}
 
 	/**
-	 * Header keys and the text of every body cell under them (or only under `columns`, in that order):
-	 * normalized, or with `raw`, as the browser reads it.
+	 * Header keys and the text of every body cell (or only under `columns`, in that order): normalized, or
+	 * with `raw`, as the browser reads it. Without `columns`, a row has a text for every grid column, also
+	 * in a table without header rows or with body rows wider than the header.
 	 */
 	function readTexts(model: TableModel, raw: boolean, columns?: string[]): EngineTexts {
-		const indexes =
-			columns === undefined
-				? model.keys.map(function (_key, c) {
-						return c;
-					})
-				: columns.map(function (key) {
-						return model.keys.indexOf(normalizeLine(key));
-					});
+		const indexes: number[] = [];
+		if (columns === undefined) {
+			const width = gridWidth(model);
+			for (let c = 0; c < width; c++) indexes.push(c);
+		} else {
+			for (const key of columns) indexes.push(model.keys.indexOf(normalizeLine(key)));
+		}
 		const rows: string[][] = [];
 		for (let r = 0; r < model.body().rows.length; r++) {
 			const texts: string[] = [];
@@ -1093,41 +1098,67 @@ export function tableSelectorEngine(
 		return { keys: model.keys, rows: rows };
 	}
 
-	/** A hash of the header keys and body cell texts (FNV-1a), with the number of body rows. */
+	/**
+	 * A hash (FNV-1a) of the header keys and the text of every body cell, with the number of body rows. The
+	 * texts are hashed one by one, without building one string of the whole table.
+	 */
 	function fingerprint(model: TableModel): EngineFingerprint {
-		const texts = readTexts(model, false);
-		const data = JSON.stringify([texts.keys, texts.rows]);
 		let hash = 0x811c9dc5;
-		for (let i = 0; i < data.length; i++) {
-			hash ^= data.charCodeAt(i);
+		let length = 0;
+		// Separators between cells (1) and rows (2), so ["ab", ""] and ["a", "b"] hash differently.
+		function add(text: string, separator: number): void {
+			for (let i = 0; i < text.length; i++) {
+				hash ^= text.charCodeAt(i);
+				hash = Math.imul(hash, 0x01000193);
+			}
+			hash ^= separator;
 			hash = Math.imul(hash, 0x01000193);
+			length += text.length + 1;
 		}
-		return { rows: texts.rows.length, hash: (hash >>> 0).toString(16) + ":" + data.length };
+		for (const key of model.keys) add(key, 1);
+		add("", 2);
+		const rows = model.body().rows.length;
+		const width = gridWidth(model);
+		for (let r = 0; r < rows; r++) {
+			for (let c = 0; c < width; c++) add(cellText(model, r, c), 1);
+			add("", 2);
+		}
+		return { rows: rows, hash: (hash >>> 0).toString(16) + ":" + length };
 	}
 
 	/** Attributes that identify a row in virtualized grids, in the order they are tried. */
 	const ROW_KEY_ATTRIBUTES = ["aria-rowindex", "row-index", "data-rowindex", "data-index", "data-id"];
+	/** The row key attributes that hold the position of the row, so rows can be ordered by them. */
+	const ROW_POSITION_ATTRIBUTES = ["aria-rowindex", "row-index", "data-rowindex", "data-index"];
 
 	/**
 	 * The body rows in view, with a key per row: the `rowKey` attribute, or the first of the default key
-	 * attributes, or else the normalized cell texts.
+	 * attributes, or else the normalized cell texts and how often the same texts came before in this view,
+	 * so identical rows stay apart. Only a position attribute gives a row an `index` to order by: an id
+	 * such as `data-id` says nothing about where the row is shown.
 	 */
 	function readWindow(model: TableModel, request: EngineWindowRequest): EngineWindow {
 		const texts = readTexts(model, request.raw === true, request.columns);
-		let all: string[][] | null = null;
+		let all: string[][] | null = request.raw !== true && request.columns === undefined ? texts.rows : null;
 		const names = request.rowKey === undefined ? ROW_KEY_ATTRIBUTES : [request.rowKey];
+		const seen = new Map<string, number>();
 		const rows = model.body().rows.map(function (row, r) {
 			let attribute: string | null = null;
-			for (const name of names) {
-				attribute = nonEmpty(row.getAttribute(name));
+			let name = "";
+			for (const candidate of names) {
+				attribute = nonEmpty(row.getAttribute(candidate));
+				name = candidate;
 				if (attribute !== null) break;
 			}
 			const cells = texts.rows[r] ?? [];
 			if (attribute === null) {
 				all ??= readTexts(model, false).rows;
-				return { key: "text:" + JSON.stringify(all[r] ?? []), index: null, texts: cells };
+				const text = JSON.stringify(all[r] ?? []);
+				const count = seen.get(text) ?? 0;
+				seen.set(text, count + 1);
+				return { key: "text:" + text + "#" + count, index: null, texts: cells };
 			}
-			const index = Number(attribute);
+			const index = ROW_POSITION_ATTRIBUTES.indexOf(name) === -1 ? NaN : Number(attribute);
 			return { key: attribute, index: isFinite(index) ? index : null, texts: cells };
 		});
 		return { keys: texts.keys, rows: rows };

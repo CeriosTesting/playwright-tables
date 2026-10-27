@@ -37,7 +37,7 @@ export function formatRows(body: EngineTexts, options: FormatOptions): string {
 		return line.length > MAX_CELL_WIDTH ? `${line.slice(0, MAX_CELL_WIDTH - 1)}…` : line;
 	};
 	const lines = [
-		["#", ...columns.map(column => cell(body.keys[column] ?? ""))],
+		["#", ...columns.map(column => cell(columnLabel(body, column)))],
 		...shown.map(index => [String(index), ...columns.map(column => cell(body.rows[index]?.[column] ?? ""))]),
 	];
 	const widths = (lines[0] ?? []).map((_text, c) => Math.max(...lines.map(line => line[c]?.length ?? 0)));
@@ -60,7 +60,7 @@ export function formatMarkdown(body: EngineTexts, options: FormatOptions): strin
 	const cell = (text: string): string => text.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 	const shown = indexes.slice(0, options.maxRows);
 	const lines = [
-		`| # | ${columns.map(column => cell(body.keys[column] ?? "")).join(" | ")} |`,
+		`| # | ${columns.map(column => cell(columnLabel(body, column))).join(" | ")} |`,
 		`| --- | ${columns.map(() => "---").join(" | ")} |`,
 		...shown.map(
 			index => `| ${index} | ${columns.map(column => cell(body.rows[index]?.[column] ?? "")).join(" | ")} |`
@@ -72,10 +72,17 @@ export function formatMarkdown(body: EngineTexts, options: FormatOptions): strin
 
 /** The grid columns of `headers` that the table has, or every column if there are none. */
 function pickColumns(body: EngineTexts, headers: readonly (string | number)[] | undefined): number[] {
+	// A table without header rows (or a body wider than its header) still has its body columns
+	const width = body.rows.reduce((widest, row) => Math.max(widest, row.length), body.keys.length);
 	const columns: number[] = [];
 	for (const header of headers ?? []) {
 		const column = typeof header === "number" ? header : body.keys.indexOf(normalizeLine(header));
-		if (column >= 0 && column < body.keys.length && !columns.includes(column)) columns.push(column);
+		if (column >= 0 && column < width && !columns.includes(column)) columns.push(column);
 	}
-	return columns.length > 0 ? columns : body.keys.map((_key, index) => index);
+	return columns.length > 0 ? columns : Array.from({ length: width }, (_value, index) => index);
+}
+
+/** The header key of a column, or its index for a column without one. */
+function columnLabel(body: EngineTexts, column: number): string {
+	return body.keys[column] ?? String(column);
 }

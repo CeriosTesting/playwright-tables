@@ -1,7 +1,8 @@
 import { expect as baseExpect, Expect, ExpectMatcherState, Locator, test, TestInfo } from "@playwright/test";
 
 import { describeMatcher, describeWhere, serializeMatcher, serializeWhere } from "./cell-matcher-serializer";
-import { describeLastError, MIN_READ_TIMEOUT, PollOutcome, pollUntil } from "./polling";
+import { checkTimeout, describeLastError, MIN_READ_TIMEOUT, PollOutcome, pollUntil } from "./polling";
+import { conditionHeaders, describeUnknown, waitForHeaders } from "./table-diagnostics";
 import { formatMarkdown, formatRows } from "./table-format";
 import { TableLocator, TableRow } from "./table-locator";
 import {
@@ -39,8 +40,15 @@ import {
 /** Maximum number of mismatching rows listed in a `toHaveRows` failure message. */
 const MAX_REPORTED_ROWS = 10;
 
-/** Time for the extra reads that describe a failure, in milliseconds. */
-const FAILURE_READ_TIMEOUT = 5_000;
+/**
+ * Time for the extra reads that describe a failure, in milliseconds. The table was read during the
+ * assertion, so a read that takes longer won't succeed; keep it short, so a failure is reported soon after
+ * the timeout, and before the test timeout.
+ */
+const FAILURE_READ_TIMEOUT = 2_000;
+
+/** Time for a read that checks the headers or the predicates after the assertion, in milliseconds. */
+const DIAGNOSTICS_TIMEOUT = 1_000;
 
 /** Maximum number of column values listed in a `toBeSortedBy` failure message. */
 const MAX_REPORTED_VALUES = 20;
@@ -143,6 +151,21 @@ async function toHaveRow(
 		found = this.isNot;
 	}
 
+	// A predicate that throws never matches, so `.not` would pass on a broken predicate.
+	const errors = this.isNot && !found ? await readPredicateErrors(table, where) : [];
+	if (errors.length > 0) {
+		return uncheckable(this, {
+			matcherName,
+			receiver: "table",
+			argument: "where",
+			expected: where,
+			description: `no row matching ${describeWhere(where)}`,
+			diagnostics: describePredicateErrors(errors),
+			locator: `Table locator: ${table.root.toString()}`,
+			timeout,
+		});
+	}
+
 	const failed = found === this.isNot;
 	const diagnostics = failed
 		? (await headerDiagnostics(table, Object.keys(where))) + (await predicateDiagnostics(table, where))
@@ -175,19 +198,38 @@ async function toHaveRowCount(
 	options?: TableMatcherOptions
 ): Promise<MatcherResult> {
 	const matcherName = "toHaveRowCount";
-	const timeout = options?.timeout ?? this.timeout;
+	const timeout = checkTimeout(options?.timeout ?? this.timeout);
+	if (count < 0 || !Number.isInteger(count)) {
+		throw new Error(`${matcherName}() expects a non-negative integer count, got: ${count}`);
+	}
+	const deadline = Date.now() + timeout;
 	const rows = table.rows.locator;
 
-	let reached: boolean;
-	try {
-		const expectation = this.isNot ? baseExpect(rows).not : baseExpect(rows);
-		await expectation.toHaveCount(count, { timeout });
-		reached = true;
-	} catch {
-		reached = false;
+	// With `.not`, a table that is not there has no rows, so it would pass: wait until it is attached.
+	const attached = this.isNot
+		? await table.root
+				.first()
+				.waitFor({ state: "attached", timeout: Math.max(MIN_READ_TIMEOUT, timeout) })
+				.then(
+					() => true,
+					() => false
+				)
+		: true;
+
+	let reached = false;
+	if (attached) {
+		try {
+			const expectation = this.isNot ? baseExpect(rows).not : baseExpect(rows);
+			// A timeout of 0 means no timeout to `toHaveCount`; here, like the other matchers, it is one read.
+			await expectation.toHaveCount(count, { timeout: Math.max(MIN_READ_TIMEOUT, deadline - Date.now()) });
+			reached = true;
+		} catch {
+			reached = false;
+		}
 	}
 
-	const pass = this.isNot ? !reached : reached;
+	// A table that is not there fails both the assertion and its negation.
+	const pass = !attached ? this.isNot : this.isNot ? !reached : reached;
 	const actual = reached ? count : await rows.count().catch(() => undefined);
 	// A broken selector matches no rows; reading the table directly shows why.
 	const diagnostics = pass === this.isNot ? await headerDiagnostics(table, []) : "";
@@ -202,7 +244,7 @@ async function toHaveRowCount(
 			this.utils.matcherHint(matcherName, "table", "count", { isNot: this.isNot }) +
 			"\n\n" +
 			`Expected: ${this.isNot ? "not " : ""}${this.utils.printExpected(count)} body rows\n` +
-			`Received: ${this.utils.printReceived(actual)}\n` +
+			(attached ? `Received: ${this.utils.printReceived(actual)}\n` : "Received: the table is not attached\n") +
 			diagnostics +
 			`Table locator: ${table.root.toString()}\n` +
 			`Timeout: ${timeout}ms`,
@@ -246,7 +288,8 @@ async function toHaveHeaders(
 
 	return {
 		name: matcherName,
-		pass: matched,
+		// A table that was never read fails both the assertion and its negation.
+		pass: poll.read ? matched : this.isNot,
 		expected: headers,
 		actual: keys,
 		timeout,
@@ -254,7 +297,7 @@ async function toHaveHeaders(
 			this.utils.matcherHint(matcherName, "table", "headers", { isNot: this.isNot }) +
 			"\n\n" +
 			`Expected: ${this.isNot ? "not " : ""}${exact ? "exactly " : ""}${this.utils.printExpected(headers)}\n` +
-			`Received: ${this.utils.printReceived(keys)}\n` +
+			(poll.read ? `Received: ${this.utils.printReceived(keys)}\n` : "Received: the table could not be read\n") +
 			(missing.length > 0 && !this.isNot ? `Missing headers: [${missing.join(", ")}]\n` : "") +
 			describeLastError(poll.error) +
 			`Table locator: ${table.root.toString()}\n` +
@@ -297,6 +340,20 @@ async function toHaveCells(
 	}
 
 	const { rowCount, reached } = await pollRowMatch(row, matching, this.isNot ? 0 : 1, deadline);
+	// A predicate that throws never matches, so `.not` would pass on a broken predicate.
+	const errors = this.isNot && reached ? await readPredicateErrors(row.table, cells) : [];
+	if (errors.length > 0) {
+		return uncheckable(this, {
+			matcherName,
+			receiver: "row",
+			argument: "cells",
+			expected: cells,
+			description: `a row not matching ${describeWhere(cells)}`,
+			diagnostics: describePredicateErrors(errors),
+			locator: `Row locator: ${row.locator.toString()}`,
+			timeout,
+		});
+	}
 	const pass = this.isNot ? !reached : reached;
 	const failed = pass === this.isNot;
 	const headers = Object.keys(cells);
@@ -353,16 +410,16 @@ async function toHaveRows(
 
 	const poll = await pollUntil(
 		readTimeout => table.root.evaluate(matchTableRows, request, { timeout: readTimeout }),
-		// With `.not`, an unknown header is not a pass: keep waiting for it to show up.
-		read => matches(read) !== this.isNot && (!this.isNot || read.unknown.length === 0),
+		// With `.not`, an unknown header or a broken predicate is not a pass: keep waiting for it to go away.
+		read => matches(read) !== this.isNot && (!this.isNot || checkableNot(read)),
 		{ keys: [], rows: [], count: 0, matched: [], unknown: [], errors: [] },
 		deadline
 	);
 	const result = poll.value;
 	const matched = matches(result);
 	// A table that was never read, or has an unknown header, cannot be checked: it fails both the
-	// assertion and its negation.
-	const uncheckable = !poll.read || result.unknown.length > 0;
+	// assertion and its negation. With `.not`, so does a broken predicate, which never matches.
+	const uncheckable = !poll.read || result.unknown.length > 0 || (this.isNot && !checkableNot(result));
 	const received = result.rows.map(texts => toRecord(result.keys, texts));
 
 	return {
@@ -378,9 +435,11 @@ async function toHaveRows(
 			rows.map((where, index) => `  [${index}] ${describeWhere(where)}\n`).join("") +
 			(!poll.read
 				? "Received: the table could not be read\n"
-				: this.isNot
-					? `Received: ${result.count} body rows that match\n`
-					: describeRowMismatches(rows, result, received)) +
+				: uncheckable
+					? "Received: a table that cannot be checked\n"
+					: this.isNot
+						? `Received: ${result.count} body rows that match\n`
+						: describeRowMismatches(rows, result, received)) +
 			(result.unknown.length > 0 ? describeUnknown(result.unknown, result.keys) : "") +
 			describePredicateErrors(result.errors) +
 			describeLastError(poll.error) +
@@ -430,7 +489,9 @@ async function toHaveEveryRow(
 	if (conditions.length === 0) {
 		throw new Error(`${matcherName}() requires at least one condition.`);
 	}
-	const checkable = (result: EngineMatrixResult): boolean => result.unknown.length === 0 && result.count > 0;
+	// With `.not`, a broken predicate never matches, so it would pass: it cannot be checked.
+	const checkable = (result: EngineMatrixResult): boolean =>
+		result.unknown.length === 0 && result.count > 0 && (!this.isNot || checkableNot(result));
 	const every = (result: EngineMatrixResult): boolean => (result.matches[0]?.length ?? 0) === result.count;
 
 	const poll = await pollMatrix(
@@ -463,7 +524,9 @@ async function toHaveEveryRow(
 					? "Received: a table that cannot be checked\n" + describeUnknown(result.unknown, result.keys)
 					: result.count === 0
 						? "Received: the table has no body rows\n"
-						: `Received: ${result.count - mismatches.length} of ${result.count} body rows match\n`) +
+						: !canCheck
+							? "Received: a table that cannot be checked\n"
+							: `Received: ${result.count - mismatches.length} of ${result.count} body rows match\n`) +
 			(body === undefined
 				? ""
 				: "Body rows that do not match:\n" +
@@ -506,7 +569,7 @@ async function toHaveColumnValues(
 	const matches = (result: EngineMatchResult): boolean =>
 		result.unknown.length === 0 && result.count === values.length && result.matched.every(Boolean);
 	const accept = (result: EngineMatchResult): boolean =>
-		matches(result) !== this.isNot && (!this.isNot || result.unknown.length === 0);
+		matches(result) !== this.isNot && (!this.isNot || checkableNot(result));
 
 	let poll: PollOutcome<EngineMatchResult>;
 	if (anyOrder) {
@@ -522,7 +585,7 @@ async function toHaveColumnValues(
 		);
 	}
 	const result = poll.value;
-	const uncheckable = !poll.read || result.unknown.length > 0;
+	const uncheckable = !poll.read || result.unknown.length > 0 || (this.isNot && !checkableNot(result));
 	const pass = uncheckable ? this.isNot : matches(result);
 	const received =
 		pass === this.isNot && !uncheckable ? await readValues(table, header).catch(() => undefined) : undefined;
@@ -541,8 +604,9 @@ async function toHaveColumnValues(
 			`[${values.map(describeMatcher).join(", ")}]\n` +
 			(!poll.read
 				? "Received: the table could not be read\n"
-				: result.unknown.length > 0
-					? "Received: a table that cannot be checked\n" + describeUnknown(result.unknown, result.keys)
+				: uncheckable
+					? "Received: a table that cannot be checked\n" +
+						(result.unknown.length > 0 ? describeUnknown(result.unknown, result.keys) : "")
 					: describeReceivedValues(values, result, received, anyOrder, this.isNot)) +
 			describePredicateErrors(result.errors) +
 			describeLastError(poll.error) +
@@ -665,7 +729,8 @@ async function pollSorted(
 		},
 		read => {
 			const { check, sorted } = evaluate(read);
-			return check.error === undefined && sorted !== isNot;
+			// A `compare` that throws won't stop throwing: fail at once.
+			return check.fatal === true || (check.error === undefined && sorted !== isNot);
 		},
 		{ column: { keys: [], values: null }, ariaSort: null },
 		deadline
@@ -852,12 +917,15 @@ async function checkRowState(
 	};
 }
 
-/** The tests and tables that already have a table attachment, so retries inside a test attach it once. */
-const attachedTables = new Set<string>();
+/**
+ * The tables that already have a table attachment in the running test (and retry), so failures inside a
+ * test attach each table once. Cleared when another test runs, so it doesn't grow for the life of a worker.
+ */
+const attached = { test: "", tables: new Set<string>() };
 
 /**
  * Attaches the body rows of `table` to the report of the running test, as a Markdown table, once per
- * test and table. Does nothing outside a test.
+ * test and table. Does nothing outside a test, or for a table that is not attached.
  */
 async function attachTable(table: TableLocator): Promise<void> {
 	let info: TestInfo;
@@ -866,11 +934,18 @@ async function attachTable(table: TableLocator): Promise<void> {
 	} catch {
 		return;
 	}
-	const key = `${info.testId}|${info.retry}|${table.root.toString()}`;
-	if (attachedTables.has(key)) return;
-	attachedTables.add(key);
+	const current = `${info.testId}|${info.retry}`;
+	if (attached.test !== current) {
+		attached.test = current;
+		attached.tables.clear();
+	}
+	const key = table.root.toString();
+	if (attached.tables.has(key)) return;
+	// A table that is not there has nothing to attach; don't wait for it.
+	if ((await table.root.count()) === 0) return;
 	const body = await readBody(table);
 	if (body === undefined) return;
+	attached.tables.add(key);
 	await info.attach(`table ${table.root.toString()}`, {
 		body: formatMarkdown(body, { maxRows: 1_000 }),
 		contentType: "text/markdown",
@@ -1068,15 +1143,19 @@ async function headerDiagnostics(table: TableLocator, headers: readonly string[]
  * uses a variable from the test), or `""` if there are none or `where` has no predicate.
  */
 async function predicateDiagnostics(table: TableLocator, where: RowWhere<string>): Promise<string> {
+	return describePredicateErrors(await readPredicateErrors(table, where));
+}
+
+/** The problems with the `predicate` conditions of `where` on the body rows, or `[]` if it has no predicate. */
+async function readPredicateErrors(table: TableLocator, where: RowWhere<string>): Promise<string[]> {
 	const conditions = serializeWhere(where);
-	if (!conditions.some(condition => hasPredicate(condition.m))) return "";
+	if (!conditions.some(condition => hasPredicate(condition.m))) return [];
 	// `_config` is private to TableLocator; the matchers of this package read it to query the engine.
 	const request: EngineFindRequest = { op: "find", cfg: table["_config"], where: conditions };
 	try {
-		const result = await table.root.evaluate(findTableRows, request, { timeout: 1_000 });
-		return describePredicateErrors(result.errors);
+		return (await table.root.evaluate(findTableRows, request, { timeout: DIAGNOSTICS_TIMEOUT })).errors;
 	} catch {
-		return "";
+		return [];
 	}
 }
 
@@ -1089,33 +1168,6 @@ function hasPredicate(matcher: SerializedMatcher): boolean {
 
 function describePredicateErrors(errors: readonly string[]): string {
 	return errors.map(error => `${error}\n`).join("");
-}
-
-/**
- * Waits until the table has every header in `headers`, up to `deadline`. Returns the diagnostics for the
- * headers that are still unknown at the deadline, or `""` once they are all known.
- */
-async function waitForHeaders(table: TableLocator, headers: readonly string[], deadline: number): Promise<string> {
-	const missing = (keys: readonly string[]): string[] =>
-		headers.filter(header => !keys.includes(normalizeLine(header)));
-	const poll = await pollUntil(
-		readTimeout => table.headerKeys({ timeout: readTimeout }),
-		keys => missing(keys).length === 0,
-		[] as string[],
-		deadline
-	);
-	const unknown = missing(poll.value);
-	return unknown.length === 0 ? "" : describeUnknown(unknown, poll.value) + describeLastError(poll.error);
-}
-
-function describeUnknown(unknown: readonly (string | number)[], available: readonly string[]): string {
-	return (
-		unknown
-			.map(header =>
-				typeof header === "number" ? `Column ${header} does not exist.\n` : `Header "${header}" not found.\n`
-			)
-			.join("") + `Available headers: [${available.join(", ")}]\n`
-	);
 }
 
 /** Reads the matrix of `rows` until `done` accepts it, or until `deadline`. */
@@ -1193,14 +1245,14 @@ async function matchUnordered(
 		table,
 		rows.map(serializeWhere),
 		Date.now() + timeout,
-		// With `.not`, an unknown header is not a pass: keep waiting for it to show up.
+		// With `.not`, an unknown header or a broken predicate is not a pass: keep waiting for it to go away.
 		read => {
 			const result = fromMatrix(read);
-			return matches(result) !== state.isNot && (!state.isNot || result.unknown.length === 0);
+			return matches(result) !== state.isNot && (!state.isNot || checkableNot(result));
 		}
 	);
 	const result = fromMatrix(poll.value);
-	const uncheckable = !poll.read || result.unknown.length > 0;
+	const uncheckable = !poll.read || result.unknown.length > 0 || (state.isNot && !checkableNot(result));
 	const pass = uncheckable ? state.isNot : matches(result);
 	const failed = pass === state.isNot;
 	const body = failed && !uncheckable ? await readBody(table) : undefined;
@@ -1221,9 +1273,9 @@ async function matchUnordered(
 			rows.map((where, index) => `  [${index}] ${describeWhere(where)}\n`).join("") +
 			(!poll.read
 				? "Received: the table could not be read\n"
-				: `Received: ${result.count} body rows${
-						state.isNot && !uncheckable ? `, and every entry matches a different one` : ""
-					}\n`) +
+				: uncheckable
+					? "Received: a table that cannot be checked\n"
+					: `Received: ${result.count} body rows${state.isNot ? `, and every entry matches a different one` : ""}\n`) +
 			(state.isNot || uncheckable
 				? ""
 				: missing
@@ -1289,10 +1341,12 @@ function range(count: number): number[] {
 	return Array.from({ length: count }, (_value, index) => index);
 }
 
-/** The headers that have a condition. */
-function conditionHeaders(where: RowWhere<string>): string[] {
-	const entries: [string, CellMatcher | undefined][] = Object.entries(where);
-	return entries.filter(entry => entry[1] !== undefined).map(entry => entry[0]);
+/**
+ * Whether a `.not` assertion can trust this read: no unknown header and no broken predicate. Both never
+ * match, so the negation would pass on them.
+ */
+function checkableNot(result: { unknown: readonly unknown[]; errors: readonly string[] }): boolean {
+	return result.unknown.length === 0 && result.errors.length === 0;
 }
 
 /**
@@ -1378,6 +1432,8 @@ type SortCheck = {
 	error?: string;
 	/** Whether the error is an unknown header. */
 	unknown?: boolean;
+	/** Whether the error won't go away by reading again, such as a `compare` that throws. */
+	fatal?: boolean;
 	/** The cell texts of the column. */
 	values?: string[];
 	/** Index of the first row that should come after the next row. */
@@ -1412,10 +1468,21 @@ function checkSorted(read: EngineValues, column: string | number, sort: SortSett
 		comparator = (a, b) => (parsed.get(a) ?? 0) - (parsed.get(b) ?? 0);
 	}
 
-	const direction = order === "asc" ? 1 : -1;
+	return findOutOfOrder(values, comparator, order === "asc" ? 1 : -1);
+}
+
+/** The first row of `values` that should come after the next row, if any. A `comparator` that throws is fatal. */
+function findOutOfOrder(values: string[], comparator: (a: string, b: string) => number, direction: number): SortCheck {
 	let previous: string | undefined;
 	for (const [i, value] of values.entries()) {
-		if (previous !== undefined && comparator(previous, value) * direction > 0) return { values, outOfOrder: i - 1 };
+		let comparison: number;
+		try {
+			comparison = previous === undefined ? 0 : comparator(previous, value);
+		} catch (error) {
+			const problem = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+			return { error: `compare threw ${problem}`, values, fatal: true };
+		}
+		if (comparison * direction > 0) return { values, outOfOrder: i - 1 };
 		previous = value;
 	}
 	return { values };

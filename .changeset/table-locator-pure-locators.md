@@ -24,7 +24,10 @@ Add `TableLocator`: a type-safe table API that only returns Playwright locators,
 - Table matchers: `toHaveRow`, `toHaveRowCount`, `toHaveHeaders`, `toHaveRows` and `toBeSortedBy` (text, number and date sorting, a custom `compare`, and an optional `aria-sort` check).
 - Row matcher: `toHaveCells`.
 - They are exported as `tableMatchers` and as a pre-extended `expect`.
-- Negated `toHaveRow`, `toHaveCells` and `toHaveRows` assertions wait for the headers and fail on an unknown header, so a typo never passes.
+- Negated `toHaveRow`, `toHaveCells` and `toHaveRows` assertions wait for the headers and fail on an unknown header, so a typo never passes. They also fail on a `predicate` that throws, which matches no row.
+- `not.toHaveHeaders` and `not.toHaveRowCount` fail on a table that is not there, instead of passing.
+- A `timeout` of `0` reads once in every matcher, and a negative or `NaN` timeout is an error. `toBeSortedBy` fails at once when `compare` throws.
+- A failure is reported soon after the timeout: the reads that describe it are short, and a table that is not there is not attached.
 
 **Table structure**
 

@@ -49,6 +49,8 @@ test.describe("AG Grid", () => {
 	});
 
 	test("findRow scrolls to a row that is not rendered", async ({ page }) => {
+		// Scrolls a grid of 200 rows
+		test.slow();
 		const cars = await openCars(page);
 		await expect(cars.row({ Model: "Model 150" }).locator).toHaveCount(0);
 
@@ -386,6 +388,8 @@ test.describe("navigation limits", () => {
 	}
 
 	test("maxPages reads only the first pages", async ({ page }) => {
+		// Goes through the pages five times
+		test.slow();
 		const orders = await openOrders(page, 2);
 
 		const rows = await orders.toJson({ allRows: true, columns: ["Id"] });
@@ -396,8 +400,7 @@ test.describe("navigation limits", () => {
 		const row = await orders.findRow({ Id: "7" });
 		await expect(row.cell("Amount")).toHaveText("$70");
 		expect(await errorMessage(() => orders.findRow({ Id: "12" }))).toContain(
-			'TableLocator.findRow() found no row matching { "Id": "12" } on 2 pages (0 scroll steps on the last page; ' +
-				"paginate.maxPages is 2)."
+			'TableLocator.findRow() found no row matching { "Id": "12" } on 2 pages (paginate.maxPages is 2).'
 		);
 	});
 
@@ -418,7 +421,7 @@ test.describe("navigation limits", () => {
 		expect(rows.length).toBeLessThan(150);
 		expect(rows.map(row => row.Id)).toEqual(ids(rows.length));
 		expect(await errorMessage(() => people.findRow({ "First name": "Person 150" }))).toContain(
-			"on 1 page (2 scroll steps on the last page; scroll.maxSteps is 2)."
+			'found no row matching { "First name": "Person 150" } (2 scroll steps; scroll.maxSteps is 2).'
 		);
 	});
 

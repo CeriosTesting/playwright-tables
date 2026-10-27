@@ -4,6 +4,8 @@
 
 `TableLocator`: add pagination and virtual scrolling, grid presets, row interactions, footer rows, typed matcher arguments and table attachments on failure.
 
+**Requires `@playwright/test` 1.45 or later** (the peer dependency was `^1.40.0`).
+
 **Pagination and virtual scrolling**
 
 - New table options:
@@ -12,21 +14,26 @@
   - `loading`: a loading indicator.
 - These options accept a `Locator`, or a function that finds it from the table root.
 - `findRow(where)` searches every page and scroll position, and returns a row locator once the table shows the row.
-- `toJson({ allRows: true })` reads every row on every page and scroll position. Rows seen more than once are read once, matched by their row key or text, and kept in order.
+- `toJson({ allRows: true })` reads every row on every page and scroll position. A row seen at several scroll positions is read once, matched by its row key, or else by its text and how often that text came before it in the view, so identical rows are all kept. Rows with a position key (`aria-rowindex`, `row-index`, `data-rowindex`, `data-index`) are ordered by it; other rows keep the order they were shown in.
 - `totalRowCount()` and the `toHaveTotalRowCount` matcher count every row. They use `aria-rowcount` when the grid declares it, and otherwise read every row.
 - `paginate.maxPages` and `scroll.maxSteps` limit how many pages and scroll steps are read, such as only the first 3 pages. Without them, every page is read.
 - Reaching the timeout before the end of the table is an error that says how many rows were read, so part of the rows is never returned as all of them.
+- Navigation first waits until the table settles (and the `loading` indicator is hidden), so a table that is still loading is not read as empty. After going to the next page, it waits until the table has rows again, so the empty table of a page that is loading is not read as a page.
+- A `next` or `first` control that matches twice (a pager above and below the table) uses the first one. A control is disabled with the `disabled` attribute, `aria-disabled="true"` or the `disabled` class, also on an element around it (Bootstrap pagers).
+- Scrolling is instant, also in a container with `scroll-behavior: smooth`.
+- `findRow` fails at once on a condition on an unknown header, with the available headers, and reports the errors of a `predicate` that throws.
+- `totalRowCount()` and `toJson({ allRows: true })` leave the table on its last page. Without `paginate.first`, the next read starts on the page in view.
 
 **Grid presets**
 
-- `presets.agGrid()`, `presets.muiDataGrid()`, `presets.angularMaterial({ paginator })` and `presets.tanstackVirtual({ container })`.
+- `presets.agGrid()`, `presets.muiDataGrid()`, `presets.angularMaterial({ paginator })` and `presets.tanstackVirtual({ container })`. The `paginator` is a `Locator` or a function that finds it from the table root.
 - The AG Grid preset is tested against AG Grid Community 36.
 
 **Row interactions**
 
 - `row.fill(values)` fills inputs, selects, checkboxes and in-place cell editors (double-click, fill, then commit).
-- `row.select()`, `row.deselect()` and `row.isSelected()`, with the `toBeSelected` row matcher.
-- For tree grids: `row.expand()`, `row.collapse()`, `row.isExpanded()` and `row.level()`, with the `toBeExpanded` row matcher.
+- `row.select()`, `row.deselect()` and `row.isSelected()`, with the `toBeSelected` row matcher. A row with `aria-selected` is selected by it. The checkbox that selects a row is the one in a column without header text, or the new `select` table option; a checkbox in a column such as "Active" is data, and is never ticked to select the row.
+- For tree grids: `row.expand()`, `row.collapse()`, `row.isExpanded()` and `row.level()`, with the `toBeExpanded` row matcher. They click the `toggle` you pass (and fail if it doesn't show up), the element with `aria-expanded` in the row (not a menu button), or the button in the first cell of a row with `aria-expanded`, and otherwise press ArrowRight or ArrowLeft. Other buttons in the row are never clicked.
 
 **Footer rows**
 
@@ -43,5 +50,4 @@
 
 **Other changes**
 
-- The peer dependency is now `@playwright/test` `^1.45.0` (it was `^1.40.0`).
 - The README now leads with `TableLocator`. The `PlaywrightTable` docs moved to `docs/playwright-table.md`. `PlaywrightTable` is in maintenance mode: it still gets fixes, and new features land in `TableLocator`.

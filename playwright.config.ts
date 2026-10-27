@@ -41,6 +41,7 @@ export default defineConfig({
 				"table-data.test.ts",
 				"table-grids.test.ts",
 				"table-selector-engine.test.ts",
+				"table-edge-cases.test.ts",
 			],
 		},
 		{
@@ -54,6 +55,7 @@ export default defineConfig({
 				"table-data.test.ts",
 				"table-grids.test.ts",
 				"table-selector-engine.test.ts",
+				"table-edge-cases.test.ts",
 			],
 		},
 		/* Tests against the built bundles (run `npm run build` first). Separate projects get separate

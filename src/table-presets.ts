@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test";
 
-import type { TableLocatorOptions } from "./table-locator.types";
+import type { LocatorRef, TableLocatorOptions } from "./table-locator.types";
+import { resolveRef } from "./table-navigation";
 import { DEFAULT_IGNORE } from "./table-selector-engine";
 
 /**
@@ -80,13 +81,14 @@ function muiDataGrid(): TablePreset {
 /**
  * Options for an Angular Material table (`mat-table`, as a native `<table>` or with the `<mat-table>`
  * elements), in both the MDC (`mat-mdc-*`) and the legacy class names. The "no data" row is not a body
- * row, and footer rows are footer rows. With `paginator`, the `mat-paginator` that pages the table.
+ * row, and footer rows are footer rows. With `paginator`, the `mat-paginator` that pages the table: a
+ * `Locator`, or a function that finds it from the table root.
  *
  * @example
  * const orders = defineTable(page.locator("table[mat-table]"), presets.angularMaterial({ paginator: page.locator("mat-paginator") }));
  * const row = await orders.findRow({ Id: "42" });
  */
-function angularMaterial(options?: { paginator?: Locator }): TablePreset {
+function angularMaterial(options?: { paginator?: LocatorRef }): TablePreset {
 	const paginator = options?.paginator;
 	return {
 		header: {
@@ -103,8 +105,8 @@ function angularMaterial(options?: { paginator?: Locator }): TablePreset {
 			? {}
 			: {
 					paginate: {
-						next: button(paginator, "Next page"),
-						first: button(paginator, "First page"),
+						next: (root: Locator) => button(resolveRef(paginator, root), "Next page"),
+						first: (root: Locator) => button(resolveRef(paginator, root), "First page"),
 					},
 				}),
 		// The sort header arrow is drawn, but some versions put text in it.
