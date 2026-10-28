@@ -682,7 +682,7 @@ await expect(orders).toHaveTotalRowCount(312);
 
 | `scroll` option | Description                                                                                                                                                        |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `container`     | The element that scrolls. Defaults to the table root.                                                                                                              |
+| `container`     | The element that scrolls (an error names the right one if it can't). Defaults to the table root.                                                                   |
 | `step`          | Pixels per step. Defaults to 90% of the container height.                                                                                                          |
 | `rowKey`        | The attribute that identifies a row, such as `"data-id"`.                                                                                                          |
 | `settle`        | After each scroll (and two animation frames), how long the table must stay the same, in milliseconds. Defaults to 50. `0` skips it, but still waits for `loading`. |

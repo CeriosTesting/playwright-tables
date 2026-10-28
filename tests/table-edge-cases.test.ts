@@ -788,3 +788,38 @@ test.describe("input values", () => {
 		expect(await people.headerKeys()).toEqual(["Name", "Email", "Notes", "Active", "Role"]);
 	});
 });
+
+test.describe("scroll container", () => {
+	const scrolling = `
+		<div id="wrapper">
+			<div class="viewport" style="height: 100px; overflow: auto">
+				<table id="t"><thead><tr><th>Id</th></tr></thead><tbody>
+					${Array.from({ length: 30 }, (_value, i) => `<tr><td>${i + 1}</td></tr>`).join("")}
+				</tbody></table>
+			</div>
+		</div>
+	`;
+
+	test("a container that can never scroll is an error that names the element that does", async ({ page }) => {
+		await page.setContent(scrolling);
+		const wrong = defineTable(page.locator("#t"), { scroll: { container: page.locator("#wrapper") } });
+		const root = defineTable(page.locator("#t"), { scroll: {} });
+
+		const message = await errorMessage(() => wrong.toJson({ allRows: true, timeout: 3_000 }));
+		expect(message).toContain("the scroll container can't scroll (overflow-y: visible)");
+		expect(message).toContain("such as div.viewport.");
+		// Without scroll.container, the table root is the container
+		const rootMessage = await errorMessage(() => root.totalRowCount({ timeout: 3_000 }));
+		expect(rootMessage).toContain("such as div.viewport.");
+		expect(rootMessage).toContain("(the table root, as scroll.container is not set)");
+	});
+
+	test("a container that can scroll works, also when its rows fit", async ({ page }) => {
+		await page.setContent(scrolling);
+		const right = defineTable(page.locator("#t"), { scroll: { container: page.locator(".viewport") } });
+		expect(await right.totalRowCount()).toBe(30);
+
+		await page.locator(".viewport").evaluate(viewport => (viewport.style.height = "2000px"));
+		expect(await right.totalRowCount()).toBe(30);
+	});
+});

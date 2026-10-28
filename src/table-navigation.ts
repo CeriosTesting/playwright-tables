@@ -215,7 +215,52 @@ export class TableNavigator {
 	}
 
 	private async scrollToTop(deadline: number): Promise<void> {
+		await this.checkScrollable(deadline);
 		await this.scrollTo(null, deadline);
+	}
+
+	/**
+	 * @throws Error if the scroll container can never scroll (`overflow-y: visible` or `clip`), which would
+	 * read only the rows in view, naming the nearest element around or inside it that does scroll.
+	 */
+	private async checkScrollable(deadline: number): Promise<void> {
+		const problem = await this.container().evaluate(
+			(element: Element) => {
+				// The page itself scrolls with any overflow.
+				if (element === document.scrollingElement) return null;
+				const overflow = getComputedStyle(element).overflowY;
+				if (overflow !== "visible" && overflow !== "clip") return null;
+				// This function runs in the browser, so it cannot use module functions.
+				const scrolls = (el: Element): boolean =>
+					/^(auto|scroll|overlay)$/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight;
+				let hint: Element | null = null;
+				for (let el = element.parentElement; el !== null && hint === null; el = el.parentElement) {
+					if (el !== document.scrollingElement && scrolls(el)) hint = el;
+				}
+				hint ??= Array.from(element.querySelectorAll("*")).find(scrolls) ?? null;
+				const name =
+					hint === null
+						? null
+						: hint.localName +
+							(hint.id === "" ? "" : "#" + hint.id) +
+							Array.from(hint.classList)
+								.slice(0, 2)
+								.map(name => "." + name)
+								.join("");
+				return { overflow, hint: name };
+			},
+			undefined,
+			{ timeout: remaining(deadline) }
+		);
+		if (problem === null) return;
+		throw new Error(
+			`TableLocator: the scroll container can't scroll (overflow-y: ${problem.overflow}), so only the rows in view ` +
+				`would be read. Point scroll.container at the element that scrolls` +
+				(problem.hint === null ? "." : `, such as ${problem.hint}.`) +
+				`\nScroll container: ${this.container().toString()}` +
+				(this.scroll?.container === undefined ? " (the table root, as scroll.container is not set)" : "") +
+				`\nTable locator: ${this.host.root.toString()}`
+		);
 	}
 
 	/** Scrolls one step down. Returns `false` at the bottom. */

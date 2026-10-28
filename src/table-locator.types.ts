@@ -324,7 +324,10 @@ export type PaginateOptions = {
  * defineTable(page.getByRole("grid"), { aria: true, scroll: { container: root => root.locator(".viewport") } });
  */
 export type ScrollOptions = {
-	/** The element that scrolls. Defaults to the table root. */
+	/**
+	 * The element that scrolls. Defaults to the table root. A container that can never scroll
+	 * (`overflow-y: visible`) is an error that names the element around or inside it that does.
+	 */
 	container?: LocatorRef;
 	/** How far to scroll per step, in pixels. Defaults to 90% of the container height. */
 	step?: number;
