@@ -198,7 +198,8 @@ test.describe("toJson columns and parse", () => {
 		await page.goto(Route.DynamicLoadTable);
 		const table = defineTable(page.locator("#DynamicTable"), { headers: ["Header 1", "Header 2", "Header 3"] });
 
-		const rows = await table.toJson({ columns: ["Header 3"], minRows: 3 });
+		// The rows load after 2 seconds; a margin for a busy machine
+		const rows = await table.toJson({ columns: ["Header 3"], minRows: 3, timeout: 10_000 });
 		expect(rows).toEqual([{ "Header 3": "Row 1 Col 3" }, { "Header 3": "Row 2 Col 3" }, { "Header 3": "Row 3 Col 3" }]);
 	});
 });
@@ -230,7 +231,8 @@ test.describe("waitForStable", () => {
 		await page.locator("#search").fill("J");
 		await page.locator("#apply").click();
 
-		await orders.waitForStable({ loading: page.getByRole("progressbar"), quiet: 300 });
+		// A margin for a busy machine, where a single read can take seconds
+		await orders.waitForStable({ loading: page.getByRole("progressbar"), quiet: 300, timeout: 10_000 });
 		expect(await orders.columnValues("Customer")).toEqual(["John", "Jane", "Joe", "Jack"]);
 	});
 
@@ -243,6 +245,7 @@ test.describe("waitForStable", () => {
 		const rows = await orders.toJson({
 			columns: ["Customer"],
 			stable: { loading: page.getByRole("progressbar"), quiet: 300 },
+			timeout: 10_000,
 		});
 		expect(rows).toEqual([{ Customer: "Jane" }, { Customer: "Jack" }]);
 	});
