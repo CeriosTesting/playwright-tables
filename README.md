@@ -650,12 +650,13 @@ await expect(orders).toHaveTotalRowCount(312);
 
 `findRow()`, `totalRowCount()` and `toJson({ allRows: true })` take a `timeout` for the whole search, 30 seconds by default. They first wait until the table settles (and `loading` is hidden), so a table that is still loading isn't read as empty. `totalRowCount()` and `toJson({ allRows: true })` leave the table on its last page, scrolled down: without `paginate.first`, the next read starts there.
 
-| `paginate` option | Description                                                                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `next`            | The control that goes to the next page. Required.                                                                                     |
-| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless it is disabled.                                     |
-| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled`, `aria-disabled="true"` or in a `.disabled` element. |
-| `maxPages`        | Read only the first pages: `3` reads at most 3. Defaults to every page.                                                               |
+| `paginate` option | Description                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `next`            | The control that goes to the next page. Required.                                                                                                            |
+| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless the table shows the first page (it is disabled, or `isFirstPage` says so). |
+| `isFirstPage`     | `(first) => Promise<boolean>`, for a `first` that stays enabled on page 1: no click there, and after a click, wait until it says so.                         |
+| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled`, `aria-disabled="true"` or in a `.disabled` element.                        |
+| `maxPages`        | Read only the first pages: `3` reads at most 3. Defaults to every page.                                                                                      |
 
 | `scroll` option | Description                                                                                                                                                        |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -665,7 +666,7 @@ await expect(orders).toHaveTotalRowCount(312);
 | `settle`        | After each scroll (and two animation frames), how long the table must stay the same, in milliseconds. Defaults to 50. `0` skips it, but still waits for `loading`. |
 | `maxSteps`      | Scroll at most this many steps per page. Defaults to scrolling to the bottom.                                                                                      |
 
-After each page change, the table must change, have rows again and then settle; a `next` that doesn't change the table fails with a clear error. A `next` or `first` that matches twice (a pager above and below the table) uses the first one.
+After clicking `first`, the table must change. A `first` that stays enabled on page 1 doesn't change it, so without `isFirstPage` that wait ends after 2 seconds (0.5 seconds for a table with a `loading` indicator that doesn't show). After each page change, the table must change, have rows again and then settle; a `next` that doesn't change the table fails with a clear error. A `next` or `first` that matches twice (a pager above and below the table) uses the first one.
 
 `maxPages` and `maxSteps` limit what is read on purpose: with `maxPages: 3`, `toJson({ allRows: true })` returns the rows of the first 3 pages and `findRow()` searches them, without an error. `totalRowCount()` counts them too, unless the grid declares `aria-rowcount`: that is the total of the whole grid.
 

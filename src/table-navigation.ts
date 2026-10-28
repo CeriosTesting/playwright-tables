@@ -13,6 +13,18 @@ const PAGE_SETTLE = 200;
 const CHANGE_INTERVAL = 50;
 
 /**
+ * How long the table may take to change after clicking `paginate.first`, in milliseconds. A table that
+ * already shows the first page doesn't change, so this is how long that case waits.
+ */
+const FIRST_PAGE_WINDOW = 2_000;
+
+/**
+ * For a table with a `loading` indicator: how long it may take to change, or to show the indicator, after
+ * clicking `paginate.first`, in milliseconds.
+ */
+const FIRST_PAGE_CUTOFF = 500;
+
+/**
  * What {@link TableNavigator} needs from the table it navigates.
  * @internal
  */
@@ -23,6 +35,8 @@ export type NavigationHost = {
 	/** A fingerprint of the header keys and body cell texts, which changes when the table does, and the number of body rows. */
 	fingerprint(timeout: number): Promise<{ rows: number; print: string }>;
 	waitForStable(options: StableOptions): Promise<void>;
+	/** Whether the loading indicator is visible now; `false` for a table without one. */
+	loadingShown(): Promise<boolean>;
 };
 
 /**
@@ -107,17 +121,74 @@ export class TableNavigator {
 		return pages + (notes.length === 0 ? "" : ` (${notes.join("; ")})`);
 	}
 
+	/**
+	 * Clicks `paginate.first`, unless the table shows the first page: with `paginate.isFirstPage`, as it
+	 * says, and otherwise when the control is disabled. Then waits until the table shows the first page.
+	 */
 	private async goToFirstPage(deadline: number): Promise<void> {
 		const first = this.paginate?.first;
 		if (first === undefined) return;
+		const resolved = resolveRef(first, this.host.root);
 		// A pager above and below the table matches twice, and both do the same.
-		const control = resolveRef(first, this.host.root).first();
-		if (await isUnavailable(control, deadline)) return;
+		const control = resolved.first();
+		const isFirstPage = this.paginate?.isFirstPage;
+		if (isFirstPage === undefined ? await isUnavailable(control, deadline) : await isFirstPage(resolved)) return;
 		const before = await this.host.fingerprint(remaining(deadline));
 		await control.click({ timeout: remaining(deadline) });
-		// Already on the first page, the control may still be enabled: a table that doesn't change is fine.
-		await this.waitForChange(before.print, Math.min(deadline, Date.now() + 2_000), false);
+		if (isFirstPage === undefined) {
+			await this.waitForFirstPageChange(before.print, deadline);
+		} else {
+			await this.waitForFirstPage(resolved, isFirstPage, deadline);
+		}
 		await this.settle(PAGE_SETTLE, deadline);
+	}
+
+	/**
+	 * Waits until `isFirstPage` says the table shows the first page.
+	 * @throws Error at `deadline` if it never does.
+	 */
+	private async waitForFirstPage(
+		first: Locator,
+		isFirstPage: (first: Locator) => Promise<boolean>,
+		deadline: number
+	): Promise<void> {
+		let lastError: unknown;
+		for (;;) {
+			try {
+				if (await isFirstPage(first)) return;
+				lastError = undefined;
+			} catch (error) {
+				lastError = error;
+			}
+			if (Date.now() >= deadline) break;
+			await new Promise(resolve => setTimeout(resolve, CHANGE_INTERVAL));
+		}
+		throw new Error(
+			`TableLocator: the table did not show the first page after clicking paginate.first ` +
+				`(paginate.isFirstPage stayed false).\n` +
+				describeLastError(lastError) +
+				`First page locator: ${first.toString()}\n` +
+				`Table locator: ${this.host.root.toString()}`
+		);
+	}
+
+	/**
+	 * After clicking `paginate.first` without `paginate.isFirstPage`: waits for the table to change, which it
+	 * doesn't when it already showed the first page and the control stays enabled. So the wait has a window:
+	 * {@link FIRST_PAGE_WINDOW}, or, for a table with a `loading` indicator, {@link FIRST_PAGE_CUTOFF} as long
+	 * as the indicator doesn't show (a page that loads shows it).
+	 */
+	private async waitForFirstPageChange(before: string, deadline: number): Promise<void> {
+		const window = Math.min(deadline, Date.now() + FIRST_PAGE_WINDOW);
+		const cutoff = this.host.loading === undefined ? window : Math.min(window, Date.now() + FIRST_PAGE_CUTOFF);
+		let loading = false;
+		for (;;) {
+			const current = await this.host.fingerprint(remaining(window)).catch(() => undefined);
+			if (current !== undefined && current.print !== before) return;
+			if (!loading && this.host.loading !== undefined) loading = await this.host.loadingShown().catch(() => false);
+			if (Date.now() >= (loading ? window : cutoff)) return;
+			await new Promise(resolve => setTimeout(resolve, CHANGE_INTERVAL));
+		}
 	}
 
 	private async isLastPage(deadline: number): Promise<boolean> {

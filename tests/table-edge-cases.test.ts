@@ -621,3 +621,102 @@ test.describe("PlaywrightTable", () => {
 		expect(await table.getJson()).toEqual([{ Name: "John" }]);
 	});
 });
+
+test.describe("going to the first page", () => {
+	/**
+	 * A paged table whose First button never disables, as some custom pagers do. With `delay`, a page loads
+	 * that many milliseconds after a click, behind a spinner. The pager marks the current page with
+	 * `aria-current`.
+	 */
+	async function openPager(page: Page, pages: string[][], delay = 0): Promise<void> {
+		await page.setContent(`
+			<button id="first">First</button><button id="next">Next</button>
+			<span id="current" aria-current="page">1</span>
+			<div id="spinner" hidden>Loading…</div>
+			<table id="t"><thead><tr><th>Id</th></tr></thead><tbody></tbody></table>
+			<script>
+				(() => {
+					const pages = ${JSON.stringify(pages)};
+					let current = 0;
+					function show(index) {
+						const load = () => {
+							current = index;
+							document.querySelector("tbody").innerHTML = pages[current].map(id => "<tr><td>" + id + "</td></tr>").join("");
+							document.getElementById("current").textContent = String(current + 1);
+							document.getElementById("next").disabled = current === pages.length - 1;
+							document.getElementById("spinner").hidden = true;
+						};
+						if (${delay} === 0) return load();
+						document.getElementById("spinner").hidden = false;
+						setTimeout(load, ${delay});
+					}
+					document.getElementById("first").addEventListener("click", () => { if (current !== 0) show(0); });
+					document.getElementById("next").addEventListener("click", () => show(current + 1));
+					show(0);
+				})();
+			</script>
+		`);
+	}
+
+	const pages = [["1", "2"], ["3", "4"], ["5"]];
+
+	test("on page 1, a First button that stays enabled costs the 2 second window, unless a signal says so", async ({
+		page,
+	}) => {
+		await openPager(page, [["1"]], 300);
+		await expect(defineTable(page.locator("#t"))).toHaveRow({ Id: "1" });
+		const paginate = { next: page.locator("#next"), first: page.locator("#first") };
+		const timed = async (table: ReturnType<typeof defineTable>): Promise<number> => {
+			const started = Date.now();
+			expect(await table.totalRowCount()).toBe(1);
+			return Date.now() - started;
+		};
+
+		const plain = await timed(defineTable(page.locator("#t"), { paginate }));
+		const withLoading = await timed(defineTable(page.locator("#t"), { paginate, loading: page.locator("#spinner") }));
+		const withIsFirstPage = await timed(
+			defineTable(page.locator("#t"), {
+				paginate: { ...paginate, isFirstPage: async () => (await page.locator("#current").textContent()) === "1" },
+			})
+		);
+		expect(plain).toBeGreaterThanOrEqual(1_900);
+		// The spinner didn't show, so the wait ends at the 0.5 second cut-off; isFirstPage skips the click
+		expect(withLoading).toBeLessThan(plain - 1_000);
+		expect(withIsFirstPage).toBeLessThan(plain - 1_000);
+	});
+
+	test("isFirstPage is waited for after a jump back to page 1", async ({ page }) => {
+		await openPager(page, pages, 300);
+		const table = defineTable(page.locator("#t"), {
+			paginate: {
+				next: page.locator("#next"),
+				first: page.locator("#first"),
+				isFirstPage: async () => (await page.locator("#current").textContent()) === "1",
+			},
+			loading: page.locator("#spinner"),
+		});
+		await expect(table).toHaveRow({ Id: "1" });
+
+		const onPageOne = await table.toJson({ allRows: true, timeout: 15_000 });
+		expect(onPageOne.map(row => row.Id)).toEqual(["1", "2", "3", "4", "5"]);
+		// From the last page, it goes back to page 1 and waits for it
+		const again = await table.toJson({ allRows: true, timeout: 15_000 });
+		expect(again.map(row => row.Id)).toEqual(["1", "2", "3", "4", "5"]);
+	});
+
+	test("with a loading indicator, a jump back to page 1 is still waited for", async ({ page }) => {
+		await openPager(page, pages, 600);
+		const table = defineTable(page.locator("#t"), {
+			paginate: { next: page.locator("#next"), first: page.locator("#first") },
+			loading: page.locator("#spinner"),
+		});
+		await expect(table).toHaveRow({ Id: "1" });
+		await page.locator("#next").click();
+		await expect(table).toHaveRow({ Id: "3" });
+		await page.locator("#next").click();
+		await expect(table).toHaveRow({ Id: "5" });
+
+		const rows = await table.toJson({ allRows: true, timeout: 15_000 });
+		expect(rows.map(row => row.Id)).toEqual(["1", "2", "3", "4", "5"]);
+	});
+});

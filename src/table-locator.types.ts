@@ -261,10 +261,24 @@ export type PaginateOptions = {
 	/** The control that goes to the next page. */
 	next: LocatorRef;
 	/**
-	 * The control that goes to the first page. When set, navigation starts by clicking it (unless it is
-	 * disabled), so it always covers every page. Without it, navigation starts at the current page.
+	 * The control that goes to the first page. When set, navigation starts by clicking it (unless the table
+	 * shows the first page), so it always covers every page. Without it, navigation starts at the current
+	 * page.
+	 *
+	 * After the click, navigation waits for the table to change. A control that stays enabled on the first
+	 * page doesn't change the table, so that wait ends after 2 seconds, or after 0.5 seconds for a table with
+	 * a `loading` indicator that doesn't show. Set `isFirstPage` to skip the wait altogether.
 	 */
 	first?: LocatorRef;
+	/**
+	 * Whether the table shows the first page, for a `first` control that stays enabled there. When it says
+	 * so, `first` is not clicked; after a click, navigation waits until it says so. Defaults to: `first` is
+	 * missing, hidden or disabled (see `isLastPage`), and after a click, the table changed.
+	 *
+	 * @example
+	 * isFirstPage: async () => (await page.getByRole("button", { name: "1", exact: true }).getAttribute("aria-current")) === "page"
+	 */
+	isFirstPage?: (first: Locator) => Promise<boolean>;
 	/**
 	 * Whether the table shows the last page. Defaults to: `next` is missing, hidden or disabled (with the
 	 * `disabled` attribute, `aria-disabled="true"` or the `disabled` class, on `next` or an element around

@@ -572,6 +572,7 @@ export class TableLocator<const H extends string = string> {
 			loading: this._loading,
 			fingerprint: timeout => this.fingerprint(timeout),
 			waitForStable: stable => this.waitForStable(stable),
+			loadingShown: async () => this._loading !== undefined && (await isShown(this._loading)),
 		};
 		this._navigator = new TableNavigator(host, options?.paginate, options?.scroll);
 		this._rowKey = options?.scroll?.rowKey;

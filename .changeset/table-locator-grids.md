@@ -9,7 +9,7 @@
 **Pagination and virtual scrolling**
 
 - New table options:
-  - `paginate`: next control, optional first control, `isLastPage`, `maxPages`.
+  - `paginate`: next control, optional first control, `isLastPage`, `isFirstPage`, `maxPages`. `isFirstPage` is for a first control that stays enabled on page 1: without it, the table must change after the click, which takes up to 2 seconds to rule out (0.5 seconds for a table with a `loading` indicator that doesn't show).
   - `scroll`: scroll container, `step`, `rowKey`, `settle`, `maxSteps`. An invalid `step` or `settle` is an error.
   - `loading`: a loading indicator.
 - These options accept a `Locator`, or a function that finds it from the table root.
