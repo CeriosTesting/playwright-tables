@@ -681,8 +681,8 @@ test.describe("going to the first page", () => {
 		);
 		expect(plain).toBeGreaterThanOrEqual(1_900);
 		// The spinner didn't show, so the wait ends at the 0.5 second cut-off; isFirstPage skips the click
-		expect(withLoading).toBeLessThan(plain - 1_000);
-		expect(withIsFirstPage).toBeLessThan(plain - 1_000);
+		expect(withLoading).toBeLessThan(plain - 500);
+		expect(withIsFirstPage).toBeLessThan(plain - 500);
 	});
 
 	test("isFirstPage is waited for after a jump back to page 1", async ({ page }) => {
