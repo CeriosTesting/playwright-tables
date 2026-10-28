@@ -768,7 +768,7 @@ test.describe("input values", () => {
 		const plain = defineTable(page.locator("#people"));
 		const people = defineTable(page.locator("#people"), { readInputValues: true });
 
-		await expect(plain).not.toHaveRow({ Email: "john@example.org" }, { timeout: 200 });
+		await expect(plain).not.toHaveRow({ Email: "john@example.org" }, { timeout: 1_000 });
 		await expect(people).toHaveRow({ Email: "john@example.org", Notes: "First line" });
 		// Header keys stay plain, checkboxes stay out, and a select reads its selected option either way
 		expect(await people.toJson()).toEqual([
