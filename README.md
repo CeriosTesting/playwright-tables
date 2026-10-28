@@ -560,6 +560,17 @@ expect(await files.row({ Name: "index.ts" }).level()).toBe(2); // aria-level
 
 Each action waits up to 5 seconds by default; pass `{ timeout }` to change it.
 
+## Placeholder rows
+
+A row such as "No data", shown when a table is empty, is a body row unless you say otherwise. Set `emptyRow` to a CSS selector of such rows: `rows`, `row()`, `toJson()`, the matchers and the row counts leave them out, so an empty table has 0 body rows.
+
+```ts
+const orders = defineTable(page.locator("#orders"), { emptyRow: ".no-data" });
+await expect(orders).toHaveRowCount(0);
+```
+
+The Angular Material preset sets it for the `mat-no-data-row`.
+
 ## Footer rows
 
 Footer rows, such as a totals row, are not body rows: `rows`, `row()`, `toJson()` and the matchers leave them out. `footer` gives them typed cells:

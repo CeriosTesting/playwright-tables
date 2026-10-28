@@ -1330,6 +1330,7 @@ function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineC
 	if (header.setMainHeaderRow !== undefined) cfg.mainHeaderRow = header.setMainHeaderRow;
 	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
 	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
+	if (options.emptyRow !== undefined) cfg.emptyRow = options.emptyRow;
 	if (options.footer?.rowSelector !== undefined) cfg.footerRow = options.footer.rowSelector;
 	return cfg;
 }

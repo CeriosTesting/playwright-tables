@@ -720,3 +720,27 @@ test.describe("going to the first page", () => {
 		expect(rows.map(row => row.Id)).toEqual(["1", "2", "3", "4", "5"]);
 	});
 });
+
+test.describe("placeholder rows", () => {
+	test("emptyRow rows are not body rows", async ({ page }) => {
+		await page.setContent(`
+			<table id="t">
+				<thead><tr><th>Name</th><th>Status</th></tr></thead>
+				<tbody><tr class="no-data"><td colspan="2">No data</td></tr></tbody>
+			</table>
+		`);
+		const plain = defineTable(page.locator("#t"));
+		const table = defineTable(page.locator("#t"), { emptyRow: ".no-data" });
+
+		// Without the option, the placeholder is a row
+		expect(await plain.rows.locator.count()).toBe(1);
+		await expect(table).toHaveRowCount(0, { timeout: 200 });
+		expect(await table.toJson()).toEqual([]);
+		const every = await errorMessage(() => expect(table).toHaveEveryRow({ Name: "x" }, { timeout: 200 }));
+		expect(every).toContain("Received: the table has no body rows");
+		// When rows arrive, they count
+		await page.locator("tbody").evaluate(body => (body.innerHTML = "<tr><td>John</td><td>Active</td></tr>"));
+		await expect(table).toHaveRowCount(1);
+		expect(await table.toJson()).toEqual([{ Name: "John", Status: "Active" }]);
+	});
+});

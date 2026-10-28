@@ -213,6 +213,14 @@ export type TableLocatorOptions<H extends string> = {
 	 */
 	loading?: LocatorRef;
 	/**
+	 * CSS selector of placeholder rows, such as a "No data" row, that are never body rows: `rows`, `row()`,
+	 * `toJson()`, the matchers and the row counts leave them out, so an empty table has 0 body rows.
+	 *
+	 * @example
+	 * emptyRow: ".no-data"
+	 */
+	emptyRow?: string;
+	/**
 	 * The control that selects a row, from the row locator, for {@link TableRow.select},
 	 * {@link TableRow.deselect} and {@link TableRow.isSelected}. Defaults to the checkbox in a selection
 	 * column: a column without header text (such as one with only a "select all" checkbox). A checkbox in a
@@ -487,6 +495,10 @@ export type EngineConfig = {
 	textContent?: 1;
 	/** Selectors of the elements inside a cell whose text is left out. Defaults to `DEFAULT_IGNORE`. */
 	ignore?: string[];
+	/** Selector of placeholder rows (such as "No data") that are never body rows. */
+	emptyRow?: string;
+	/** Read the value of text inputs and text areas in body cells as their text. */
+	inputs?: 1;
 };
 
 /**

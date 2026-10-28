@@ -26,7 +26,7 @@
 
 **Grid presets**
 
-- `presets.agGrid()`, `presets.muiDataGrid()`, `presets.angularMaterial({ paginator })` and `presets.tanstackVirtual({ container })`. The `paginator` is a `Locator` or a function that finds it from the table root.
+- `presets.agGrid()`, `presets.muiDataGrid()`, `presets.angularMaterial({ paginator })` and `presets.tanstackVirtual({ container })`. The `paginator` is a `Locator` or a function that finds it from the table root. The Angular Material preset marks the "no data" row with `emptyRow`.
 - The AG Grid preset is tested against AG Grid Community 36.
 
 **Row interactions**

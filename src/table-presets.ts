@@ -96,11 +96,12 @@ function angularMaterial(options?: { paginator?: LocatorRef }): TablePreset {
 			columnSelector: ".mat-mdc-header-cell, .mat-header-cell",
 		},
 		row: {
-			// The "no data" row gets `mat-mdc-no-data-row`, and the Angular docs give it `mat-row` as well
-			rowSelector: ".mat-mdc-row:not(.mat-mdc-no-data-row), .mat-row:not(.mat-mdc-no-data-row)",
+			rowSelector: ".mat-mdc-row, .mat-row",
 			columnSelector: ".mat-mdc-cell, .mat-cell, .mat-mdc-footer-cell, .mat-footer-cell",
 		},
 		footer: { rowSelector: ".mat-mdc-footer-row, .mat-footer-row" },
+		// The "no data" row gets `mat-mdc-no-data-row`, and the Angular docs give it `mat-row` as well
+		emptyRow: ".mat-mdc-no-data-row, .mat-no-data-row",
 		...(paginator === undefined
 			? {}
 			: {

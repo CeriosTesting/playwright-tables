@@ -118,6 +118,10 @@ export function tableSelectorEngine(
 		textContent: boolean;
 		/** Selector of the elements inside a cell whose text is left out, or `""` for none. */
 		ignore: string;
+		/** Selector of placeholder rows that are never body rows, or `""` for none. */
+		emptyRow: string;
+		/** Whether the value of text inputs and text areas in body cells is read as their text. */
+		inputs: boolean;
 	};
 	type TableBody = {
 		/** One element per logical body row: the first element of a row split over several containers. */
@@ -241,6 +245,8 @@ export function tableSelectorEngine(
 			mainHeaderRow: cfg.mainHeaderRow ?? null,
 			textContent: cfg.textContent === 1,
 			ignore: (cfg.ignore ?? DEFAULT_IGNORE).join(", "),
+			emptyRow: cfg.emptyRow ?? "",
+			inputs: cfg.inputs === 1,
 		};
 	}
 
@@ -729,10 +735,10 @@ export function tableSelectorEngine(
 				return cell === undefined ? undefined : cell.el;
 			}),
 			body: function (): TableBody {
-				return (body ??= buildBody(scope, cfg, cfg.bodyRow, headerIndexes, deep));
+				return (body ??= buildBody(scope, cfg, cfg.bodyRow, cfg.emptyRow, headerIndexes, deep));
 			},
 			footer: function (): TableBody {
-				return (footer ??= buildBody(scope, cfg, cfg.footerRow, headerIndexes, deep));
+				return (footer ??= buildBody(scope, cfg, cfg.footerRow, "", headerIndexes, deep));
 			},
 			texts: new Map(),
 			raws: new Map(),
@@ -740,11 +746,15 @@ export function tableSelectorEngine(
 		};
 	}
 
-	/** The body rows of the table, or with the footer row selector, its footer rows. */
+	/**
+	 * The body rows of the table, or with the footer row selector, its footer rows. Rows matching `empty`
+	 * (placeholder rows such as "No data") are left out.
+	 */
 	function buildBody(
 		scope: Node & ParentNode,
 		cfg: Config,
 		rowSelector: string,
+		empty: string,
 		headerIndexes: Set<string>,
 		deep: boolean
 	): TableBody {
@@ -752,6 +762,7 @@ export function tableSelectorEngine(
 		const anyCell = cfg.headerCell + "," + cfg.bodyCell;
 		const groups = groupRows(ownRows(scope, rowSelector, anyCell, deep)).filter(function (group) {
 			const key = group[0].getAttribute("aria-rowindex");
+			if (empty !== "" && group[0].matches(empty)) return false;
 			return key === null || !headerIndexes.has(key);
 		});
 		const rows: Element[] = [];
