@@ -22,6 +22,8 @@ import type {
 	EngineWindowRequest,
 	SelectorEngine,
 	SerializedMatcher,
+	SerializedSelector,
+	SerializedText,
 	SerializedWhere,
 } from "./table-locator.types";
 
@@ -106,22 +108,27 @@ export function tableSelectorEngine(
 	type TextTest = (text: string, raw: () => string) => boolean;
 	/** A row condition with the grid column of its header. */
 	type ColumnCondition = { column: number; test: TextTest };
+	/**
+	 * A compiled {@link SerializedSelector}: `css` finds the candidates, and `test`, if set, narrows them
+	 * down. An empty `css` matches nothing. `key` tells selectors apart in caches.
+	 */
+	type Sel = { css: string; test: ((el: Element) => boolean) | null; key: string };
 	/** How `readDomText` reads text without layout. */
-	type DomTextOptions = { ignore: string; transform: boolean; inputs: boolean };
+	type DomTextOptions = { ignore: Sel; transform: boolean; inputs: boolean };
 	/** An {@link EngineConfig} with the defaults filled in. */
 	type Config = {
-		headerRow: string;
-		headerCell: string;
-		bodyRow: string;
-		bodyCell: string;
-		/** Footer row selector, or `""` for none. */
-		footerRow: string;
+		headerRow: Sel;
+		headerCell: Sel;
+		bodyRow: Sel;
+		bodyCell: Sel;
+		/** Footer rows, or nothing for none. */
+		footerRow: Sel;
 		mainHeaderRow: number | null;
 		textContent: boolean;
-		/** Selector of the elements inside a cell whose text is left out, or `""` for none. */
-		ignore: string;
-		/** Selector of placeholder rows that are never body rows, or `""` for none. */
-		emptyRow: string;
+		/** The elements inside a cell whose text is left out. */
+		ignore: Sel;
+		/** Placeholder rows that are never body rows. */
+		emptyRow: Sel;
 		/** Whether the value of text inputs and text areas in body cells is read as their text. */
 		inputs: boolean;
 	};
@@ -213,6 +220,20 @@ export function tableSelectorEngine(
 		bodyCell: "[role=gridcell], [role=cell], [role=rowheader]",
 		footerRow: "",
 	};
+	/** The selector that matches nothing. */
+	const NOTHING: Sel = { css: "", test: null, key: "" };
+	/** Every row of an HTML table or ARIA grid. */
+	const ANY_ROW: Sel = { css: "[role=row], tr", test: null, key: "[role=row], tr" };
+	// The table elements that can have a role without a `role` attribute, by role.
+	const IMPLICIT_ROLE_TAGS: Record<string, string> = {
+		table: "table",
+		rowgroup: "thead, tbody, tfoot",
+		row: "tr",
+		cell: "td",
+		gridcell: "td",
+		columnheader: "th",
+		rowheader: "th",
+	};
 
 	// Models are cached for the duration of one synchronous selector evaluation. The DOM cannot change
 	// while an evaluation runs, and the cache is dropped on the next microtask, so retries always see
@@ -245,16 +266,122 @@ export function tableSelectorEngine(
 	function resolveConfig(cfg: EngineConfig): Config {
 		const defaults = cfg.aria === 1 ? ARIA_SELECTORS : HTML_SELECTORS;
 		return {
-			headerRow: cfg.headerRow ?? defaults.headerRow,
-			headerCell: cfg.headerCell ?? defaults.headerCell,
-			bodyRow: cfg.bodyRow ?? defaults.bodyRow,
-			bodyCell: cfg.bodyCell ?? defaults.bodyCell,
-			footerRow: cfg.footerRow ?? defaults.footerRow,
+			headerRow: compileSelector(cfg.headerRow ?? defaults.headerRow),
+			headerCell: compileSelector(cfg.headerCell ?? defaults.headerCell),
+			bodyRow: compileSelector(cfg.bodyRow ?? defaults.bodyRow),
+			bodyCell: compileSelector(cfg.bodyCell ?? defaults.bodyCell),
+			footerRow: compileSelector(cfg.footerRow ?? defaults.footerRow),
 			mainHeaderRow: cfg.mainHeaderRow ?? null,
 			textContent: cfg.textContent === 1,
-			ignore: (cfg.ignore ?? DEFAULT_IGNORE).join(", "),
-			emptyRow: cfg.emptyRow ?? "",
+			ignore: (cfg.ignore ?? DEFAULT_IGNORE).map(compileSelector).reduce(unionSel, NOTHING),
+			emptyRow: compileSelector(cfg.emptyRow ?? ""),
 			inputs: cfg.inputs === 1,
+		};
+	}
+
+	/**
+	 * Compiles a selector. A descriptor finds the elements that match its CSS selector and could have one of
+	 * its roles, and tests them for the exact role and the text.
+	 */
+	function compileSelector(selector: SerializedSelector): Sel {
+		if (typeof selector === "string") return { css: selector, test: null, key: selector };
+		const roles = selector.r;
+		const hasText = selector.t === undefined ? null : compileText(selector.t);
+		const hasNotText = selector.n === undefined ? null : compileText(selector.n);
+		let css = selector.c ?? "*";
+		if (roles !== undefined) {
+			const candidates = roles.map(function (role) {
+				const tags = IMPLICIT_ROLE_TAGS[role];
+				return "[role~=" + JSON.stringify(role) + "]" + (tags === undefined ? "" : ", " + tags);
+			});
+			css = ":is(" + css + "):is(" + candidates.join(", ") + ")";
+		}
+		return {
+			css: css,
+			test: function (el) {
+				if (roles !== undefined && roles.indexOf(roleOf(el)) === -1) return false;
+				if (hasText === null && hasNotText === null) return true;
+				const text = normalizeLine(el.textContent);
+				return (hasText === null || hasText(text)) && (hasNotText === null || !hasNotText(text));
+			},
+			key: JSON.stringify(selector),
+		};
+	}
+
+	/** Compiles the text of a descriptor: a string is found case-insensitively in the text, a RegExp tested on it. */
+	function compileText(text: SerializedText): (value: string) => boolean {
+		if ("s" in text) {
+			const expected = normalizeLine(text.s).toLowerCase();
+			return function (value) {
+				return value.toLowerCase().indexOf(expected) !== -1;
+			};
+		}
+		const regexp = new RegExp(text.r, text.f);
+		return function (value) {
+			// A global or sticky RegExp keeps its position between calls.
+			regexp.lastIndex = 0;
+			return regexp.test(value);
+		};
+	}
+
+	/** The role of `el`: the first role of its `role` attribute, or else the role of a table element, or `""`. */
+	function roleOf(el: Element): string {
+		const explicit = (el.getAttribute("role") ?? "").trim().split(/\s+/)[0] ?? "";
+		if (explicit !== "") return explicit;
+		switch (el.localName) {
+			case "table":
+				return "table";
+			case "thead":
+			case "tbody":
+			case "tfoot":
+				return "rowgroup";
+			case "tr":
+				return "row";
+			case "td":
+				return isGridCell(el) ? "gridcell" : "cell";
+			case "th":
+				return isRowHeader(el) ? "rowheader" : "columnheader";
+		}
+		return "";
+	}
+
+	/** Whether a `<td>` is in a table with the `grid` or `treegrid` role. */
+	function isGridCell(td: Element): boolean {
+		const table = td.closest("table");
+		const role = table === null ? "" : (table.getAttribute("role") ?? "").trim().split(/\s+/)[0];
+		return role === "grid" || role === "treegrid";
+	}
+
+	/** Whether a `<th>` heads its row: with `scope="row"`, or in a row outside a `<thead>` that also has a `<td>`. */
+	function isRowHeader(th: Element): boolean {
+		const scope = (th.getAttribute("scope") ?? "").toLowerCase();
+		if (scope === "row" || scope === "rowgroup") return true;
+		if (scope === "col" || scope === "colgroup") return false;
+		const row = th.parentElement;
+		if (row === null || row.localName !== "tr" || row.parentElement?.localName === "thead") return false;
+		return Array.from(row.children).some(function (cell) {
+			return cell.localName === "td";
+		});
+	}
+
+	/** Whether `el` matches `sel`. */
+	function matchesSel(el: Element, sel: Sel): boolean {
+		return sel.css !== "" && el.matches(sel.css) && (sel.test === null || sel.test(el));
+	}
+
+	/** The elements that match either selector. */
+	function unionSel(a: Sel, b: Sel): Sel {
+		if (a.css === "") return b;
+		if (b.css === "") return a;
+		return {
+			css: a.css + ", " + b.css,
+			test:
+				a.test === null && b.test === null
+					? null
+					: function (el) {
+							return matchesSel(el, a) || matchesSel(el, b);
+						},
+			key: a.key + "\n" + b.key,
 		};
 	}
 
@@ -353,8 +480,8 @@ export function tableSelectorEngine(
 	}
 
 	/** Whether `el` matches the `ignore` selector. */
-	function isIgnored(el: Element, ignore: string): boolean {
-		return ignore !== "" && el.matches(ignore);
+	function isIgnored(el: Element, ignore: Sel): boolean {
+		return matchesSel(el, ignore);
 	}
 
 	/**
@@ -397,11 +524,14 @@ export function tableSelectorEngine(
 	 * (left out), `<select>`s (read as their selected options), and with `inputs`, text inputs and text
 	 * areas (read as their value). Not their descendants.
 	 */
-	function specialElements(cell: Element, ignore: string, inputs: boolean): Element[] {
+	function specialElements(cell: Element, ignore: Sel, inputs: boolean): Element[] {
 		const found: Element[] = [];
 		if (cell.firstElementChild === null) return found;
-		const selector = (ignore === "" ? "select" : ignore + ", select") + (inputs ? ", " + TEXT_INPUTS : "");
+		const read = "select" + (inputs ? ", " + TEXT_INPUTS : "");
+		const selector = ignore.css === "" ? read : ignore.css + ", " + read;
 		for (const el of Array.from(cell.querySelectorAll(selector))) {
+			// A candidate of an ignore descriptor that it doesn't match
+			if (ignore.test !== null && !el.matches(read) && !ignore.test(el)) continue;
 			const inFound = found.some(function (outer) {
 				return outer.contains(el);
 			});
@@ -584,8 +714,15 @@ export function tableSelectorEngine(
 		return deep ? deepQueryAll(scope, selector) : Array.from(scope.querySelectorAll(selector));
 	}
 
+	/** The elements matching `sel` in `scope`, also inside open shadow roots when `deep` is set. */
+	function querySel(scope: Node & ParentNode, sel: Sel, deep: boolean): Element[] {
+		if (sel.css === "") return [];
+		const found = queryIn(scope, sel.css, deep);
+		return sel.test === null ? found : found.filter(sel.test);
+	}
+
 	/** Whether `el` has a header row, also inside open shadow roots. */
-	function hasHeaderRow(el: Element, selector: string): boolean {
+	function hasHeaderRow(el: Element, sel: Sel): boolean {
 		getModelCache();
 		const cache = headerRowCache as Map<Node, Map<string, boolean>>;
 		let bySelector = cache.get(el);
@@ -593,31 +730,34 @@ export function tableSelectorEngine(
 			bySelector = new Map();
 			cache.set(el, bySelector);
 		}
-		let found = bySelector.get(selector);
+		let found = bySelector.get(sel.key);
 		if (found === undefined) {
-			found = el.querySelector(selector) !== null || (hasShadowHost(el) && deepQueryAll(el, selector).length > 0);
-			bySelector.set(selector, found);
+			found =
+				sel.test === null
+					? el.querySelector(sel.css) !== null || (hasShadowHost(el) && deepQueryAll(el, sel.css).length > 0)
+					: querySel(el, sel, hasShadowHost(el)).length > 0;
+			bySelector.set(sel.key, found);
 		}
 		return found;
 	}
 
 	/**
 	 * Whether `el` is part of `container` itself, rather than content of a cell inside it (such as a
-	 * nested table). `cellSelector` matches the header and body cells of the table.
+	 * nested table). `cellSel` matches the header and body cells of the table.
 	 */
-	function owned(el: Element, container: Node, cellSelector: string): boolean {
+	function owned(el: Element, container: Node, cellSel: Sel): boolean {
 		let node = parentOf(el);
 		while (node !== null && node !== container) {
-			if (node.matches(cellSelector)) return false;
+			if (matchesSel(node, cellSel)) return false;
 			node = parentOf(node);
 		}
 		return true;
 	}
 
-	/** The rows of `scope` that match `selector` and are not inside a cell. */
-	function ownRows(scope: Node & ParentNode, selector: string, cellSelector: string, deep: boolean): Element[] {
-		return queryIn(scope, selector, deep).filter(function (row) {
-			return owned(row, scope, cellSelector);
+	/** The rows of `scope` that match `sel` and are not inside a cell. */
+	function ownRows(scope: Node & ParentNode, sel: Sel, cellSel: Sel, deep: boolean): Element[] {
+		return querySel(scope, sel, deep).filter(function (row) {
+			return owned(row, scope, cellSel);
 		});
 	}
 
@@ -657,7 +797,7 @@ export function tableSelectorEngine(
 	 * Lays out logical rows on a visual grid that respects rowspan and colspan. A cell with an
 	 * `aria-colindex` is placed in that column, so cells of virtualized and split rows line up.
 	 */
-	function buildGrid(rows: RowGroup[], cellSelector: string, ownCellSelector: string, deep: boolean): GridLine[] {
+	function buildGrid(rows: RowGroup[], cellSel: Sel, ownCellSel: Sel, deep: boolean): GridLine[] {
 		const grid = rows.map(function (): GridLine {
 			return [];
 		});
@@ -666,7 +806,7 @@ export function tableSelectorEngine(
 			let c = 0;
 			// Like in HTML, a rowspan stops at the end of its row group (`<tbody>`), and 0 spans to it.
 			const end = ends[r] ?? rows.length;
-			for (const el of ownCells(group, cellSelector, ownCellSelector, deep)) {
+			for (const el of ownCells(group, cellSel, ownCellSel, deep)) {
 				const colindex = parseInt(el.getAttribute("aria-colindex") ?? "", 10);
 				if (colindex >= 1) {
 					c = colindex - 1;
@@ -706,12 +846,12 @@ export function tableSelectorEngine(
 		return ends;
 	}
 
-	/** The cells of a logical row that match `cellSelector` and are not inside a nested cell. */
-	function ownCells(group: RowGroup, cellSelector: string, ownCellSelector: string, deep: boolean): Element[] {
+	/** The cells of a logical row that match `cellSel` and are not inside a nested cell. */
+	function ownCells(group: RowGroup, cellSel: Sel, ownCellSel: Sel, deep: boolean): Element[] {
 		const cells: Element[] = [];
 		for (const part of group) {
-			for (const cell of queryIn(part, cellSelector, deep)) {
-				if (owned(cell, part, ownCellSelector)) cells.push(cell);
+			for (const cell of querySel(part, cellSel, deep)) {
+				if (owned(cell, part, ownCellSel)) cells.push(cell);
 			}
 		}
 		return cells;
@@ -746,7 +886,7 @@ export function tableSelectorEngine(
 	function buildModel(scope: Node, cfg: Config): TableModel | null {
 		if (!isParentNode(scope)) return null;
 		const deep = hasShadowHost(scope);
-		const anyCell = cfg.headerCell + "," + cfg.bodyCell;
+		const anyCell = unionSel(cfg.headerCell, cfg.bodyCell);
 		const headerRows = groupRows(ownRows(scope, cfg.headerRow, anyCell, deep));
 		const mainIndex = cfg.mainHeaderRow ?? headerRows.length - 1;
 		const mainLine =
@@ -772,7 +912,7 @@ export function tableSelectorEngine(
 				return (body ??= buildBody(scope, cfg, cfg.bodyRow, cfg.emptyRow, headerIndexes, deep));
 			},
 			footer: function (): TableBody {
-				return (footer ??= buildBody(scope, cfg, cfg.footerRow, "", headerIndexes, deep));
+				return (footer ??= buildBody(scope, cfg, cfg.footerRow, NOTHING, headerIndexes, deep));
 			},
 			texts: new Map(),
 			raws: new Map(),
@@ -787,16 +927,16 @@ export function tableSelectorEngine(
 	function buildBody(
 		scope: Node & ParentNode,
 		cfg: Config,
-		rowSelector: string,
-		empty: string,
+		rowSel: Sel,
+		empty: Sel,
 		headerIndexes: Set<string>,
 		deep: boolean
 	): TableBody {
-		if (rowSelector === "") return { rows: [], rowOf: new Map(), grid: [] };
-		const anyCell = cfg.headerCell + "," + cfg.bodyCell;
-		const groups = groupRows(ownRows(scope, rowSelector, anyCell, deep)).filter(function (group) {
+		if (rowSel.css === "") return { rows: [], rowOf: new Map(), grid: [] };
+		const anyCell = unionSel(cfg.headerCell, cfg.bodyCell);
+		const groups = groupRows(ownRows(scope, rowSel, anyCell, deep)).filter(function (group) {
 			const key = group[0].getAttribute("aria-rowindex");
-			if (empty !== "" && group[0].matches(empty)) return false;
+			if (matchesSel(group[0], empty)) return false;
 			return key === null || !headerIndexes.has(key);
 		});
 		const rows: Element[] = [];
@@ -1263,16 +1403,16 @@ export function tableSelectorEngine(
 	 */
 	function readTotal(root: Element, model: TableModel): EngineTotal {
 		const body = model.body();
-		const anyCell = model.cfg.headerCell + "," + model.cfg.bodyCell;
+		const anyCell = unionSel(model.cfg.headerCell, model.cfg.bodyCell);
 		// Not the aria-rowcount of a grid nested in a cell of this one
 		const inside = Array.from(root.querySelectorAll("[aria-rowcount]")).find(function (el) {
-			return owned(el, root, anyCell) && !el.matches(anyCell);
+			return owned(el, root, anyCell) && !matchesSel(el, anyCell);
 		});
 		const holder = root.hasAttribute("aria-rowcount") ? root : (inside ?? root.closest("[aria-rowcount]"));
 		const count = holder === null ? NaN : parseInt(holder.getAttribute("aria-rowcount") ?? "", 10);
 		const scope = holder !== null && holder.contains(root) ? holder : root;
 		const others = new Set<string>();
-		ownRows(scope, "[role=row], tr", anyCell, hasShadowHost(scope)).forEach(function (row, i) {
+		ownRows(scope, ANY_ROW, anyCell, hasShadowHost(scope)).forEach(function (row, i) {
 			if (body.rowOf.has(row)) return;
 			others.add(row.getAttribute("aria-rowindex") ?? "row " + i);
 		});

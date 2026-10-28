@@ -139,6 +139,47 @@ export type ValidRowWhere<H extends string, W> = ([keyof W] extends [never]
 	: unknown) &
 	([Exclude<keyof W, HeaderKey<H>>] extends [never] ? unknown : { [K in Exclude<keyof W, HeaderKey<H>>]: never });
 
+/** An ARIA role, as Playwright's `getByRole` accepts it. */
+export type AriaRole = Parameters<Locator["getByRole"]>[0];
+
+/**
+ * Which elements an option of {@link TableLocator} selects: a CSS selector, or a descriptor that combines a
+ * CSS selector, a role and the text of the element. Every field of a descriptor must match.
+ *
+ * These options are not Playwright `Locator`s, because the table is read in the browser on every retry of a
+ * locator or matcher, and only a CSS selector or a descriptor can be checked there.
+ *
+ * @example
+ * row: { rowSelector: "tbody>tr.data" }
+ * row: { rowSelector: { role: "row", hasNotText: "Loading" } }
+ * row: { columnSelector: { role: ["cell", "rowheader"] } }
+ * emptyRow: { hasText: "No data" }
+ * ignore: [...DEFAULT_IGNORE, { css: "span", hasText: /^sort/ }]
+ */
+export type ElementSelector = string | ElementDescriptor;
+
+/** A descriptor of {@link ElementSelector}. It needs at least one field. */
+export type ElementDescriptor = {
+	/** A CSS selector the element matches. */
+	css?: string;
+	/**
+	 * The role of the element, or one of several roles: its `role` attribute (the first role in it), or
+	 * else the role of a table element. `<table>` is a `table`, `<thead>`, `<tbody>` and `<tfoot>` are a
+	 * `rowgroup`, and `<tr>` is a `row`. `<td>` is a `gridcell` in a table with the `grid` or `treegrid` role,
+	 * and a `cell` otherwise. `<th>` is a `rowheader` with `scope="row"` or in a row that also has a `<td>`
+	 * (outside a `<thead>`), and a `columnheader` otherwise.
+	 */
+	role?: AriaRole | readonly [AriaRole, ...AriaRole[]];
+	/**
+	 * Text inside the element, like `Locator.filter({ hasText })`: a string matches case-insensitively,
+	 * anywhere in the text, with whitespace collapsed; a RegExp is tested on that text. The text is the
+	 * `textContent` of the element, hidden text included.
+	 */
+	hasText?: string | RegExp;
+	/** Text that is not inside the element, the opposite of `hasText`. */
+	hasNotText?: string | RegExp;
+};
+
 /**
  * Options for {@link TableLocator}.
  *
@@ -172,28 +213,29 @@ export type TableLocatorOptions<H extends string> = {
 		/** Index of the main header row. Defaults to the last header row. */
 		setMainHeaderRow?: number;
 		/**
-		 * CSS selector for header rows. Defaults to `"thead>tr"`, plus the leading rows of `<th>` cells (and
-		 * no `<td>`) in the first `<tbody>` of a table without a `<thead>`.
+		 * Header rows, see {@link ElementSelector}. Defaults to `"thead>tr"`, plus the leading rows of `<th>`
+		 * cells (and no `<td>`) in the first `<tbody>` of a table without a `<thead>`.
 		 */
-		rowSelector?: string;
-		/** CSS selector for header cells. Defaults to `"th, td"`. */
-		columnSelector?: string;
+		rowSelector?: ElementSelector;
+		/** Header cells, see {@link ElementSelector}. Defaults to `"th, td"`. */
+		columnSelector?: ElementSelector;
 	};
 	row?: {
 		/**
-		 * CSS selector for body rows. Defaults to `"tbody>tr"` (and `<tr>` right inside a `<table>` built
-		 * without a `<tbody>`), without the header rows of a table without a `<thead>`.
+		 * Body rows, see {@link ElementSelector}. Defaults to `"tbody>tr"` (and `<tr>` right inside a
+		 * `<table>` built without a `<tbody>`), without the header rows of a table without a `<thead>`.
 		 */
-		rowSelector?: string;
-		/** CSS selector for body cells. Defaults to `"td, th"`, so row header cells are columns too. */
-		columnSelector?: string;
+		rowSelector?: ElementSelector;
+		/** Body cells, see {@link ElementSelector}. Defaults to `"td, th"`, so row header cells are columns too. */
+		columnSelector?: ElementSelector;
 	};
 	footer?: {
 		/**
-		 * CSS selector for footer rows, such as a totals row. Their cells are found with `row.columnSelector`.
-		 * Defaults to `"tfoot>tr"`, or no footer rows with `aria: true`. Footer rows are not body rows.
+		 * Footer rows, such as a totals row, see {@link ElementSelector}. Their cells are found with
+		 * `row.columnSelector`. Defaults to `"tfoot>tr"`, or no footer rows with `aria: true`. Footer rows are
+		 * not body rows.
 		 */
-		rowSelector?: string;
+		rowSelector?: ElementSelector;
 	};
 	/**
 	 * How to go to the next page of a paginated table, so {@link TableLocator.findRow},
@@ -213,13 +255,15 @@ export type TableLocatorOptions<H extends string> = {
 	 */
 	loading?: LocatorRef;
 	/**
-	 * CSS selector of placeholder rows, such as a "No data" row, that are never body rows: `rows`, `row()`,
-	 * `toJson()`, the matchers and the row counts leave them out, so an empty table has 0 body rows.
+	 * Placeholder rows, such as a "No data" row, that are never body rows: `rows`, `row()`, `toJson()`,
+	 * the matchers and the row counts leave them out, so an empty table has 0 body rows. See
+	 * {@link ElementSelector}.
 	 *
 	 * @example
 	 * emptyRow: ".no-data"
+	 * emptyRow: { hasText: "No data" }
 	 */
-	emptyRow?: string;
+	emptyRow?: ElementSelector;
 	/**
 	 * Read the current value of text inputs and text areas in body cells as cell text, in row conditions,
 	 * `toJson()`, `columnValues()` and the matchers, for editable grids and cells in edit mode. Text-like
@@ -250,15 +294,15 @@ export type TableLocatorOptions<H extends string> = {
 	 */
 	cellContentType?: CellContentType;
 	/**
-	 * CSS selectors of elements inside header and body cells whose text is left out, such as screen reader
-	 * only text and icons. Defaults to {@link DEFAULT_IGNORE}: `.sr-only`, `.visually-hidden`, the Material
-	 * Icons and Material Symbols classes, and `[aria-hidden=true]`.
+	 * Elements inside header and body cells whose text is left out, such as screen reader only text and
+	 * icons, see {@link ElementSelector}. Defaults to {@link DEFAULT_IGNORE}: `.sr-only`, `.visually-hidden`,
+	 * the Material Icons and Material Symbols classes, and `[aria-hidden=true]`.
 	 *
 	 * Setting it replaces the defaults. Spread them to add your own (`[...DEFAULT_IGNORE, ".sort-icon"]`),
 	 * or pass `[]` to read all text. Raw values (`toJson({ raw: true })`, a predicate's `raw`) are never
 	 * filtered.
 	 */
-	ignore?: readonly string[];
+	ignore?: readonly ElementSelector[];
 };
 
 /**
@@ -492,27 +536,40 @@ export type SerializedMatcher =
 	| { t: "g"; op: "gt" | "gte" | "lt" | "lte" | "between"; v: number; w: number; d: DecimalSeparator };
 
 /**
- * Table configuration shared by every `pw-table-v1` query. Only what differs from the defaults is set,
+ * Wire format of the text of an {@link ElementDescriptor}: a string, or a RegExp.
+ * @internal
+ */
+export type SerializedText = { s: string } | { r: string; f: string };
+
+/**
+ * Wire format of an {@link ElementSelector}: a CSS selector stays a string; a descriptor has its CSS
+ * selector in `c`, its roles in `r`, its `hasText` in `t` and its `hasNotText` in `n`.
+ * @internal
+ */
+export type SerializedSelector = string | { c?: string; r?: string[]; t?: SerializedText; n?: SerializedText };
+
+/**
+ * Table configuration shared by every `pw-table-v2` query. Only what differs from the defaults is set,
  * so selectors stay short; the engine fills in the rest.
  * @internal
  */
 export type EngineConfig = {
 	/** Use the ARIA default selectors instead of the HTML ones. */
 	aria?: 1;
-	headerRow?: string;
-	headerCell?: string;
-	bodyRow?: string;
-	bodyCell?: string;
+	headerRow?: SerializedSelector;
+	headerCell?: SerializedSelector;
+	bodyRow?: SerializedSelector;
+	bodyCell?: SerializedSelector;
 	/** Footer row selector, or `""` for none. Defaults to `"tfoot>tr"`, or none for ARIA. */
-	footerRow?: string;
+	footerRow?: SerializedSelector;
 	/** Index of the main header row. Defaults to the last header row. */
 	mainHeaderRow?: number;
 	/** Read text with `textContent` instead of `innerText`. */
 	textContent?: 1;
 	/** Selectors of the elements inside a cell whose text is left out. Defaults to `DEFAULT_IGNORE`. */
-	ignore?: string[];
+	ignore?: SerializedSelector[];
 	/** Selector of placeholder rows (such as "No data") that are never body rows. */
-	emptyRow?: string;
+	emptyRow?: SerializedSelector;
 	/** Read the value of text inputs and text areas in body cells as their text. */
 	inputs?: 1;
 };

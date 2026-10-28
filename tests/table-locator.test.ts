@@ -35,7 +35,11 @@ async function openUsers(page: Page): Promise<TableLocator<"Name" | "Status" | "
 type DemoCase = {
 	/** Selector of the table root. Defaults to `"table"`. */
 	root?: string;
-	options?: TableLocatorOptions<string>;
+	// CSS selectors only, so PlaywrightTable can read the same table
+	options?: TableLocatorOptions<string> & {
+		header?: { rowSelector?: string; columnSelector?: string };
+		row?: { rowSelector?: string; columnSelector?: string };
+	};
 	/** A row to wait for before reading, for tables that load late. */
 	wait?: RowWhere<string>;
 	/** The expected `toJson()`. Defaults to `PlaywrightTable.getJson()` with the same selectors. */
@@ -582,6 +586,108 @@ test.describe("TableLocator row headers and nested tables", () => {
 			{ Item: "Bikes", Count: "3" },
 			{ Item: "Cars", Count: "4" },
 		]);
+	});
+});
+
+test.describe("TableLocator selector descriptors", () => {
+	test("finds rows and cells by the role of HTML table elements", async ({ page }) => {
+		await page.goto(Route.RowHeaderTable);
+		const table = defineTable(page.locator("#RowHeaderTable"), {
+			header: { rowSelector: { css: "thead>tr", role: "row" }, columnSelector: { role: ["columnheader", "cell"] } },
+			row: { rowSelector: { css: "tbody>tr" }, columnSelector: { role: ["cell", "rowheader"] } },
+		});
+
+		expect(await table.headerKeys()).toEqual(["{{Empty}}", "Q1", "Q2", "Details"]);
+		await expect(table.row({ "{{Empty}}": "South" }).cell("Q2")).toHaveText("400");
+		// The rows of the nested table are inside a cell, so they are not rows of this table
+		await expect(table).toHaveRowCount(2);
+		await expect(table.column("Q1")).toHaveText(["100", "300"]);
+		// <th scope="row"> is a row header, not a column header
+		const columnHeaders = defineTable(page.locator("#RowHeaderTable"), {
+			row: { rowSelector: { css: "tbody>tr" }, columnSelector: { role: "columnheader" } },
+		});
+		await expect(columnHeaders.rowAt(0).cell(0)).toHaveCount(0);
+	});
+
+	test("an explicit role wins, and rows can be told apart by their text", async ({ page }) => {
+		await page.setContent(`
+			<table id="t">
+				<thead><tr><th>Name</th><th>Status</th></tr></thead>
+				<tbody>
+					<tr><td>John</td><td>Active</td></tr>
+					<tr role="presentation"><td>spacer</td><td></td></tr>
+					<tr id="pending"><td>Loading...</td><td></td></tr>
+					<tr><td>Jane</td><td>Inactive</td></tr>
+				</tbody>
+			</table>
+		`);
+		const table = defineTable(page.locator("#t"), {
+			headers: ["Name", "Status"],
+			row: { rowSelector: { css: "tbody>tr", role: "row", hasNotText: /^loading/i } },
+		});
+
+		expect(await table.toJson()).toEqual([
+			{ Name: "John", Status: "Active" },
+			{ Name: "Jane", Status: "Inactive" },
+		]);
+		await expect(table.row({ Name: "Jane" }).cell("Status")).toHaveText("Inactive");
+		// The locators resolve again on every retry, so the row counts once it has loaded
+		await page.locator("#pending").evaluate(row => (row.innerHTML = "<td>Joe</td><td>Active</td>"));
+		await expect(table).toHaveRowCount(3);
+		await expect(table.row({ Name: "Joe" }).cell("Status")).toHaveText("Active");
+	});
+
+	test("a cell of a grid table is a gridcell", async ({ page }) => {
+		await page.setContent(`
+			<table id="t" role="grid">
+				<thead><tr><th>Name</th></tr></thead>
+				<tbody><tr><td>John</td></tr></tbody>
+			</table>
+		`);
+		const grid = defineTable(page.locator("#t"), { row: { columnSelector: { role: "gridcell" } } });
+		const notCells = defineTable(page.locator("#t"), { row: { columnSelector: { role: "cell" } } });
+
+		await expect(grid.column("Name")).toHaveText(["John"]);
+		await expect(notCells.column("Name")).toHaveCount(0);
+	});
+
+	test("emptyRow and ignore take descriptors", async ({ page }) => {
+		await page.setContent(`
+			<table id="t">
+				<thead><tr><th>Name <span>sort ascending</span></th><th>Status <span>(filtered)</span></th></tr></thead>
+				<tbody><tr><td colspan="2">No data</td></tr></tbody>
+			</table>
+		`);
+		const options: TableLocatorOptions<string> = {
+			emptyRow: { hasText: "no DATA" },
+			ignore: [{ css: "span", hasText: /^sort/ }],
+		};
+		const table = defineTable(page.locator("#t"), options);
+		const textContent = defineTable(page.locator("#t"), { ...options, cellContentType: CellContentType.TextContent });
+
+		expect(await table.headerKeys()).toEqual(["Name", "Status (filtered)"]);
+		expect(await textContent.headerKeys()).toEqual(["Name", "Status (filtered)"]);
+		await expect(table).toHaveRowCount(0, { timeout: 200 });
+		await page.locator("tbody").evaluate(body => (body.innerHTML = "<tr><td>John</td><td>Active</td></tr>"));
+		expect(await table.toJson()).toEqual([{ Name: "John", "Status (filtered)": "Active" }]);
+	});
+
+	test("invalid descriptors fail when the table is defined", ({ page }) => {
+		const root = page.locator("table");
+
+		expect(() => defineTable(root, { emptyRow: {} })).toThrow("emptyRow is an empty descriptor");
+		expect(() => defineTable(root, { row: { rowSelector: root.locator("tr") as never } })).toThrow(
+			"A Playwright Locator can't be used here"
+		);
+		expect(() => defineTable(root, { header: { columnSelector: { role: [] as never } } })).toThrow(
+			"header.columnSelector: role must be a role"
+		);
+		expect(() => defineTable(root, { ignore: [".x", { css: " " }] })).toThrow(
+			"ignore[1]: css must be a non-empty CSS selector"
+		);
+		expect(() => defineTable(root, { footer: { rowSelector: { hasText: 5 as never } } })).toThrow(
+			"footer.rowSelector: hasText must be a string or a RegExp"
+		);
 	});
 });
 

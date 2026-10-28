@@ -1,7 +1,7 @@
 import { Locator } from "@playwright/test";
 
 import { CellContentType } from "./cell-content-type";
-import { describeWhere, serializeWhere } from "./cell-matcher-serializer";
+import { describeWhere, serializeSelector, serializeWhere } from "./cell-matcher-serializer";
 import { checkTimeout, describeLastError, MIN_READ_TIMEOUT, pollUntil } from "./polling";
 import { conditionHeaders, waitForHeaders } from "./table-diagnostics";
 import { formatRows } from "./table-format";
@@ -536,17 +536,17 @@ export class TableLocator<const H extends string = string> {
 	 * @param options.headers - (Optional) Header names, used for typed header keys and {@link validateHeaders}.
 	 * @param options.aria - (Optional) Use ARIA roles for the default selectors. Defaults to `false`.
 	 * @param options.header.setMainHeaderRow - (Optional) Index of the main header row. Defaults to the last header row.
-	 * @param options.header.rowSelector - (Optional) CSS selector for header rows. Defaults to `"thead>tr"`, plus the leading `<th>`-only rows of a table without `<thead>`.
-	 * @param options.header.columnSelector - (Optional) CSS selector for header cells. Defaults to `"th, td"`.
-	 * @param options.row.rowSelector - (Optional) CSS selector for body rows. Defaults to `"tbody>tr"`, without those header rows.
-	 * @param options.row.columnSelector - (Optional) CSS selector for body cells. Defaults to `"td, th"`.
+	 * @param options.header.rowSelector - (Optional) Header rows: a CSS selector or an {@link ElementSelector} descriptor. Defaults to `"thead>tr"`, plus the leading `<th>`-only rows of a table without `<thead>`.
+	 * @param options.header.columnSelector - (Optional) Header cells, see {@link ElementSelector}. Defaults to `"th, td"`.
+	 * @param options.row.rowSelector - (Optional) Body rows, see {@link ElementSelector}. Defaults to `"tbody>tr"`, without those header rows.
+	 * @param options.row.columnSelector - (Optional) Body cells, see {@link ElementSelector}. Defaults to `"td, th"`.
 	 * @param options.cellContentType - (Optional) How cell text is read. Defaults to `InnerText`.
-	 * @param options.ignore - (Optional) CSS selectors of elements inside cells whose text is left out. Defaults to {@link DEFAULT_IGNORE}.
-	 * @param options.footer.rowSelector - (Optional) CSS selector for footer rows. Defaults to `"tfoot>tr"`, or none with `aria`.
+	 * @param options.ignore - (Optional) Elements inside cells whose text is left out, see {@link ElementSelector}. Defaults to {@link DEFAULT_IGNORE}.
+	 * @param options.footer.rowSelector - (Optional) Footer rows, see {@link ElementSelector}. Defaults to `"tfoot>tr"`, or none with `aria`.
 	 * @param options.paginate - (Optional) How to go to the next page, see {@link PaginateOptions}.
 	 * @param options.scroll - (Optional) How to scroll a virtualized grid, see {@link ScrollOptions}.
 	 * @param options.loading - (Optional) The loading indicator of the table.
-	 * @param options.emptyRow - (Optional) CSS selector of placeholder rows, such as a "No data" row, that are never body rows.
+	 * @param options.emptyRow - (Optional) Placeholder rows, such as a "No data" row, that are never body rows, see {@link ElementSelector}.
 	 * @param options.readInputValues - (Optional) Read the value of text inputs in body cells as cell text. Defaults to `false`.
 	 * @param options.select - (Optional) The control that selects a row, from the row locator. Defaults to the checkbox in a selection column.
 	 *
@@ -564,6 +564,13 @@ export class TableLocator<const H extends string = string> {
 	 * @example
 	 * // ARIA grid, such as AG Grid or MUI Data Grid
 	 * const grid = new TableLocator(page.getByRole("grid"), { aria: true });
+	 *
+	 * @example
+	 * // Rows by role and text instead of CSS
+	 * const orders = new TableLocator(page.locator("#orders"), {
+	 *   row: { rowSelector: { role: "row", hasNotText: "Loading" } },
+	 *   emptyRow: { hasText: "No data" },
+	 * });
 	 */
 	constructor(root: Locator, options?: TableLocatorOptions<H>) {
 		this.root = root;
@@ -1129,7 +1136,7 @@ export class TableLocator<const H extends string = string> {
 		const selector = this._config.headerRow;
 		throw new Error(
 			`TableLocator.toJson() needs a header row, but the table has none.\n` +
-				(selector === undefined ? "" : `Header row selector: "${selector}"\n`) +
+				(selector === undefined ? "" : `Header row selector: ${JSON.stringify(selector)}\n`) +
 				`Table locator: ${this.root.toString()}`
 		);
 	}
@@ -1323,16 +1330,20 @@ export function defineTable<const H extends string = string>(
  */
 function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineConfig {
 	const { header = {}, row = {} } = options;
-	TableUtils.warnOnIdenticalRowSelectors("TableLocator", header.rowSelector, row.rowSelector);
 	const cfg: EngineConfig = {};
 	if (options.aria === true) cfg.aria = 1;
-	if (header.rowSelector !== undefined) cfg.headerRow = header.rowSelector;
-	if (header.columnSelector !== undefined) cfg.headerCell = header.columnSelector;
-	if (row.rowSelector !== undefined) cfg.bodyRow = row.rowSelector;
-	if (row.columnSelector !== undefined) cfg.bodyCell = row.columnSelector;
+	if (header.rowSelector !== undefined) cfg.headerRow = serializeSelector("header.rowSelector", header.rowSelector);
+	if (header.columnSelector !== undefined) {
+		cfg.headerCell = serializeSelector("header.columnSelector", header.columnSelector);
+	}
+	if (row.rowSelector !== undefined) cfg.bodyRow = serializeSelector("row.rowSelector", row.rowSelector);
+	if (row.columnSelector !== undefined) cfg.bodyCell = serializeSelector("row.columnSelector", row.columnSelector);
 	if (header.setMainHeaderRow !== undefined) cfg.mainHeaderRow = header.setMainHeaderRow;
-	if (options.emptyRow !== undefined) cfg.emptyRow = options.emptyRow;
-	if (options.footer?.rowSelector !== undefined) cfg.footerRow = options.footer.rowSelector;
+	if (options.emptyRow !== undefined) cfg.emptyRow = serializeSelector("emptyRow", options.emptyRow);
+	if (options.footer?.rowSelector !== undefined) {
+		cfg.footerRow = serializeSelector("footer.rowSelector", options.footer.rowSelector);
+	}
+	TableUtils.warnOnIdenticalRowSelectors("TableLocator", cfg.headerRow, cfg.bodyRow);
 	return { ...cfg, ...resolveTextConfig(options) };
 }
 
@@ -1340,7 +1351,9 @@ function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineC
 function resolveTextConfig(options: TableLocatorOptions<string>): EngineConfig {
 	const cfg: EngineConfig = {};
 	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
-	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
+	if (options.ignore !== undefined) {
+		cfg.ignore = options.ignore.map((selector, i) => serializeSelector(`ignore[${i}]`, selector));
+	}
 	if (options.readInputValues === true) cfg.inputs = 1;
 	return cfg;
 }

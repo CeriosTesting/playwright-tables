@@ -11,6 +11,8 @@ export type {
 	ColumnParser,
 	ColumnParsers,
 	DecimalSeparator,
+	ElementDescriptor,
+	ElementSelector,
 	HeaderKey,
 	LocatorRef,
 	NavigationOptions,

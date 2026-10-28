@@ -2,8 +2,11 @@ import {
 	CellCondition,
 	CellMatcher,
 	DecimalSeparator,
+	ElementSelector,
 	RowWhere,
 	SerializedMatcher,
+	SerializedSelector,
+	SerializedText,
 	SerializedWhere,
 } from "./table-locator.types";
 import { normalizeLine } from "./table-selector-engine";
@@ -173,4 +176,64 @@ function serializeMatchers(header: string, kind: string, matchers: readonly Cell
 		throw new TypeError(`Condition for header "${header}": ${kind} needs at least one matcher.`);
 	}
 	return matchers.map(matcher => serializeMatcher(header, matcher));
+}
+
+const DESCRIPTOR_KEYS = ["css", "role", "hasText", "hasNotText"];
+
+/**
+ * Converts an {@link ElementSelector} to the wire format of the `pw-table-v1` engine. A CSS selector stays
+ * as it is. `option` names the option in errors, such as `"row.rowSelector"`.
+ *
+ * @internal
+ */
+export function serializeSelector(option: string, selector: ElementSelector): SerializedSelector {
+	if (typeof selector === "string") return selector;
+	checkDescriptor(option, selector);
+	const serialized: Exclude<SerializedSelector, string> = {};
+	if (selector.css !== undefined) serialized.c = serializeCss(option, selector.css);
+	if (selector.role !== undefined) serialized.r = serializeRoles(option, selector.role);
+	if (selector.hasText !== undefined) serialized.t = serializeText(option, "hasText", selector.hasText);
+	if (selector.hasNotText !== undefined) serialized.n = serializeText(option, "hasNotText", selector.hasNotText);
+	if (Object.keys(serialized).length === 0) {
+		throw new TypeError(`${option} is an empty descriptor: give it css, role, hasText or hasNotText.`);
+	}
+	return serialized;
+}
+
+/** @throws TypeError if `selector` is not a plain object with only descriptor keys, such as a Locator. */
+function checkDescriptor(option: string, selector: unknown): void {
+	// Typed as a descriptor, but JavaScript callers can pass anything.
+	if (selector === null || typeof selector !== "object" || Array.isArray(selector) || selector instanceof RegExp) {
+		throw new TypeError(
+			`${option} must be a CSS selector or a descriptor such as { role: "row" }, not ${String(selector)}.`
+		);
+	}
+	const unknown = Object.keys(selector).filter(key => !DESCRIPTOR_KEYS.includes(key));
+	if (unknown.length > 0) {
+		throw new TypeError(
+			`${option} has unknown keys (${unknown.join(", ")}): a descriptor has css, role, hasText and hasNotText. ` +
+				`A Playwright Locator can't be used here, because the table is read in the browser.`
+		);
+	}
+}
+
+function serializeCss(option: string, css: unknown): string {
+	if (typeof css !== "string" || css.trim() === "") {
+		throw new TypeError(`${option}: css must be a non-empty CSS selector.`);
+	}
+	return css;
+}
+
+function serializeRoles(option: string, role: unknown): string[] {
+	const roles: unknown = typeof role === "string" ? [role] : role;
+	if (!Array.isArray(roles) || roles.length === 0 || !roles.every(item => typeof item === "string" && item !== "")) {
+		throw new TypeError(`${option}: role must be a role, such as "row", or a non-empty list of roles.`);
+	}
+	return roles as string[];
+}
+
+function serializeText(option: string, key: string, text: string | RegExp): SerializedText {
+	if (typeof text === "string") return { s: text };
+	if (text instanceof RegExp) return { r: text.source, f: text.flags };
+	throw new TypeError(`${option}: ${key} must be a string or a RegExp.`);
 }

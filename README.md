@@ -81,6 +81,7 @@ The `test` of this package registers the selector engine that `TableLocator` use
 
 - [Setup](#setup)
 - [Defining a table](#defining-a-table)
+  - [Selector descriptors](#selector-descriptors)
 - [Rows and cells](#rows-and-cells)
   - [Column indexes and tables without headers](#column-indexes-and-tables-without-headers)
   - [Row headers and nested tables](#row-headers-and-nested-tables)
@@ -162,15 +163,43 @@ The first argument is the table root: the `<table>`, or the element that holds t
 | `paginate`                |                                                               | How to go to the next page (see [Pages and virtual scrolling](#pages-and-virtual-scrolling)).                                                             |
 | `scroll`                  |                                                               | How to scroll a virtualized grid (see [Pages and virtual scrolling](#pages-and-virtual-scrolling)).                                                       |
 | `loading`                 |                                                               | The loading indicator, such as a spinner. `waitForStable()` and the page and scroll navigation wait until it is hidden.                                   |
-| `emptyRow`                |                                                               | A CSS selector of placeholder rows such as "No data", which are not body rows (see [Placeholder rows](#placeholder-rows)).                                |
+| `emptyRow`                |                                                               | Placeholder rows such as "No data", which are not body rows (see [Placeholder rows](#placeholder-rows)).                                                  |
 | `readInputValues`         | `false`                                                       | Read the value of text inputs in body cells as their text (see [Editable cells](#editable-cells)).                                                        |
 | `select`                  | the checkbox in a selection column                            | The control that selects a row, from the row locator (see [Row interactions](#row-interactions)).                                                         |
 
 `loading`, `paginate.next`, `paginate.first` and `scroll.container` take a `Locator`, or a function that finds it from the table root (`root => root.getByRole("progressbar")`).
 
+The row, cell, `emptyRow` and `ignore` options take a CSS selector or a [descriptor](#selector-descriptors).
+
 To read only `thead` rows as header rows and `tbody` rows as body rows, set `header.rowSelector` to `"thead>tr"` and `row.rowSelector` to `"tbody>tr"`. When the two row selectors are the same, a warning is logged: header rows would also be read as body rows.
 
 For popular data grids, [presets](#grid-presets) set these options for you.
+
+### Selector descriptors
+
+Instead of a CSS selector, the row, cell, `emptyRow` and `ignore` options take a descriptor, which selects elements by their role and text, like `getByRole()` and `filter({ hasText })`. Every field you give must match:
+
+```ts
+const orders = defineTable(page.locator("#orders"), {
+	row: {
+		rowSelector: { css: "tbody>tr", role: "row", hasNotText: /^loading/i },
+		columnSelector: { role: ["cell", "rowheader"] },
+	},
+	emptyRow: { hasText: "No data" },
+	ignore: [...DEFAULT_IGNORE, { css: "span", hasText: /^sort/ }],
+});
+```
+
+| Field        | Matches                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `css`        | A CSS selector.                                                                                                                                                     |
+| `role`       | A role, or any of a list of roles: the first role in the `role` attribute, or else the role of a table element (below).                                             |
+| `hasText`    | Text in the element: a string matches case-insensitively, anywhere, with whitespace collapsed; a RegExp is tested on that text. Hidden text (`textContent`) counts. |
+| `hasNotText` | Text that is not in the element.                                                                                                                                    |
+
+Table elements without a `role` attribute have these roles: `<table>` is a `table`; `<thead>`, `<tbody>` and `<tfoot>` are a `rowgroup`; `<tr>` is a `row`; `<td>` is a `gridcell` in a table with `role="grid"` or `"treegrid"`, and a `cell` otherwise; `<th>` is a `rowheader` with `scope="row"` or in a row with a `<td>` (outside a `<thead>`), and a `columnheader` otherwise.
+
+These options are not `Locator`s: rows and cells are found in the browser on every retry of a locator or matcher, so they keep up with a table that changes, and a `Locator` can't be run there. The table root and the options that point at a control (`loading`, `paginate`, `scroll.container`, `select`) are `Locator`s, because they are used from your test.
 
 ## Rows and cells
 
@@ -578,7 +607,7 @@ Checkboxes, buttons, files and passwords stay out, a `<select>` reads as its sel
 
 ## Placeholder rows
 
-A row such as "No data", shown when a table is empty, is a body row unless you say otherwise. Set `emptyRow` to a CSS selector of such rows: `rows`, `row()`, `toJson()`, the matchers and the row counts leave them out, so an empty table has 0 body rows.
+A row such as "No data", shown when a table is empty, is a body row unless you say otherwise. Set `emptyRow` to a CSS selector or a [descriptor](#selector-descriptors) of such rows, such as `{ hasText: "No data" }`: `rows`, `row()`, `toJson()`, the matchers and the row counts leave them out, so an empty table has 0 body rows.
 
 ```ts
 const orders = defineTable(page.locator("#orders"), { emptyRow: ".no-data" });

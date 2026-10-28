@@ -1,6 +1,7 @@
 import { Locator } from "@playwright/test";
 
 import { CellContentType } from "./cell-content-type";
+import type { SerializedSelector } from "./table-locator.types";
 
 /**
  * Utility class for extracting table cell content and attributes.
@@ -70,12 +71,14 @@ export class TableUtils {
 	 */
 	static warnOnIdenticalRowSelectors(
 		owner: string,
-		headerRowSelector: string | undefined,
-		bodyRowSelector: string | undefined
+		headerRowSelector: SerializedSelector | undefined,
+		bodyRowSelector: SerializedSelector | undefined
 	): void {
-		if (headerRowSelector !== undefined && headerRowSelector !== "" && headerRowSelector === bodyRowSelector) {
+		if (headerRowSelector === undefined || headerRowSelector === "") return;
+		const header = JSON.stringify(headerRowSelector);
+		if (header === JSON.stringify(bodyRowSelector)) {
 			console.warn(
-				`${owner}: header.rowSelector and row.rowSelector are identical ("${headerRowSelector}"). ` +
+				`${owner}: header.rowSelector and row.rowSelector are identical (${header}). ` +
 					`This can cause header rows to be included in body rows. Consider scoping selectors to separate row groups.`
 			);
 		}

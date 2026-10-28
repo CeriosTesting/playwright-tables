@@ -129,6 +129,23 @@ export function typeTests(root: Locator): void {
 	// @ts-expect-error DEFAULT_IGNORE is read-only
 	DEFAULT_IGNORE.push(".x");
 
+	// Selector options take a CSS selector or a descriptor
+	defineTable(root, {
+		header: { rowSelector: { css: "thead>tr" }, columnSelector: { role: "columnheader" } },
+		row: { rowSelector: { role: "row", hasNotText: /loading/i }, columnSelector: { role: ["cell", "rowheader"] } },
+		footer: { rowSelector: { css: "tr.total", hasText: "Total" } },
+		emptyRow: { hasText: "No data" },
+		ignore: [...DEFAULT_IGNORE, { css: "span", hasText: /^sort/ }],
+	});
+	// @ts-expect-error not a role
+	defineTable(root, { row: { rowSelector: { role: "tablerow" } } });
+	// @ts-expect-error a role list is not empty
+	defineTable(root, { row: { columnSelector: { role: [] } } });
+	// @ts-expect-error unknown descriptor key
+	defineTable(root, { emptyRow: { text: "No data" } });
+	// @ts-expect-error a Locator is not a selector option
+	defineTable(root, { row: { rowSelector: root.locator("tr") } });
+
 	// HeaderKey covers plain names and both suffix kinds
 	const keys: HeaderKey<"Name">[] = ["Name", "Name__C1", "Name__D12"];
 	void keys;
