@@ -48,7 +48,7 @@ Playwright has no table API: finding "the cell under _Status_ in the row where _
 npm i -D @cerios/playwright-table
 ```
 
-You need [`@playwright/test`](https://playwright.dev/docs/intro) 1.45 or later. With Playwright 1.53 and later, locators also read like the code that built them in error messages and traces.
+You need [`@playwright/test`](https://playwright.dev/docs/intro) 1.45 or later, and TypeScript 5.0 or later if you type-check your tests. With Playwright 1.53 and later, locators also read like the code that built them in error messages and traces.
 
 ## Quick start
 
@@ -93,6 +93,8 @@ The `test` of this package registers the selector engine that `TableLocator` use
   - [Some columns and typed values](#some-columns-and-typed-values)
   - [Waiting for a table to settle](#waiting-for-a-table-to-settle)
 - [Row interactions](#row-interactions)
+- [Editable cells](#editable-cells)
+- [Placeholder rows](#placeholder-rows)
 - [Footer rows](#footer-rows)
 - [Data grids](#data-grids)
   - [ARIA grids (AG Grid, MUI Data Grid)](#aria-grids-ag-grid-mui-data-grid)
@@ -160,8 +162,11 @@ The first argument is the table root: the `<table>`, or the element that holds t
 | `paginate`                |                                                               | How to go to the next page (see [Pages and virtual scrolling](#pages-and-virtual-scrolling)).                                                             |
 | `scroll`                  |                                                               | How to scroll a virtualized grid (see [Pages and virtual scrolling](#pages-and-virtual-scrolling)).                                                       |
 | `loading`                 |                                                               | The loading indicator, such as a spinner. `waitForStable()` and the page and scroll navigation wait until it is hidden.                                   |
+| `emptyRow`                |                                                               | A CSS selector of placeholder rows such as "No data", which are not body rows (see [Placeholder rows](#placeholder-rows)).                                |
+| `readInputValues`         | `false`                                                       | Read the value of text inputs in body cells as their text (see [Editable cells](#editable-cells)).                                                        |
+| `select`                  | the checkbox in a selection column                            | The control that selects a row, from the row locator (see [Row interactions](#row-interactions)).                                                         |
 
-`paginate`, `scroll` and `loading` take a `Locator`, or a function that finds it from the table root (`root => root.getByRole("progressbar")`).
+`loading`, `paginate.next`, `paginate.first` and `scroll.container` take a `Locator`, or a function that finds it from the table root (`root => root.getByRole("progressbar")`).
 
 To read only `thead` rows as header rows and `tbody` rows as body rows, set `header.rowSelector` to `"thead>tr"` and `row.rowSelector` to `"tbody>tr"`. When the two row selectors are the same, a warning is logged: header rows would also be read as body rows.
 
@@ -562,14 +567,14 @@ Each action waits up to 5 seconds by default; pass `{ timeout }` to change it.
 
 ## Editable cells
 
-Cell text is the text the cell shows, like Playwright's `toHaveText`: the value of an `<input>` is not part of it. For an editable grid, or cells in edit mode, set `readInputValues: true`. The value of text inputs and text areas in body cells then counts as their text, in conditions, `toJson()`, `columnValues()` and the matchers:
+Cell text is the text the cell shows, like Playwright's `toHaveText`: the value of an `<input>` is not part of it. For an editable grid, or cells in edit mode, set `readInputValues: true`. The value of text areas and text-like inputs (`text`, `email`, `number`, `search`, `tel`, `url` and the date and time types) in body cells then counts as their text, in conditions, `toJson()`, `columnValues()` and the matchers:
 
 ```ts
 const people = defineTable(page.locator("#people"), { readInputValues: true });
 await expect(people).toHaveRow({ Email: "john@example.org" }); // <td><input value="john@example.org"></td>
 ```
 
-Checkboxes, buttons, files and passwords stay out, a `<select>` reads as its selected option either way, and header cells never read their inputs (filter fields).
+Checkboxes, buttons, files and passwords stay out, a `<select>` reads as its selected option either way, and header cells never read their inputs (filter fields). Raw text (`raw: true`, and the `raw` of a predicate) is not affected.
 
 ## Placeholder rows
 
@@ -640,7 +645,7 @@ const people = defineTable(page.locator("table"), presets.tanstackVirtual({ cont
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agGrid()`                        | ARIA roles, header rows without the floating filter row, pinned top and bottom rows (such as totals) as footer rows, the body viewport, the paging panel ("First Page" and "Next Page"), the loading overlay, and hidden elements (`.ag-hidden`) left out of the text. Tested with AG Grid Community 36. |
 | `muiDataGrid()`                   | ARIA roles, rows and cells without filler and skeleton cells, the virtual scroller, the "Go to next page" button, the loading indicator (MUI X v7/v8 markup).                                                                                                                                            |
-| `angularMaterial({ paginator? })` | `mat-table` rows and cells (MDC and legacy classes), footer rows, no "no data" row, and the sort header arrow left out of the text. With `paginator` (a `Locator` for the `mat-paginator`), its "First page" and "Next page" buttons.                                                                    |
+| `angularMaterial({ paginator? })` | `mat-table` rows and cells (MDC and legacy classes), footer rows, no "no data" row, and the sort header arrow left out of the text. With `paginator` (the `mat-paginator`, as a `Locator` or a function), its "First page" and "Next page" buttons.                                                      |
 | `tanstackVirtual({ container })`  | The scroll container (a `Locator`), and rows told apart by `data-index`. TanStack Table itself renders plain tables and needs no preset.                                                                                                                                                                 |
 
 AG Grid also virtualizes columns: only the columns in view are rendered. Rows are read with every column the grid has rendered; to read the others, set `suppressColumnVirtualisation: true` in your test setup or make the grid wide enough.
@@ -668,25 +673,25 @@ await expect(orders).toHaveTotalRowCount(312);
 
 - **`findRow(where)`** checks the rows in view first. Then it starts on the first page (with `paginate.first`) and the top, scrolls each page down step by step, and goes to the next page until a row matches. It returns `row(where)`, which now resolves to the row. Without `paginate` and `scroll`, it waits until a row matches, like a locator. On failure it says how many pages it searched.
 - **`toJson({ allRows: true })`** reads the rows at every position. Rows seen at several scroll positions are read once: they are told apart by `aria-rowindex`, `row-index`, `data-rowindex`, `data-index` or `data-id` (or `scroll.rowKey`), or else by their text and how often that text came before in the view, so identical rows are all kept. When every row has a position key (all of these but `data-id`), rows are ordered by it; otherwise they keep the order they were shown in.
-- **`totalRowCount()`** and **`toHaveTotalRowCount(n)`** use `aria-rowcount` when the grid declares it (minus the header rows it also counts). Without it, they read every row like `toJson({ allRows: true })`, or count the body rows of a table without `paginate` and `scroll`.
+- **`totalRowCount()`** and **`toHaveTotalRowCount(n)`** use `aria-rowcount` when the grid declares it (minus the other rows it also counts, such as header, footer and pinned rows). Without it, they read every row like `toJson({ allRows: true })`, or count the body rows of a table without `paginate` and `scroll`.
 
 `findRow()`, `totalRowCount()` and `toJson({ allRows: true })` take a `timeout` for the whole search, 30 seconds by default. They first wait until the table settles (and `loading` is hidden), so a table that is still loading isn't read as empty. `totalRowCount()` and `toJson({ allRows: true })` leave the table on its last page, scrolled down: without `paginate.first`, the next read starts there.
 
-| `paginate` option | Description                                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `next`            | The control that goes to the next page. Required.                                                                                                            |
-| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless the table shows the first page (it is disabled, or `isFirstPage` says so). |
-| `isFirstPage`     | `(first) => Promise<boolean>`, for a `first` that stays enabled on page 1: no click there, and after a click, wait until it says so.                         |
-| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled`, `aria-disabled="true"` or in a `.disabled` element.                        |
-| `maxPages`        | Read only the first pages: `3` reads at most 3. Defaults to every page.                                                                                      |
+| `paginate` option | Description                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `next`            | The control that goes to the next page. Required.                                                                                                                                                            |
+| `first`           | The control that goes to the first page. Navigation starts by clicking it, unless the table shows the first page: `first` is missing, hidden or disabled (like `isLastPage`), or else `isFirstPage` says so. |
+| `isFirstPage`     | `(first) => Promise<boolean>`, for a `first` that stays enabled on page 1. It replaces the disabled check: no click when it says true, and after a click, wait until it does (an error at the timeout).      |
+| `isLastPage`      | `(next) => Promise<boolean>`. Defaults to: `next` is missing, hidden, `disabled`, `aria-disabled="true"` or in a `.disabled` element.                                                                        |
+| `maxPages`        | Read only the first pages: `3` reads at most 3. Defaults to every page.                                                                                                                                      |
 
-| `scroll` option | Description                                                                                                                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `container`     | The element that scrolls (an error names the right one if it can't). Defaults to the table root.                                                                   |
-| `step`          | Pixels per step. Defaults to 90% of the container height.                                                                                                          |
-| `rowKey`        | The attribute that identifies a row, such as `"data-id"`.                                                                                                          |
-| `settle`        | After each scroll (and two animation frames), how long the table must stay the same, in milliseconds. Defaults to 50. `0` skips it, but still waits for `loading`. |
-| `maxSteps`      | Scroll at most this many steps per page. Defaults to scrolling to the bottom.                                                                                      |
+| `scroll` option | Description                                                                                                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `container`     | The element that scrolls. Defaults to the table root. A container that can never scroll (`overflow-y: visible` or `clip`) is an error when navigation starts, which names an element that does scroll when it finds one. So a `<table>` that scrolls in a wrapper `div` needs `container`. |
+| `step`          | Pixels per step. Defaults to 90% of the container height.                                                                                                                                                                                                                                  |
+| `rowKey`        | The attribute that identifies a row, such as `"data-id"`.                                                                                                                                                                                                                                  |
+| `settle`        | After each scroll (and two animation frames), how long the table must stay the same, in milliseconds. Defaults to 50. `0` skips it, but still waits for `loading`.                                                                                                                         |
+| `maxSteps`      | Scroll at most this many steps per page. Defaults to scrolling to the bottom.                                                                                                                                                                                                              |
 
 After clicking `first`, the table must change. A `first` that stays enabled on page 1 doesn't change it, so without `isFirstPage` that wait ends after 2 seconds (0.5 seconds for a table with a `loading` indicator that doesn't show). After each page change, the table must change, have rows again and then settle; a `next` that doesn't change the table fails with a clear error. A `next` or `first` that matches twice (a pager above and below the table) uses the first one.
 

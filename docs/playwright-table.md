@@ -428,7 +428,7 @@ await table.getJson({
 });
 ```
 
-The top-level `cellContentType` is deprecated: use `bodyRowOptions.cellContentType`. `getJson()` and `getAllBodyCellLocatorsByHeaderIndex()` ignore the top-level one.
+The top-level `cellContentType` is deprecated: use `bodyRowOptions.cellContentType`. It still works, in every method that reads body cells.
 
 ### Header row options
 
@@ -569,7 +569,6 @@ import {
 
 Both can be used on the same table. On some tables, `getJson()` and `TableLocator.toJson()` give different results:
 
-- `PlaywrightTable` carries a `rowspan` header down only one header row. `TableLocator` uses a full grid, so a header spanning three or more header rows is carried all the way down.
 - `TableLocator` also reads `th` cells in body rows and `td` cells in header rows, skips nested tables, and uses `aria-colindex` and `aria-rowindex`.
 - `TableLocator` normalizes text the way it is shown: see [How text is read](../README.md#how-text-is-read).
 

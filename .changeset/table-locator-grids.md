@@ -4,13 +4,13 @@
 
 `TableLocator`: add pagination and virtual scrolling, grid presets, row interactions, footer rows, typed matcher arguments and table attachments on failure.
 
-**Requires `@playwright/test` 1.45 or later** (the peer dependency was `^1.40.0`).
+**Requires `@playwright/test` 1.45 or later** (the peer dependency was `^1.40.0`), and TypeScript 5.0 or later for the type declarations.
 
 **Pagination and virtual scrolling**
 
 - New table options:
   - `paginate`: next control, optional first control, `isLastPage`, `isFirstPage`, `maxPages`. `isFirstPage` is for a first control that stays enabled on page 1: without it, the table must change after the click, which takes up to 2 seconds to rule out (0.5 seconds for a table with a `loading` indicator that doesn't show).
-  - `scroll`: scroll container, `step`, `rowKey`, `settle`, `maxSteps`. An invalid `step` or `settle` is an error, and so is a container that can never scroll (`overflow-y: visible`): the error names the element around or inside it that does scroll.
+  - `scroll`: scroll container, `step`, `rowKey`, `settle`, `maxSteps`. An invalid `step` or `settle` is an error, and so is a container that can never scroll (`overflow-y: visible` or `clip`), when navigation starts: the error names the element around or inside it that does scroll.
   - `loading`: a loading indicator.
 - These options accept a `Locator`, or a function that finds it from the table root.
 - `findRow(where)` searches every page and scroll position, and returns a row locator once the table shows the row.

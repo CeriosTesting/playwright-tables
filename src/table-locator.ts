@@ -546,6 +546,9 @@ export class TableLocator<const H extends string = string> {
 	 * @param options.paginate - (Optional) How to go to the next page, see {@link PaginateOptions}.
 	 * @param options.scroll - (Optional) How to scroll a virtualized grid, see {@link ScrollOptions}.
 	 * @param options.loading - (Optional) The loading indicator of the table.
+	 * @param options.emptyRow - (Optional) CSS selector of placeholder rows, such as a "No data" row, that are never body rows.
+	 * @param options.readInputValues - (Optional) Read the value of text inputs in body cells as cell text. Defaults to `false`.
+	 * @param options.select - (Optional) The control that selects a row, from the row locator. Defaults to the checkbox in a selection column.
 	 *
 	 * @example
 	 * // Typed headers: header arguments are checked at compile time
