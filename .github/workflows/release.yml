@@ -60,11 +60,10 @@ jobs:
 
       - name: Create Release Pull Request or Publish
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
+        # Trusted publishing adds the provenance attestation, changesets 3 rejects a --provenance flag
         with:
-          version: npm run changeset:version
-          publish: npx changeset publish --provenance
-          commit: "chore(release): bump version"
-          title: "chore(release): bump version"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version-script: npm run changeset:version
+          publish-script: npm run changeset:publish
+          commit-message: "chore(release): bump version"
+          pr-title: "chore(release): bump version"
