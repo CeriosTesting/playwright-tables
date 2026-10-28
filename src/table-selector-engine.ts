@@ -106,6 +106,8 @@ export function tableSelectorEngine(
 	type TextTest = (text: string, raw: () => string) => boolean;
 	/** A row condition with the grid column of its header. */
 	type ColumnCondition = { column: number; test: TextTest };
+	/** How `readDomText` reads text without layout. */
+	type DomTextOptions = { ignore: string; transform: boolean; inputs: boolean };
 	/** An {@link EngineConfig} with the defaults filled in. */
 	type Config = {
 		headerRow: string;
@@ -161,6 +163,12 @@ export function tableSelectorEngine(
 	const BLOCK_TAGS =
 		/^(address|article|aside|blockquote|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)$/;
 	const SKIPPED_TAGS = /^(script|style|template|noscript)$/;
+	// The controls whose value is text, read with the `inputs` config: text areas and text-like inputs, not
+	// checkboxes, buttons, files or passwords.
+	const TEXT_INPUTS =
+		"textarea, input:not([type]), input[type=text], input[type=email], input[type=number], input[type=search], " +
+		"input[type=tel], input[type=url], input[type=date], input[type=time], input[type=datetime-local], " +
+		"input[type=month], input[type=week]";
 	// Elements inside a cell whose text the user doesn't read: screen reader only text (Bootstrap, Tailwind),
 	// ligature icons (Material Icons and Material Symbols draw a word such as `arrow_upward` as an icon), and
 	// content hidden from assistive technology, which is how decorative icons are marked.
@@ -322,17 +330,22 @@ export function tableSelectorEngine(
 	/**
 	 * The text of `el` as it is shown, before normalization: `innerText` without the text of the elements
 	 * matching `cfg.ignore`, and with the selected option of a `<select>`. With `textContent`, all text in
-	 * the DOM except the ignored elements, with line breaks for `<br>` and block elements.
+	 * the DOM except the ignored elements, with line breaks for `<br>` and block elements. With `inputs`,
+	 * text inputs and text areas read as their value.
 	 */
-	function readText(el: Element, cfg: Config): string {
+	function readText(el: Element, cfg: Config, inputs: boolean): string {
 		// An element that is not rendered has no layout, and its innerText is its textContent. Its CSS
 		// `text-transform` is applied anyway, so a header reads the same whether it is shown or not.
 		if (cfg.textContent || !("innerText" in el) || el.getClientRects().length === 0) {
 			const parts: string[] = [];
-			readDomText(el, cfg.ignore, false, parts, !cfg.textContent && "innerText" in el);
+			readDomText(el, false, parts, {
+				ignore: cfg.ignore,
+				transform: !cfg.textContent && "innerText" in el,
+				inputs: inputs,
+			});
 			return parts.join("");
 		}
-		const special = specialElements(el, cfg.ignore);
+		const special = specialElements(el, cfg.ignore, inputs);
 		if (special.length === 0) return (el as HTMLElement).innerText;
 		const parts: string[] = [];
 		readShownText(el, special, parts);
@@ -345,39 +358,50 @@ export function tableSelectorEngine(
 	}
 
 	/**
-	 * Reads the text of the children of `node` without layout, leaving out `ignore`d elements, into `parts`.
-	 * With `transform`, the computed `text-transform` of each text is applied, as `innerText` does.
+	 * Reads the text of the children of `node` without layout into `parts`: leaving out the elements that
+	 * match `options.ignore`; with `options.transform`, applying the computed `text-transform` of each text,
+	 * as `innerText` does; and with `options.inputs`, reading text inputs and text areas as their value.
 	 */
-	function readDomText(node: Node, ignore: string, pre: boolean, parts: string[], transform: boolean): void {
-		const textTransform = transform && isElement(node) ? getComputedStyle(node).textTransform : "none";
+	function readDomText(node: Node, pre: boolean, parts: string[], options: DomTextOptions): void {
+		const textTransform = options.transform && isElement(node) ? getComputedStyle(node).textTransform : "none";
 		for (const child of Array.from(node.childNodes)) {
 			if (child.nodeType === 3) {
 				const value = child.nodeValue ?? "";
 				parts.push(transformText(pre ? value : value.replace(CSS_WHITESPACE, " "), textTransform));
-				continue;
+			} else if (isElement(child)) {
+				readDomElement(child, pre, parts, options);
 			}
-			if (!isElement(child)) continue;
-			const name = child.localName;
-			if (name === "br") {
-				parts.push("\n");
-				continue;
-			}
-			if (SKIPPED_TAGS.test(name) || isIgnored(child, ignore)) continue;
-			const block = BLOCK_TAGS.test(name);
-			if (block) parts.push("\n");
-			readDomText(child, ignore, pre || name === "pre" || name === "textarea", parts, transform);
-			if (block) parts.push("\n");
 		}
+	}
+
+	/** Reads the text of `el`, a child in {@link readDomText}, into `parts`. */
+	function readDomElement(el: Element, pre: boolean, parts: string[], options: DomTextOptions): void {
+		const name = el.localName;
+		if (name === "br") {
+			parts.push("\n");
+			return;
+		}
+		if (SKIPPED_TAGS.test(name) || isIgnored(el, options.ignore)) return;
+		if (options.inputs && el.matches(TEXT_INPUTS)) {
+			parts.push(inputValue(el));
+			return;
+		}
+		const block = BLOCK_TAGS.test(name);
+		if (block) parts.push("\n");
+		readDomText(el, pre || name === "pre" || name === "textarea", parts, options);
+		if (block) parts.push("\n");
 	}
 
 	/**
 	 * The descendants of `cell` whose text is not read with `innerText`: the elements matching `ignore`
-	 * (left out), and `<select>`s (read as their selected options). Not their descendants.
+	 * (left out), `<select>`s (read as their selected options), and with `inputs`, text inputs and text
+	 * areas (read as their value). Not their descendants.
 	 */
-	function specialElements(cell: Element, ignore: string): Element[] {
+	function specialElements(cell: Element, ignore: string, inputs: boolean): Element[] {
 		const found: Element[] = [];
 		if (cell.firstElementChild === null) return found;
-		for (const el of Array.from(cell.querySelectorAll(ignore === "" ? "select" : ignore + ", select"))) {
+		const selector = (ignore === "" ? "select" : ignore + ", select") + (inputs ? ", " + TEXT_INPUTS : "");
+		for (const el of Array.from(cell.querySelectorAll(selector))) {
 			const inFound = found.some(function (outer) {
 				return outer.contains(el);
 			});
@@ -413,7 +437,11 @@ export function tableSelectorEngine(
 			parts.push(selectedText(el as HTMLSelectElement));
 			return;
 		}
-		if (special.indexOf(el) !== -1) return;
+		if (special.indexOf(el) !== -1) {
+			// A text input among the special elements is read as its value; the others are left out.
+			if (el.matches(TEXT_INPUTS) && style.visibility === "visible") parts.push(inputValue(el));
+			return;
+		}
 		const block = style.display.slice(0, 6) !== "inline" && style.display !== "contents";
 		if (block) parts.push("\n");
 		const mixed = special.some(function (inner) {
@@ -425,6 +453,11 @@ export function tableSelectorEngine(
 			parts.push(rawText(el, false));
 		}
 		if (block) parts.push("\n");
+	}
+
+	/** The value of a text input or text area. */
+	function inputValue(el: Element): string {
+		return "value" in el ? String((el as HTMLInputElement).value) : "";
 	}
 
 	function selectedText(select: HTMLSelectElement): string {
@@ -451,7 +484,7 @@ export function tableSelectorEngine(
 	function textOf(model: TableModel, el: Element): string {
 		const cached = model.texts.get(el);
 		if (cached !== undefined) return cached;
-		const text = normalizeCell(readText(el, model.cfg));
+		const text = normalizeCell(readText(el, model.cfg, model.cfg.inputs));
 		model.texts.set(el, text);
 		return text;
 	}
@@ -693,7 +726,8 @@ export function tableSelectorEngine(
 				keys.push(EMPTY_HEADER);
 				continue;
 			}
-			const base = normalizeLine(readText(cell.el, cfg)) || EMPTY_HEADER;
+			// Header cells never read their inputs, such as filter fields
+			const base = normalizeLine(readText(cell.el, cfg, false)) || EMPTY_HEADER;
 			// Headers carried down by rowspan keep their plain text; colspan continuations get a suffix.
 			keys.push(cell.rowOffset === 0 && cell.colOffset > 0 ? base + COLSPAN_SUFFIX + cell.colOffset : base);
 		}
@@ -1478,7 +1512,7 @@ export function tableSelectorEngine(
 
 	if (root !== undefined && request !== undefined) {
 		const cfg = resolveConfig(request.cfg);
-		if (request.op === "text") return normalizeCell(readText(root, cfg));
+		if (request.op === "text") return normalizeCell(readText(root, cfg, cfg.inputs));
 		if (request.op === "total") {
 			const totalModel = buildModel(root, cfg);
 			return totalModel === null ? { ariaRowCount: null, otherRows: 0, bodyRows: 0 } : readTotal(root, totalModel);

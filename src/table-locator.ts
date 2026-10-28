@@ -1328,10 +1328,17 @@ function resolveEngineConfig(options: TableLocatorOptions<string> = {}): EngineC
 	if (row.rowSelector !== undefined) cfg.bodyRow = row.rowSelector;
 	if (row.columnSelector !== undefined) cfg.bodyCell = row.columnSelector;
 	if (header.setMainHeaderRow !== undefined) cfg.mainHeaderRow = header.setMainHeaderRow;
-	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
-	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
 	if (options.emptyRow !== undefined) cfg.emptyRow = options.emptyRow;
 	if (options.footer?.rowSelector !== undefined) cfg.footerRow = options.footer.rowSelector;
+	return { ...cfg, ...resolveTextConfig(options) };
+}
+
+/** The engine configuration for how `options` reads cell text. Only what differs from the defaults is set. */
+function resolveTextConfig(options: TableLocatorOptions<string>): EngineConfig {
+	const cfg: EngineConfig = {};
+	if (options.cellContentType === CellContentType.TextContent) cfg.textContent = 1;
+	if (options.ignore !== undefined) cfg.ignore = [...options.ignore];
+	if (options.readInputValues === true) cfg.inputs = 1;
 	return cfg;
 }
 

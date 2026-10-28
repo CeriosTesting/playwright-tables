@@ -221,6 +221,19 @@ export type TableLocatorOptions<H extends string> = {
 	 */
 	emptyRow?: string;
 	/**
+	 * Read the current value of text inputs and text areas in body cells as cell text, in row conditions,
+	 * `toJson()`, `columnValues()` and the matchers, for editable grids and cells in edit mode. Text-like
+	 * inputs only (`text`, `email`, `number`, `search`, `tel`, `url` and the date and time types):
+	 * checkboxes, buttons, files and passwords stay out, and a `<select>` always reads as its selected option.
+	 * Header cells never read their inputs, so filter fields don't end up in the header keys. Raw text
+	 * (`raw: true`, a predicate's `raw`) is not affected. Defaults to `false`, like Playwright's `toHaveText`.
+	 *
+	 * @example
+	 * const people = defineTable(page.locator("#people"), { readInputValues: true });
+	 * await expect(people).toHaveRow({ Email: "john@example.org" }); // <td><input value="john@example.org"></td>
+	 */
+	readInputValues?: boolean;
+	/**
 	 * The control that selects a row, from the row locator, for {@link TableRow.select},
 	 * {@link TableRow.deselect} and {@link TableRow.isSelected}. Defaults to the checkbox in a selection
 	 * column: a column without header text (such as one with only a "select all" checkbox). A checkbox in a

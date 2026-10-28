@@ -744,3 +744,47 @@ test.describe("placeholder rows", () => {
 		expect(await table.toJson()).toEqual([{ Name: "John", Status: "Active" }]);
 	});
 });
+
+test.describe("input values", () => {
+	const editable = `
+		<table id="people">
+			<thead>
+				<tr><th>Name <input aria-label="Filter names" value="Jo" /></th><th>Email</th><th>Notes</th><th>Active</th><th>Role</th></tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>John</td>
+					<td><input aria-label="Email" value="john@example.org" /></td>
+					<td><textarea aria-label="Notes">First line</textarea></td>
+					<td><input type="checkbox" checked aria-label="Active" /></td>
+					<td><select aria-label="Role"><option>Viewer</option><option selected>Admin</option></select></td>
+				</tr>
+			</tbody>
+		</table>
+	`;
+
+	test("readInputValues reads text inputs and text areas as cell text, only in body cells", async ({ page }) => {
+		await page.setContent(editable);
+		const plain = defineTable(page.locator("#people"));
+		const people = defineTable(page.locator("#people"), { readInputValues: true });
+
+		await expect(plain).not.toHaveRow({ Email: "john@example.org" }, { timeout: 200 });
+		await expect(people).toHaveRow({ Email: "john@example.org", Notes: "First line" });
+		// Header keys stay plain, checkboxes stay out, and a select reads its selected option either way
+		expect(await people.toJson()).toEqual([
+			{ Name: "John", Email: "john@example.org", Notes: "First line", Active: "", Role: "Admin" },
+		]);
+		// The current value, also after typing
+		await people.row({ Name: "John" }).fill({ Email: "john@example.com" });
+		await expect(people).toHaveRow({ Email: "john@example.com" });
+		expect(await people.columnValues("Email")).toEqual(["john@example.com"]);
+	});
+
+	test("readInputValues also reads the inputs of a hidden table", async ({ page }) => {
+		await page.setContent(`<div id="tab" style="display: none">${editable}</div>`);
+		const people = defineTable(page.locator("#people"), { readInputValues: true });
+
+		expect(await people.columnValues("Email")).toEqual(["john@example.org"]);
+		expect(await people.headerKeys()).toEqual(["Name", "Email", "Notes", "Active", "Role"]);
+	});
+});

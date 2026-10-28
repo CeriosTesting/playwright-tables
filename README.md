@@ -560,6 +560,17 @@ expect(await files.row({ Name: "index.ts" }).level()).toBe(2); // aria-level
 
 Each action waits up to 5 seconds by default; pass `{ timeout }` to change it.
 
+## Editable cells
+
+Cell text is the text the cell shows, like Playwright's `toHaveText`: the value of an `<input>` is not part of it. For an editable grid, or cells in edit mode, set `readInputValues: true`. The value of text inputs and text areas in body cells then counts as their text, in conditions, `toJson()`, `columnValues()` and the matchers:
+
+```ts
+const people = defineTable(page.locator("#people"), { readInputValues: true });
+await expect(people).toHaveRow({ Email: "john@example.org" }); // <td><input value="john@example.org"></td>
+```
+
+Checkboxes, buttons, files and passwords stay out, a `<select>` reads as its selected option either way, and header cells never read their inputs (filter fields).
+
 ## Placeholder rows
 
 A row such as "No data", shown when a table is empty, is a body row unless you say otherwise. Set `emptyRow` to a CSS selector of such rows: `rows`, `row()`, `toJson()`, the matchers and the row counts leave them out, so an empty table has 0 body rows.

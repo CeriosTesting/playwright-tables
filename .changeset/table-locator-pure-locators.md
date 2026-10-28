@@ -18,6 +18,7 @@ Add `TableLocator`: a type-safe table API that only returns Playwright locators,
 
 - A string, a RegExp, `equals`, `contains`, `startsWith`, `endsWith`, `oneOf`, `empty` and `predicate`, and the `not`, `anyOf` and `allOf` combinators.
 - A `predicate` gets the raw cell text as its second argument. A `predicate` that throws fails the row (also inside `not`, `anyOf` and `allOf`), and the matchers report its error. A generator or async function is rejected.
+- The `readInputValues` option reads the current value of text inputs and text areas in body cells as cell text (for editable grids), in conditions, `toJson()` and the matchers. Header cells and raw text are not affected.
 - The `emptyRow` option (a CSS selector) marks placeholder rows, such as "No data", that are never body rows, so an empty table has 0 body rows.
 - `oneOf` takes `ignoreCase`, and `{ empty: false }` matches a cell with text. An empty `oneOf` or a `null` condition is an error that names the header.
 
