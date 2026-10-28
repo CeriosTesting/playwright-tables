@@ -17,7 +17,7 @@ function button(root: Locator, name: string): Locator {
 
 /**
  * Options for AG Grid (tested with AG Grid Community 36): ARIA roles, the header rows without the
- * floating filter row, the pinned bottom rows as footer rows, the body viewport to scroll, the
+ * floating filter row, the pinned top and bottom rows (such as totals) as footer rows, the body viewport to scroll, the
  * pagination panel, and the loading overlay. The table root is the element you created the grid in, or
  * any element inside it that holds the whole grid.
  *
@@ -30,6 +30,13 @@ function button(root: Locator, name: string): Locator {
  * const row = await cars.findRow({ Model: "Model 150" });
  * await expect(cars).toHaveTotalRowCount(200);
  */
+/**
+ * The rows AG Grid pins to the top or bottom of the grid (pinnedTopRowData, pinnedBottomRowData), with the
+ * class names of AG Grid 33 and later, and of older versions.
+ */
+const PINNED_ROWS =
+	".ag-grid-pinned-top-rows .ag-row, .ag-floating-top .ag-row, .ag-grid-pinned-bottom-rows .ag-row, .ag-floating-bottom .ag-row";
+
 function agGrid(): TablePreset {
 	return {
 		aria: true,
@@ -38,10 +45,8 @@ function agGrid(): TablePreset {
 			rowSelector: ".ag-header-row-column-group, .ag-header-row-column",
 			columnSelector: "[role=columnheader]",
 		},
-		row: {
-			rowSelector: ".ag-row:not(.ag-grid-pinned-bottom-rows .ag-row):not(.ag-floating-bottom .ag-row)",
-		},
-		footer: { rowSelector: ".ag-grid-pinned-bottom-rows .ag-row, .ag-floating-bottom .ag-row" },
+		row: { rowSelector: `.ag-row:not(${PINNED_ROWS})` },
+		footer: { rowSelector: PINNED_ROWS },
 		scroll: { container: root => root.locator(".ag-grid-viewport, .ag-body-viewport").first() },
 		paginate: {
 			next: root => button(root, "Next Page"),

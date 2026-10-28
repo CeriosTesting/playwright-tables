@@ -143,6 +143,28 @@ test.describe("AG Grid", () => {
 		await paged.waitForStable({ quiet: 100 });
 		await expect(page.locator("#paged .ag-overlay-loading-wrapper")).toBeHidden();
 	});
+
+	test("pinned top and bottom rows are footer rows, not body rows", async ({ page }) => {
+		test.slow();
+		await page.goto(GridRoute.AgGrid);
+		const summary = defineTable(page.locator("#summary"), { ...presets.agGrid(), headers: ["Id", "Make", "Price"] });
+		await expect(summary).toHaveRow({ Id: "1" });
+
+		await expect(summary).not.toHaveRow({ Id: "Top" });
+		await expect(summary).not.toHaveRow({ Id: "Total" });
+		expect((await summary.toJson()).every(row => /^\d+$/.test(row.Id))).toBe(true);
+		const all = await summary.toJson({ allRows: true, columns: ["Id"] });
+		expect(all.map(row => row.Id)).toEqual(ids(50));
+		await expect(summary).toHaveTotalRowCount(50);
+		// Pinned top rows first, then pinned bottom rows, each joined over the pinned and center containers
+		await expect(summary.footer.locator).toHaveCount(2);
+		await expect(summary.footer.first().cell("Id")).toHaveText("Top");
+		await expect(summary.footer.first().cell("Make")).toHaveText("Best seller");
+		await expect(summary.footer.last().cell("Id")).toHaveText("Total");
+		await expect(summary.footer.last().cell("Price")).toHaveText(
+			String(Array.from({ length: 50 }, (_v, i) => 10_000 + i * 250).reduce((a, b) => a + b, 0))
+		);
+	});
 });
 
 test.describe("MUI X Data Grid", () => {

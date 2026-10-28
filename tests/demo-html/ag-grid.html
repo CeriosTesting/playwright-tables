@@ -12,6 +12,9 @@
 		<h2>AG Grid with pagination</h2>
 		<div id="paged" style="height: 400px; width: 700px"></div>
 
+		<h2>AG Grid with pinned rows (top and bottom) and a pinned column</h2>
+		<div id="summary" style="height: 400px; width: 700px"></div>
+
 		<script>
 			if (agGrid.ModuleRegistry && agGrid.AllCommunityModule) {
 				agGrid.ModuleRegistry.registerModules([agGrid.AllCommunityModule]);
@@ -45,6 +48,20 @@
 					{ field: "id", headerName: "Id" },
 					{ field: "make", headerName: "Make" },
 					{ field: "model", headerName: "Model" },
+				],
+			});
+
+			const sales = cars.slice(0, 50).map(car => ({ id: car.id, make: car.make, price: car.price }));
+			window.summaryGrid = agGrid.createGrid(document.getElementById("summary"), {
+				rowData: sales,
+				pinnedTopRowData: [{ id: "Top", make: "Best seller", price: 99_999 }],
+				pinnedBottomRowData: [
+					{ id: "Total", make: "All makes", price: sales.reduce((sum, sale) => sum + sale.price, 0) },
+				],
+				columnDefs: [
+					{ field: "id", headerName: "Id", pinned: "left", width: 90 },
+					{ field: "make", headerName: "Make" },
+					{ field: "price", headerName: "Price" },
 				],
 			});
 		</script>
