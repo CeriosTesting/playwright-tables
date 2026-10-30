@@ -13,4 +13,18 @@ export enum Route {
 	SimpleTable = "/simple-table",
 	PrimitivesTable = "/primitives-table",
 	InnerTextTable = "/inner-text-table",
+	RowHeaderTable = "/row-header-table",
+	AriaGridTable = "/aria-grid-table",
+	SortableTable = "/sortable-table",
+	ShadowDomTable = "/shadow-dom-table",
+	RefreshingTable = "/refreshing-table",
+}
+
+/** Pages of data grids, virtualized or paged, tested in `table-grids.test.ts`. */
+export enum GridRoute {
+	AgGrid = "/ag-grid",
+	MuiDataGrid = "/mui-data-grid",
+	TanstackVirtual = "/tanstack-virtual",
+	AngularMaterial = "/angular-material-table",
+	Interactive = "/interactive-table",
 }

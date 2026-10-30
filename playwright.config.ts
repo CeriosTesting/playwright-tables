@@ -6,16 +6,19 @@ export default defineConfig({
 	fullyParallel: true,
 	/* Fail the build on CI if you accidentally left test.only in the source code. */
 	forbidOnly: !!process.env.CI,
-	/* Retry on CI only */
-	retries: process.env.CI ? 2 : 0,
+	/* No retries, so a flaky test fails the build instead of passing on a retry. */
+	retries: 0,
 	/* Opt out of parallel tests on CI. */
 	workers: process.env.CI ? 1 : undefined,
 	/* Reporter to use. See https://playwright.dev/docs/test-reporters */
-	reporter: "html",
+	/* On CI, also annotate failures in the GitHub run; the html report is uploaded when a job fails. */
+	reporter: process.env.CI ? [["github"], ["list"], ["html", { open: "never" }]] : "html",
+	/* Copies the grid libraries that demo pages load into tests/demo-html/vendor. */
+	globalSetup: "./tests/global-setup.ts",
 	/* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
 	use: {
-		/* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-		trace: "on-first-retry",
+		/* Keep the trace of a failed test. See https://playwright.dev/docs/trace-viewer */
+		trace: "retain-on-failure",
 		baseURL: "http://localhost:3000",
 	},
 
@@ -25,6 +28,50 @@ export default defineConfig({
 			name: "chromium",
 			use: { ...devices["Desktop Chrome"] },
 			timeout: 10_000,
+			testIgnore: "bundle/**",
+		},
+		/* The pw-table selector engine runs inside the browser, so its tests also run on Firefox and WebKit. */
+		{
+			name: "firefox",
+			use: { ...devices["Desktop Firefox"] },
+			timeout: 15_000,
+			testMatch: [
+				"table-locator.test.ts",
+				"table-locator-text.test.ts",
+				"table-matchers.test.ts",
+				"table-data.test.ts",
+				"table-grids.test.ts",
+				"table-selector-engine.test.ts",
+				"table-edge-cases.test.ts",
+			],
+		},
+		{
+			name: "webkit",
+			use: { ...devices["Desktop Safari"] },
+			timeout: 15_000,
+			testMatch: [
+				"table-locator.test.ts",
+				"table-locator-text.test.ts",
+				"table-matchers.test.ts",
+				"table-data.test.ts",
+				"table-grids.test.ts",
+				"table-selector-engine.test.ts",
+				"table-edge-cases.test.ts",
+			],
+		},
+		/* Tests against the built bundles (run `npm run build` first). Separate projects get separate
+		   workers, so each bundle registers its own copy of the pw-table selector engine. */
+		{
+			name: "dist-cjs",
+			use: { ...devices["Desktop Chrome"] },
+			timeout: 10_000,
+			testMatch: "bundle/*.test.cjs",
+		},
+		{
+			name: "dist-esm",
+			use: { ...devices["Desktop Chrome"] },
+			timeout: 10_000,
+			testMatch: "bundle/*.test.mjs",
 		},
 	],
 

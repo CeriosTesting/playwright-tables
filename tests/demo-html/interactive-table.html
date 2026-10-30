@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>Interactive tables</title>
+		<style>
+			[role="row"][hidden] {
+				display: none;
+			}
+			[role="row"][aria-selected="true"] {
+				background: #def;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Tree grid: expand with the toggle button, or with ArrowRight and ArrowLeft; click a row to select it</h2>
+		<div role="treegrid" id="files" aria-label="Files">
+			<div role="row">
+				<span role="columnheader">Name</span>
+				<span role="columnheader">Size</span>
+			</div>
+			<div role="row" aria-level="1" aria-expanded="false" data-id="src" tabindex="-1">
+				<span role="gridcell"
+					><button aria-label="Toggle src"><span aria-hidden="true">▸</span></button> src</span
+				>
+				<span role="gridcell">2 files</span>
+			</div>
+			<div role="row" aria-level="2" data-parent="src" hidden>
+				<span role="gridcell">index.ts</span>
+				<span role="gridcell">4 KB</span>
+			</div>
+			<div role="row" aria-level="2" data-parent="src" hidden>
+				<span role="gridcell">util.ts</span>
+				<span role="gridcell">1 KB</span>
+			</div>
+			<div role="row" aria-level="1" aria-expanded="false" data-id="docs" tabindex="-1">
+				<span role="gridcell">docs</span>
+				<span role="gridcell">1 file</span>
+			</div>
+			<div role="row" aria-level="2" data-parent="docs" hidden>
+				<span role="gridcell">README.md</span>
+				<span role="gridcell">2 KB</span>
+			</div>
+			<div role="row" aria-level="1">
+				<span role="gridcell">package.json</span>
+				<span role="gridcell">1 KB</span>
+			</div>
+		</div>
+
+		<h2>Editable table: inputs, a select, a checkbox, and a cell that is edited in place by double-clicking it</h2>
+		<table id="people">
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Email</th>
+					<th>Role</th>
+					<th>Active</th>
+					<th>Notes</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>John</td>
+					<td><input type="email" value="john@example.com" aria-label="Email" /></td>
+					<td>
+						<select aria-label="Role">
+							<option>Viewer</option>
+							<option>Editor</option>
+							<option>Admin</option>
+						</select>
+					</td>
+					<td><input type="checkbox" checked aria-label="Active" /></td>
+					<td class="editable">First</td>
+				</tr>
+				<tr>
+					<td>Jane</td>
+					<td><input type="email" value="jane@example.com" aria-label="Email" /></td>
+					<td>
+						<select aria-label="Role">
+							<option>Viewer</option>
+							<option selected>Editor</option>
+							<option>Admin</option>
+						</select>
+					</td>
+					<td><input type="checkbox" aria-label="Active" /></td>
+					<td class="editable">Second</td>
+				</tr>
+			</tbody>
+			<tfoot>
+				<tr>
+					<td>Count</td>
+					<td>2 people</td>
+					<td></td>
+					<td id="active-count">1 active</td>
+					<td></td>
+				</tr>
+			</tfoot>
+		</table>
+
+		<script>
+			const tree = document.getElementById("files");
+			function setExpanded(row, expanded) {
+				row.setAttribute("aria-expanded", String(expanded));
+				for (const child of tree.querySelectorAll(`[data-parent="${row.dataset.id}"]`)) child.hidden = !expanded;
+			}
+			for (const row of tree.querySelectorAll("[aria-expanded]")) {
+				row.querySelector("button")?.addEventListener("click", event => {
+					event.stopPropagation();
+					setExpanded(row, row.getAttribute("aria-expanded") !== "true");
+				});
+				row.addEventListener("keydown", event => {
+					if (event.key === "ArrowRight") setExpanded(row, true);
+					if (event.key === "ArrowLeft") setExpanded(row, false);
+				});
+			}
+			for (const row of tree.querySelectorAll("[aria-level]")) {
+				row.setAttribute("aria-selected", "false");
+				row.addEventListener("click", () => {
+					row.setAttribute("aria-selected", String(row.getAttribute("aria-selected") !== "true"));
+				});
+			}
+
+			const people = document.getElementById("people");
+			people.addEventListener("change", () => {
+				const active = people.querySelectorAll("tbody input[type=checkbox]:checked").length;
+				document.getElementById("active-count").textContent = `${active} active`;
+			});
+			for (const cell of people.querySelectorAll(".editable")) {
+				cell.addEventListener("dblclick", () => {
+					if (cell.querySelector("input")) return;
+					const input = document.createElement("input");
+					input.value = cell.textContent;
+					cell.replaceChildren(input);
+					input.focus();
+					input.addEventListener("keydown", event => {
+						if (event.key === "Enter") cell.textContent = input.value;
+					});
+				});
+			}
+		</script>
+	</body>
+</html>

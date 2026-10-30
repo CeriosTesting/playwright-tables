@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>TanStack Virtual table markup</title>
+		<style>
+			.scroll-container {
+				height: 300px;
+				width: 500px;
+				overflow: auto;
+				position: relative;
+			}
+			table {
+				display: grid;
+				border-collapse: collapse;
+			}
+			thead {
+				display: grid;
+				position: sticky;
+				top: 0;
+				z-index: 1;
+				background: white;
+			}
+			tbody {
+				display: grid;
+				position: relative;
+			}
+			tr {
+				display: flex;
+				width: 100%;
+				height: 35px;
+			}
+			th,
+			td {
+				width: 150px;
+			}
+			tbody tr {
+				position: absolute;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Markup of a TanStack Table virtualized with TanStack Virtual</h2>
+		<p>
+			Not the real TanStack: a small script that renders rows like <code>useVirtualizer</code> does, absolutely
+			positioned with a <code>data-index</code>, in the order the virtualizer keeps them (not by index).
+		</p>
+		<div class="scroll-container">
+			<table>
+				<thead>
+					<tr>
+						<th>Id</th>
+						<th>First name</th>
+						<th>Visits</th>
+					</tr>
+				</thead>
+				<tbody></tbody>
+			</table>
+		</div>
+
+		<script>
+			const ROW_HEIGHT = 35;
+			const OVERSCAN = 5;
+			const people = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, name: `Person ${i + 1}`, visits: i * 3 }));
+			const container = document.querySelector(".scroll-container");
+			const body = document.querySelector("tbody");
+			const rendered = new Map();
+			body.style.height = `${people.length * ROW_HEIGHT}px`;
+
+			function render() {
+				const first = Math.max(0, Math.floor(container.scrollTop / ROW_HEIGHT) - OVERSCAN);
+				const last = Math.min(
+					people.length,
+					Math.ceil((container.scrollTop + container.clientHeight) / ROW_HEIGHT) + OVERSCAN
+				);
+				for (const [index, row] of rendered) {
+					if (index < first || index >= last) {
+						row.remove();
+						rendered.delete(index);
+					}
+				}
+				for (let index = first; index < last; index++) {
+					if (rendered.has(index)) continue;
+					const person = people[index];
+					const row = document.createElement("tr");
+					row.dataset.index = String(index);
+					row.style.transform = `translateY(${index * ROW_HEIGHT}px)`;
+					for (const text of [person.id, person.name, person.visits]) {
+						const td = document.createElement("td");
+						td.textContent = String(text);
+						row.appendChild(td);
+					}
+					// New rows go first, so the DOM order is not the visual order.
+					body.prepend(row);
+					rendered.set(index, row);
+				}
+			}
+
+			container.addEventListener("scroll", render);
+			render();
+		</script>
+	</body>
+</html>

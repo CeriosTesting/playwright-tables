@@ -5,6 +5,17 @@ import { BodyRow, Cell } from "./row";
 import { TableUtils } from "./table-utils";
 
 /**
+ * The DOM cell behind a grid position: the cell at index `cell` among the cells of body row `row`.
+ * A rowspan cell is the source of positions in later rows too.
+ */
+export type CellSource = { row: number; cell: number };
+
+/** Cell contents carried down by rowspans, by row index. Columns without a carried cell are holes. */
+type SpannedCells = Record<number, ({ content: Cell; source: CellSource } | undefined)[]>;
+
+type CellData = { content: string; rowspan: number; colspan: number };
+
+/**
  * Utility class for extracting and processing table body rows.
  * Handles rowspan and colspan attributes to properly structure table data.
  * Contains only static methods - cannot be instantiated.
@@ -37,172 +48,137 @@ export class TableBody {
 			cellContentType?: CellContentType;
 		}
 	): Promise<BodyRow[]> {
+		return (await this.getRowsWithSources(rowLocator, columnsSelector, bodyRowsOptions)).rows;
+	}
+
+	/**
+	 * Like {@link getRows}, and also returns, for every grid position, the DOM cell it comes from.
+	 * `sources[r][c]` is `undefined` for a position without a cell.
+	 *
+	 * @internal
+	 */
+	static async getRowsWithSources(
+		rowLocator: Locator,
+		columnsSelector: string,
+		bodyRowsOptions?: {
+			cellContentType?: CellContentType;
+		}
+	): Promise<{ rows: BodyRow[]; sources: (CellSource | undefined)[][] }> {
 		if (!columnsSelector || columnsSelector.trim() === "") {
 			throw new Error("columnsSelector cannot be empty");
 		}
 
 		const locatorDescription = rowLocator.toString();
-		const rows: BodyRow[] = [];
 		const rowsCount = await rowLocator.count();
+		const cellContentType = bodyRowsOptions?.cellContentType ?? CellContentType.InnerText;
 
-		if (rowsCount === 0) {
-			return rows;
-		}
+		// Read every row in parallel, one round trip each; the spans are resolved afterwards, in order.
+		const cellData = await Promise.all(
+			Array.from({ length: rowsCount }, async (_, rowIndex) => {
+				try {
+					return await TableUtils.readRowCells(rowLocator.nth(rowIndex), columnsSelector, cellContentType);
+				} catch (error) {
+					throw this.rowError(rowIndex, locatorDescription, columnsSelector, error);
+				}
+			})
+		);
 
-		const spannedCells: Record<number, Cell[]> = {};
-
-		for (let rowIndex = 0; rowIndex < rowsCount; rowIndex++) {
+		const rows: BodyRow[] = [];
+		const sources: (CellSource | undefined)[][] = [];
+		const spannedCells: SpannedCells = {};
+		for (const [rowIndex, cells] of cellData.entries()) {
 			try {
-				const row = rowLocator.nth(rowIndex);
-				const columns = await this.extractColumns(
-					row,
-					columnsSelector,
-					rowIndex,
-					spannedCells,
-					bodyRowsOptions?.cellContentType
-				);
-				rows.push(columns as BodyRow);
+				const row = this.placeCells(cells, rowIndex, spannedCells, rowsCount);
+				rows.push(row.columns);
+				sources.push(row.sources);
 			} catch (error) {
-				throw new Error(
-					`Failed to process body row at index ${rowIndex}.\n` +
-						`Body row locator: ${locatorDescription}\n` +
-						`Columns selector: "${columnsSelector}"\n` +
-						`Error: ${error instanceof Error ? error.message : String(error)}`
-				);
+				throw this.rowError(rowIndex, locatorDescription, columnsSelector, error);
 			}
 		}
 
-		return rows;
+		return { rows, sources };
 	}
 
-	private static async extractColumns(
-		row: Locator,
-		columnsSelector: string,
+	private static rowError(
 		rowIndex: number,
-		spannedCells: Record<number, Cell[]>,
-		cellContentType?: CellContentType
-	): Promise<Cell[]> {
+		locatorDescription: string,
+		columnsSelector: string,
+		error: unknown
+	): Error {
+		return new Error(
+			`Failed to process body row at index ${rowIndex}.\n` +
+				`Body row locator: ${locatorDescription}\n` +
+				`Columns selector: "${columnsSelector}"\n` +
+				`Error: ${error instanceof Error ? error.message : String(error)}`
+		);
+	}
+
+	/** Places the cells of one row on the grid, skipping the positions taken by rowspans from above. */
+	private static placeCells(
+		cells: CellData[],
+		rowIndex: number,
+		spannedCells: SpannedCells,
+		rowsCount: number
+	): { columns: Cell[]; sources: (CellSource | undefined)[] } {
 		const columns: Cell[] = [];
-		const columnLocators = row.locator(columnsSelector);
-		const columnCount = await columnLocators.count();
-
-		if (columnCount === 0) {
-			// Still apply any spanned cells even if this row has no DOM cells
-			this.applySpannedCells(spannedCells, rowIndex, columns);
-			return columns;
-		}
-
-		const cellDataPromises = [];
-		for (let colIndex = 0; colIndex < columnCount; colIndex++) {
-			cellDataPromises.push(this.fetchCellData(columnLocators.nth(colIndex), cellContentType));
-		}
-		const cellDataArray = await Promise.all(cellDataPromises);
+		const sources: (CellSource | undefined)[] = [];
 
 		// First, determine which column positions are occupied by rowspans from above
 		const spannedPositions = new Set<number>();
-		if (spannedCells[rowIndex]) {
-			spannedCells[rowIndex].forEach((_, colIndex) => {
-				if (spannedCells[rowIndex][colIndex] !== undefined) {
-					spannedPositions.add(colIndex);
-				}
-			});
-		}
+		spannedCells[rowIndex]?.forEach((spanned, colIndex) => {
+			if (spanned !== undefined) {
+				spannedPositions.add(colIndex);
+			}
+		});
 
 		// Process cells, accounting for spanned positions
 		let actualColIndex = 0;
-		for (let domCellIndex = 0; domCellIndex < columnCount; domCellIndex++) {
+		for (const [cellIndex, cellData] of cells.entries()) {
 			// Skip columns that are occupied by rowspans from above
 			while (spannedPositions.has(actualColIndex)) {
 				actualColIndex++;
 			}
 
-			const cellData = cellDataArray[domCellIndex];
-			this.processCellData(cellData, actualColIndex, columns, rowIndex, spannedCells);
+			const source = { row: rowIndex, cell: cellIndex };
+			for (let span = 0; span < cellData.colspan; span++) {
+				columns[actualColIndex + span] = cellData.content;
+				sources[actualColIndex + span] = source;
+			}
+			if (cellData.rowspan > 1) {
+				this.storeSpannedCells(rowIndex, actualColIndex, cellData, source, spannedCells, rowsCount);
+			}
 
 			// Move past this cell and any colspan it creates
 			actualColIndex += cellData.colspan;
 		}
 
-		this.applySpannedCells(spannedCells, rowIndex, columns);
+		// Apply any spanned cells, also when this row has no DOM cells
+		spannedCells[rowIndex]?.forEach((spanned, colIndex) => {
+			if (spanned !== undefined) {
+				columns[colIndex] = spanned.content;
+				sources[colIndex] = spanned.source;
+			}
+		});
 
-		return columns;
-	}
-
-	/**
-	 * Fetches cell content and span attributes in parallel.
-	 * This method performs DOM operations that can be parallelized across multiple cells.
-	 */
-	private static async fetchCellData(
-		column: Locator,
-		cellContentType: CellContentType = CellContentType.InnerText
-	): Promise<{ content: string; rowspan: number; colspan: number }> {
-		const [content, spanAttributes] = await Promise.all([
-			TableUtils.getCellContent(column, cellContentType),
-			TableUtils.parseSpanAttributes(column),
-		]);
-
-		return {
-			content,
-			rowspan: spanAttributes.rowspan,
-			colspan: spanAttributes.colspan,
-		};
-	}
-
-	/**
-	 * Processes pre-fetched cell data and applies it to the columns array.
-	 * This method is purely computational and doesn't perform any DOM operations.
-	 */
-	private static processCellData(
-		cellData: { content: string; rowspan: number; colspan: number },
-		colIndex: number,
-		columns: Cell[],
-		rowIndex: number,
-		spannedCells: Record<number, Cell[]>
-	): void {
-		const { content, rowspan, colspan } = cellData;
-
-		if (colIndex < 0) {
-			throw new Error(`Invalid column index: ${colIndex}. Must be non-negative.`);
-		}
-		if (rowIndex < 0) {
-			throw new Error(`Invalid row index: ${rowIndex}. Must be non-negative.`);
-		}
-
-		for (let span = 0; span < colspan; span++) {
-			columns[colIndex + span] = content;
-		}
-
-		if (rowspan > 1) {
-			this.storeSpannedCells(rowIndex, colIndex, rowspan, colspan, content, spannedCells);
-		}
+		return { columns, sources };
 	}
 
 	private static storeSpannedCells(
 		rowIndex: number,
 		colIndex: number,
-		rowspan: number,
-		colspan: number,
-		content: Cell,
-		spannedCells: Record<number, Cell[]>
+		cellData: CellData,
+		source: CellSource,
+		spannedCells: SpannedCells,
+		rowsCount: number
 	): void {
-		for (let rowSpan = 1; rowSpan < rowspan; rowSpan++) {
-			if (!spannedCells[rowIndex + rowSpan]) {
-				spannedCells[rowIndex + rowSpan] = [];
-			}
+		// A rowspan never reaches past the last row (`rowspan="0"` spans to it)
+		for (let rowSpan = 1; rowSpan < cellData.rowspan && rowIndex + rowSpan < rowsCount; rowSpan++) {
+			const spannedRow = spannedCells[rowIndex + rowSpan] ?? [];
+			spannedCells[rowIndex + rowSpan] = spannedRow;
 			// Store the content for each column covered by colspan
-			for (let colSpan = 0; colSpan < colspan; colSpan++) {
-				spannedCells[rowIndex + rowSpan][colIndex + colSpan] = content;
+			for (let colSpan = 0; colSpan < cellData.colspan; colSpan++) {
+				spannedRow[colIndex + colSpan] = { content: cellData.content, source };
 			}
-		}
-	}
-
-	private static applySpannedCells(spannedCells: Record<number, Cell[]>, rowIndex: number, columns: Cell[]): void {
-		if (spannedCells[rowIndex]) {
-			spannedCells[rowIndex].forEach((spannedContent, colIndex) => {
-				if (spannedContent !== undefined) {
-					columns[colIndex] = spannedContent;
-				}
-			});
 		}
 	}
 }

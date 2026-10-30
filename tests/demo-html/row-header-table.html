@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>Table with row headers and a nested table</title>
+		<style>
+			table,
+			th,
+			td {
+				border: 1px solid black;
+				border-collapse: collapse;
+			}
+
+			th,
+			td {
+				padding: 5px;
+				text-align: left;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Table with row headers and a nested table</h2>
+
+		<table id="RowHeaderTable" style="width: 50%">
+			<thead>
+				<tr>
+					<td></td>
+					<th scope="col">Q1</th>
+					<th scope="col">Q2</th>
+					<th scope="col">Details</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<th scope="row">North</th>
+					<td>100</td>
+					<td>200</td>
+					<td>
+						<table class="nested">
+							<thead>
+								<tr>
+									<th>Item</th>
+									<th>Count</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<td>Bikes</td>
+									<td>3</td>
+								</tr>
+								<tr>
+									<td>Cars</td>
+									<td>4</td>
+								</tr>
+							</tbody>
+						</table>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">South</th>
+					<td>300</td>
+					<td>400</td>
+					<td>None</td>
+				</tr>
+			</tbody>
+		</table>
+	</body>
+</html>

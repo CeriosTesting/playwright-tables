@@ -96,7 +96,7 @@ test.describe("Header Row Tests", () => {
 		});
 	});
 
-	test.describe("Options colspan", async () => {
+	test.describe("Options colspan", () => {
 		const optionsColspanTestCases: {
 			options: { colspan?: { enabled?: boolean; suffix?: boolean } };
 			expectedHeaders: HeaderRow[];
@@ -132,7 +132,7 @@ test.describe("Header Row Tests", () => {
 		}
 	});
 
-	test.describe("Options empty cell replacement", async () => {
+	test.describe("Options empty cell replacement", () => {
 		const optionsEmptyCellReplacementTestCases: {
 			options: { emptyCellReplacement: boolean };
 			expectedHeaders: HeaderRow[];
@@ -156,7 +156,7 @@ test.describe("Header Row Tests", () => {
 		}
 	});
 
-	test.describe("Options duplicate suffix", async () => {
+	test.describe("Options duplicate suffix", () => {
 		const optionsDuplicateSuffixTestCases: {
 			options: { duplicateSuffix: boolean };
 			expectedHeaders: HeaderRow[];

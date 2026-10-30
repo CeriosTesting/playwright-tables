@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>Angular Material table markup</title>
+	</head>
+	<body>
+		<h2>Markup of an Angular Material table with a filter, a paginator, a footer row and a "no data" row</h2>
+		<p>
+			Not the real Angular Material: a small script that renders the same elements and classes, to test the
+			<code>angularMaterial</code> preset without Angular.
+		</p>
+		<label>Filter <input id="filter" /></label>
+
+		<table mat-table class="mat-mdc-table mdc-data-table__table" role="table" id="orders">
+			<thead role="rowgroup">
+				<tr mat-header-row class="mat-mdc-header-row mdc-data-table__header-row" role="row">
+					<th class="mat-mdc-header-cell mat-sort-header" role="columnheader">
+						<div class="mat-sort-header-container">
+							<div class="mat-sort-header-content">Id</div>
+							<div class="mat-sort-header-arrow"></div>
+						</div>
+					</th>
+					<th class="mat-mdc-header-cell" role="columnheader">Product</th>
+					<th class="mat-mdc-header-cell" role="columnheader">Amount</th>
+				</tr>
+			</thead>
+			<tbody class="mdc-data-table__content" role="rowgroup"></tbody>
+			<tfoot role="rowgroup">
+				<tr mat-footer-row class="mat-mdc-footer-row" role="row">
+					<td class="mat-mdc-footer-cell" role="cell">Total</td>
+					<td class="mat-mdc-footer-cell" role="cell"></td>
+					<td class="mat-mdc-footer-cell" role="cell" id="total"></td>
+				</tr>
+			</tfoot>
+		</table>
+
+		<mat-paginator class="mat-mdc-paginator" role="group">
+			<div class="mat-mdc-paginator-range-label"></div>
+			<button class="mat-mdc-paginator-navigation-first" aria-label="First page">«</button>
+			<button class="mat-mdc-paginator-navigation-previous" aria-label="Previous page">‹</button>
+			<button class="mat-mdc-paginator-navigation-next" aria-label="Next page">›</button>
+		</mat-paginator>
+
+		<script>
+			const PAGE_SIZE = 5;
+			const products = ["Laptop", "Phone", "Tablet", "Monitor"];
+			const orders = Array.from({ length: 12 }, (_, i) => ({
+				id: String(i + 1),
+				product: products[i % products.length],
+				amount: (i + 1) * 10,
+			}));
+			const body = document.querySelector("#orders tbody");
+			const label = document.querySelector(".mat-mdc-paginator-range-label");
+			const first = document.querySelector("[aria-label='First page']");
+			const next = document.querySelector("[aria-label='Next page']");
+			let page = 0;
+			let filter = "";
+
+			function setDisabled(button, disabled) {
+				button.disabled = disabled;
+				button.classList.toggle("mat-mdc-button-disabled", disabled);
+			}
+
+			function render() {
+				const matching = orders.filter(order => order.product.toLowerCase().includes(filter));
+				const shown = matching.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+				body.replaceChildren();
+				for (const order of shown) {
+					const tr = document.createElement("tr");
+					tr.className = "mat-mdc-row mdc-data-table__row";
+					tr.setAttribute("role", "row");
+					for (const text of [order.id, order.product, `$${order.amount}`]) {
+						const td = document.createElement("td");
+						td.className = "mat-mdc-cell mdc-data-table__cell";
+						td.setAttribute("role", "cell");
+						td.textContent = text;
+						tr.appendChild(td);
+					}
+					body.appendChild(tr);
+				}
+				if (shown.length === 0) {
+					body.innerHTML = `<tr class="mat-mdc-no-data-row"><td class="mat-mdc-cell" colspan="3">No data matching "${filter}"</td></tr>`;
+				}
+				const total = matching.reduce((sum, order) => sum + order.amount, 0);
+				document.getElementById("total").textContent = `$${total}`;
+				const start = matching.length === 0 ? 0 : page * PAGE_SIZE + 1;
+				label.textContent = `${start} – ${page * PAGE_SIZE + shown.length} of ${matching.length}`;
+				setDisabled(first, page === 0);
+				setDisabled(next, (page + 1) * PAGE_SIZE >= matching.length);
+			}
+
+			next.addEventListener("click", () => {
+				page++;
+				setTimeout(render, 100);
+			});
+			first.addEventListener("click", () => {
+				page = 0;
+				setTimeout(render, 100);
+			});
+			document.getElementById("filter").addEventListener("input", event => {
+				filter = event.target.value.toLowerCase();
+				page = 0;
+				render();
+			});
+			render();
+		</script>
+	</body>
+</html>

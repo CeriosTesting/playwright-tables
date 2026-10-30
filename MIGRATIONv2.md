@@ -2,6 +2,8 @@
 
 This guide helps you upgrade from `@cerios/playwright-table` v1.x to v2.0.
 
+> **New in 2.1: `TableLocator`.** It returns auto-waiting Playwright locators and has retrying `expect` matchers, so you don't need the polling recipes below. For new tests, see the [README](./README.md). The `PlaywrightTable` API on this page is in maintenance mode; its docs are in [docs/playwright-table.md](./docs/playwright-table.md).
+
 ## Breaking Change: Auto-Wait Removed
 
 ### What Changed
@@ -21,14 +23,14 @@ This guide helps you upgrade from `@cerios/playwright-table` v1.x to v2.0.
 
 The following wait methods have been removed:
 
-| Removed Method             | Replacement                                                |
-| -------------------------- | ---------------------------------------------------------- |
-| `waitForHeaderRows()`      | `expect.poll(() => table.getHeaderRows())`                 |
-| `waitForBodyRows()`        | `expect.poll(() => table.getBodyRows())`                   |
-| `waitForStable()`          | `expect.poll()` with custom stability logic                |
-| `waitForRowByConditions()` | `expect.poll(() => table.findRowIndex(conditions))`        |
-| `waitForRowByIndex()`      | `expect.poll(() => table.getRowCount())`                   |
-| `waitForCellText()`        | `expect.poll()` with `getBodyCellLocatorByRowConditions()` |
+| Removed Method             | Replacement                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `waitForHeaderRows()`      | `expect.poll(() => table.getHeaderRows())`                                                  |
+| `waitForBodyRows()`        | `expect.poll(() => table.getBodyRows())`                                                    |
+| `waitForStable()`          | `TableLocator.waitForStable()` (new in 2.1), or `expect.poll()` with custom stability logic |
+| `waitForRowByConditions()` | `expect.poll(() => table.findRowIndex(conditions))`                                         |
+| `waitForRowByIndex()`      | `expect.poll(() => table.getRowCount())`                                                    |
+| `waitForCellText()`        | `expect.poll()` with `getBodyCellLocatorByRowConditions()`                                  |
 
 ## Available Wait Methods
 
@@ -117,8 +119,8 @@ await expect.poll(() => table.getDistinctColumnValues("Status")).toContain("Acti
 // ✅ Built-in method still available
 await table.waitForEmpty({ timeout: 5000 });
 
-// ✅ Alternative with expect.poll
-await expect.poll(async () => (await table.getBodyRows()).length).toBe(0);
+// ✅ Alternative with expect.poll. Count with getRowCount(): getBodyRows() throws on an empty table.
+await expect.poll(async () => (await table.getRowCount()).body).toBe(0);
 ```
 
 ### Wait for Table Stability (Dynamic Content)
@@ -127,12 +129,15 @@ await expect.poll(async () => (await table.getBodyRows()).length).toBe(0);
 // ❌ Old: waitForStable
 await table.waitForStable({ stabilityDuration: 500 });
 
-// ✅ New: Custom stability check with expect.poll
+// ✅ New in 2.1: TableLocator waits until the header keys and every cell text stop changing
+await defineTable(page.locator("table")).waitForStable({ quiet: 500 });
+
+// ✅ Or a custom stability check with expect.poll
 let lastCount = -1;
 await expect
 	.poll(
 		async () => {
-			const currentCount = (await table.getBodyRows()).length;
+			const currentCount = (await table.getRowCount()).body;
 			const stable = currentCount === lastCount;
 			lastCount = currentCount;
 			return stable;
@@ -185,10 +190,11 @@ const data = await table.getJson();
 
 ### Error: "No header rows found"
 
-Ensure headers are loaded before operations:
+The methods that read the table need both header rows and body rows. Wait for both before reading:
 
 ```typescript
-await expect.poll(async () => (await table.getHeaderRows()).length).toBeGreaterThan(0);
+await expect.poll(async () => (await table.getRowCount()).header).toBeGreaterThan(0);
+await table.waitForNonEmpty();
 const headers = await table.getMainHeaderRow();
 ```
 

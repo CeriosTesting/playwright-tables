@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<title>Sortable HTML Table</title>
+		<style>
+			table,
+			th,
+			td {
+				border: 1px solid black;
+				border-collapse: collapse;
+			}
+
+			th,
+			td {
+				padding: 5px;
+				text-align: left;
+			}
+
+			th {
+				cursor: pointer;
+			}
+		</style>
+	</head>
+	<body>
+		<h2>Sortable HTML Table</h2>
+		<p>Click a header to sort by it, click again to reverse. Sorting takes a moment, like a server round trip.</p>
+
+		<table id="SortableTable" style="width: 50%">
+			<thead>
+				<tr>
+					<th aria-sort="none" data-type="text">Name</th>
+					<th aria-sort="none" data-type="number">Salary</th>
+					<th aria-sort="none" data-type="date">Joined</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>dave</td>
+					<td>€ 12,000</td>
+					<td>Mar 1, 2021</td>
+				</tr>
+				<tr>
+					<td>Alice</td>
+					<td>€ 950</td>
+					<td>Jan 15, 2023</td>
+				</tr>
+				<tr>
+					<td>Bob</td>
+					<td>€ 1,200</td>
+					<td>Dec 31, 2019</td>
+				</tr>
+				<tr>
+					<td>carol</td>
+					<td>€ 3,400</td>
+					<td>Jul 4, 2022</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<script>
+			const table = document.getElementById("SortableTable");
+			const headers = Array.from(table.querySelectorAll("th"));
+
+			function value(text, type) {
+				if (type === "number") return Number(text.replace(/[^\d.-]/g, ""));
+				if (type === "date") return Date.parse(text);
+				return text.toLowerCase();
+			}
+
+			headers.forEach((header, index) => {
+				header.addEventListener("click", () => {
+					const order = header.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+					const type = header.dataset.type;
+					setTimeout(() => {
+						const body = table.tBodies[0];
+						const rows = Array.from(body.rows);
+						rows.sort((a, b) => {
+							const x = value(a.cells[index].textContent, type);
+							const y = value(b.cells[index].textContent, type);
+							const result = x < y ? -1 : x > y ? 1 : 0;
+							return order === "ascending" ? result : -result;
+						});
+						rows.forEach(row => body.appendChild(row));
+						headers.forEach(other => other.setAttribute("aria-sort", "none"));
+						header.setAttribute("aria-sort", order);
+					}, 300);
+				});
+			});
+		</script>
+	</body>
+</html>

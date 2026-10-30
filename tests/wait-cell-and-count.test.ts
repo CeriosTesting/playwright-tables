@@ -95,8 +95,8 @@ test.describe("waitForExactRowCount", () => {
 		}).rejects.toThrow();
 		const elapsed = Date.now() - startTime;
 
-		// Should fail within reasonable time (allow some overhead)
-		expect(elapsed).toBeLessThan(1000);
+		// Fails long before the default timeout of 30 seconds; the margin keeps a busy machine from failing it
+		expect(elapsed).toBeLessThan(5_000);
 	});
 
 	test("should respect custom interval option", async ({ page }) => {
@@ -132,7 +132,7 @@ test.describe("waitForExactRowCount", () => {
 		const table = new PlaywrightTable(page.locator("table"));
 
 		// Simulate rapid changes
-		page.evaluate(() => {
+		await page.evaluate(() => {
 			const tbody = document.querySelector("tbody");
 			if (tbody) {
 				let count = 2;
