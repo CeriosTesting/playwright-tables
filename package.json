@@ -1,6 +1,6 @@
 {
 	"name": "@cerios/playwright-table",
-	"version": "2.0.2",
+	"version": "2.1.0",
 	"description": "Type-safe, auto-waiting Playwright locators and retrying expect matchers for HTML tables and data grids: find rows and cells by header name, assert whole tables, and handle colspan, rowspan, pagination, virtual scrolling and grids such as AG Grid, MUI X Data Grid and Angular Material.",
 	"keywords": [
 		"ag-grid",
